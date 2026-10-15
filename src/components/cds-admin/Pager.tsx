@@ -2,6 +2,12 @@ import Link from "next/link";
 import styles from "./cds-admin.module.css";
 
 /** Page numbers to show: the first, the last, and two on each side of the current page. */
+/** A page number inside 1..last page, so an old or edited link never asks for rows past the end. */
+export function clampPage(page: number, total: number, pageSize: number): number {
+  const last = Math.max(1, Math.ceil(total / pageSize));
+  return Math.min(Math.max(1, Math.floor(page) || 1), last);
+}
+
 export function pageNumbers(page: number, pages: number): (number | "gap")[] {
   const keep = new Set([1, pages]);
   for (let p = page - 2; p <= page + 2; p++) if (p >= 1 && p <= pages) keep.add(p);

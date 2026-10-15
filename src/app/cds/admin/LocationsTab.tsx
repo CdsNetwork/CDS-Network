@@ -2,7 +2,7 @@ import Link from "next/link";
 import { SearchSelect, type SearchOption } from "@/components/SearchSelect";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
 import styles from "@/components/cds-admin/cds-admin.module.css";
-import { Pager } from "@/components/cds-admin/Pager";
+import { clampPage, Pager } from "@/components/cds-admin/Pager";
 import { one } from "@/components/cds-admin/server-utils";
 import { FULFILLMENT_LABEL, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -74,31 +74,39 @@ export async function LocationsTab({ edit, filters }: { edit?: string; filters: 
     hint: [s.city, s.region].filter(Boolean).join(", ") || undefined,
   }));
 
-  let query = supabase.from("customer_locations").select(COLUMNS, { count: "exact" });
-  if (f.customer) query = query.eq("customer_id", f.customer);
-  if (f.shop === "none") query = query.is("default_affiliate_id", null);
-  else if (f.shop) query = query.eq("default_affiliate_id", f.shop);
-  if (f.fulfillment) query = query.eq("fulfillment", f.fulfillment);
-  // Every word must match a location column, the customer or the default shop.
-  for (const word of searchWords(f.q)) {
-    const w = word.toLowerCase();
-    const or = SEARCH_COLUMNS.map((c) => `${c}.ilike."*${word}*"`);
-    const customerIds = customerRows.filter((c) => `${c.name} ${c.code}`.toLowerCase().includes(w)).map((c) => c.id);
-    const shopIds = shopRows.filter((s) => `${s.display_name} ${s.short_code}`.toLowerCase().includes(w)).map((s) => s.id);
-    if (customerIds.length) or.push(`customer_id.in.(${customerIds.join(",")})`);
-    if (shopIds.length) or.push(`default_affiliate_id.in.(${shopIds.join(",")})`);
-    query = query.or(or.join(","));
-  }
-  const from = (f.page - 1) * PAGE_SIZE;
-  const [{ data: locData, error, count }, { data: editData }] = await Promise.all([
-    query.order("code").order("id").range(from, from + PAGE_SIZE - 1),
+  // The same filters for the count and for the page. Every word must match a location
+  // column, the customer or the default shop.
+  const filteredQuery = (columns: string, head: boolean) => {
+    let query = supabase.from("customer_locations").select(columns, { count: "exact", head });
+    if (f.customer) query = query.eq("customer_id", f.customer);
+    if (f.shop === "none") query = query.is("default_affiliate_id", null);
+    else if (f.shop) query = query.eq("default_affiliate_id", f.shop);
+    if (f.fulfillment) query = query.eq("fulfillment", f.fulfillment);
+    for (const word of searchWords(f.q)) {
+      const w = word.toLowerCase();
+      const or = SEARCH_COLUMNS.map((c) => `${c}.ilike."*${word}*"`);
+      const customerIds = customerRows.filter((c) => `${c.name} ${c.code}`.toLowerCase().includes(w)).map((c) => c.id);
+      const shopIds = shopRows.filter((s) => `${s.display_name} ${s.short_code}`.toLowerCase().includes(w)).map((s) => s.id);
+      if (customerIds.length) or.push(`customer_id.in.(${customerIds.join(",")})`);
+      if (shopIds.length) or.push(`default_affiliate_id.in.(${shopIds.join(",")})`);
+      query = query.or(or.join(","));
+    }
+    return query;
+  };
+
+  const { count: totalCount, error: countError } = await filteredQuery("id", true);
+  const total = totalCount ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = clampPage(f.page, total, PAGE_SIZE);
+  const from = (page - 1) * PAGE_SIZE;
+  const [{ data: locData, error: pageError }, { data: editData }] = await Promise.all([
+    filteredQuery(COLUMNS, false).order("code").order("id").range(from, from + PAGE_SIZE - 1),
     edit && edit !== "new"
       ? supabase.from("customer_locations").select(COLUMNS).eq("id", edit).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
-  const shown = (locData ?? []) as Location[];
-  const total = count ?? 0;
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const error = countError ?? pageError;
+  const shown = (locData ?? []) as unknown as Location[];
   const editing = (editData ?? undefined) as Location | undefined;
   const filtered = Boolean(f.q || f.customer || f.shop || f.fulfillment);
   const backHref = href(f);
@@ -256,7 +264,7 @@ export async function LocationsTab({ edit, filters }: { edit?: string; filters: 
         </table>
       </div>
 
-      <Pager page={f.page} pages={pages} href={(page) => href({ ...f, page })} label="Location pages" />
+      <Pager page={page} pages={pages} href={(page) => href({ ...f, page })} label="Location pages" />
     </>
   );
 }
