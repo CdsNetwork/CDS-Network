@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
+import styles from "@/components/cds-admin/cds-admin.module.css";
 import { createClient } from "@/lib/supabase/server";
 import { inviteShopLogin, saveShop, setProfileActive, setShopActive } from "./actions";
 import { wrapCell } from "@/lib/format";
@@ -19,32 +20,50 @@ export type Shop = {
   can_one_box: boolean | null;
   hours_note: string | null;
 };
+type ShopRow = Shop & { customer_locations: { count: number }[] | null };
+export type ShopFilters = { q: string; kind: string; status: string };
 type Login = { id: string; full_name: string; email: string; active: boolean; affiliate_id: string };
 type Contact = { affiliate_id: string; email: string };
 
-const KIND_LABEL: Record<string, string> = {
+export const SHOP_KIND_LABEL: Record<string, string> = {
   service_shop: "Service shop",
   parts_supplier: "Parts supplier",
   cds_owned: "CDS owned",
 };
 
-export async function ShopsTab({ edit }: { edit?: string }) {
+export async function ShopsTab({ edit, filters }: { edit?: string; filters: ShopFilters }) {
   const supabase = await createClient();
   const [{ data: shopData, error }, { data: loginData }, { data: contactData }] = await Promise.all([
     supabase
       .from("affiliates")
-      .select("id, short_code, display_name, kind, active, address_line1, city, region, postal_code, can_egr, can_oil_soaked, can_one_box, hours_note")
+      .select(
+        "id, short_code, display_name, kind, active, address_line1, city, region, postal_code, can_egr, can_oil_soaked, can_one_box, hours_note, customer_locations(count)",
+      )
       .order("display_name"),
     supabase.from("profiles").select("id, full_name, email, active, affiliate_id").eq("kind", "shop").order("active", { ascending: false }),
     supabase.from("affiliate_contacts").select("affiliate_id, email").eq("receives_dispatch", true).order("email"),
   ]);
-  const shops = (shopData ?? []) as Shop[];
+  const shops = (shopData ?? []) as ShopRow[];
   const logins = (loginData ?? []) as Login[];
   const contacts = (contactData ?? []) as Contact[];
   const loginsFor = (id: string) => logins.filter((l) => l.affiliate_id === id);
   const dispatchFor = (id: string) => contacts.find((c) => c.affiliate_id === id)?.email ?? "";
 
   const editing = edit === "new" ? null : shops.find((s) => s.id === edit);
+  const locationCount = (s: ShopRow) => s.customer_locations?.[0]?.count ?? 0;
+
+  // Every word must match the code, name, city, state or an email of the shop.
+  const words = filters.q.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = shops.filter((s) => {
+    if (filters.kind && s.kind !== filters.kind) return false;
+    if (filters.status === "active" && !s.active) return false;
+    if (filters.status === "inactive" && s.active) return false;
+    if (!words.length) return true;
+    const emails = [...contacts.filter((c) => c.affiliate_id === s.id).map((c) => c.email), ...loginsFor(s.id).map((l) => l.email)];
+    const text = [s.short_code, s.display_name, s.city ?? "", s.region ?? "", ...emails].join(" ").toLowerCase();
+    return words.every((w) => text.includes(w));
+  });
+  const filtered = Boolean(filters.q || filters.kind || filters.status);
 
   return (
     <>
@@ -61,9 +80,49 @@ export async function ShopsTab({ edit }: { edit?: string }) {
         </details>
       )}
 
+      <form className={styles.filters} method="get" action="/cds/admin">
+        <input type="hidden" name="tab" value="shops" />
+        <div className={styles.grow}>
+          <label htmlFor="shop-q">Search</label>
+          <input className="input" id="shop-q" type="search" name="q" defaultValue={filters.q} placeholder="Code, name, city or email" />
+        </div>
+        <div className={styles.fixed}>
+          <label htmlFor="shop-kind">Type</label>
+          <select id="shop-kind" name="kind" defaultValue={filters.kind}>
+            <option value="">Any type</option>
+            {Object.entries(SHOP_KIND_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className={styles.fixed}>
+          <label htmlFor="shop-status">Status</label>
+          <select id="shop-status" name="status" defaultValue={filters.status}>
+            <option value="">Active and inactive</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+        <div className={styles.filterActions}>
+          <button className="btn btn-secondary" type="submit">
+            Search
+          </button>
+          {filtered && (
+            <Link className="link small" href="/cds/admin?tab=shops">
+              Clear
+            </Link>
+          )}
+        </div>
+      </form>
+      <p className="small" role="status">
+        {shown.length} of {shops.length} shops
+      </p>
+
       {error && <div className="notice danger">Could not load shops. Refresh the page to try again.</div>}
 
-      <div className="tablewrap" style={{ marginTop: 18 }}>
+      <div className="tablewrap">
         <table className="wide">
           <thead>
             <tr>
@@ -72,20 +131,21 @@ export async function ShopsTab({ edit }: { edit?: string }) {
               <th>Type</th>
               <th>City / Region</th>
               <th>Capabilities</th>
+              <th className="num">Locations</th>
               <th>Login</th>
               <th>Status</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {shops.length === 0 && (
+            {shown.length === 0 && (
               <tr>
-                <td colSpan={8} className="small">
-                  No shops yet.
+                <td colSpan={9} className="small">
+                  {shops.length === 0 ? "No shops yet." : "No shops match this search."}
                 </td>
               </tr>
             )}
-            {shops.map((s) => {
+            {shown.map((s) => {
               const login = loginsFor(s.id).find((l) => l.active);
               return (
                 <tr key={s.id} style={s.active ? undefined : { opacity: 0.6 }}>
@@ -96,10 +156,19 @@ export async function ShopsTab({ edit }: { edit?: string }) {
                     {s.display_name}
                     {dispatchFor(s.id) && <div className="small">Dispatch: {dispatchFor(s.id)}</div>}
                   </td>
-                  <td>{KIND_LABEL[s.kind] ?? s.kind}</td>
+                  <td>{SHOP_KIND_LABEL[s.kind] ?? s.kind}</td>
                   <td>{[s.city, s.region].filter(Boolean).join(", ") || "-"}</td>
                   <td>
                     <Capabilities shop={s} />
+                  </td>
+                  <td className="num">
+                    {locationCount(s) > 0 ? (
+                      <Link className="link" href={`/cds/admin?tab=locations&shop=${s.id}`} title="Locations with this default shop">
+                        {locationCount(s)}
+                      </Link>
+                    ) : (
+                      <span className="small">0</span>
+                    )}
                   </td>
                   <td className={wrapCell(login?.email)}>{login ? login.email : <span className="small">No login</span>}</td>
                   <td>{s.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}</td>
@@ -240,7 +309,7 @@ function ShopFields({ shop, dispatchEmail }: { shop?: Shop; dispatchEmail?: stri
       <div className="field">
         <label htmlFor={`kind-${k}`}>Type</label>
         <select id={`kind-${k}`} name="kind" defaultValue={shop?.kind ?? "service_shop"}>
-          {Object.entries(KIND_LABEL).map(([value, label]) => (
+          {Object.entries(SHOP_KIND_LABEL).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>

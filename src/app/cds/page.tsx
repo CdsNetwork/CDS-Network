@@ -1,21 +1,26 @@
 import Form from "next/form";
 import Link from "next/link";
-import { StatusBadge } from "@/components/StatusBadge";
+import { PeriodSelect } from "@/components/cds-wo/PeriodSelect";
+import styles from "@/components/cds-wo/cds-wo.module.css";
 import { one, SHIPMENT_PROBLEM_STATUSES } from "@/components/cds-wo/util";
+import {
+  ALL_STATUSES,
+  filteredWorkOrders,
+  filterQuery,
+  financialsFor,
+  GROUPS,
+  IN_PROGRESS,
+  parseFilters,
+  parsePeriod,
+  periodRange,
+  PERIODS,
+  TABLE_STATUS_LABEL,
+  TO_INVOICE,
+  type Financials,
+} from "@/components/cds-wo/woFilters";
 import { requireCds } from "@/lib/auth";
-import { money, SHIPMENT_STATUS_LABEL, STATUS_LABEL, STATUS_ORDER, woLabel, type WoStatus, idCell, wrapCell } from "@/lib/format";
+import { money, SHIPMENT_STATUS_LABEL, STATUS_LABEL, woLabel, type WoStatus, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
-
-const IN_PROGRESS: WoStatus[] = ["awaiting_acceptance", "accepted", "picked_up", "in_process"];
-const TO_INVOICE: WoStatus[] = ["completed", "delivered", "ready_to_invoice"];
-
-/** Status filter values: a single status, or one of these groups. */
-const GROUPS: Record<string, { label: string; statuses: WoStatus[] }> = {
-  in_progress: { label: "In Progress (all)", statuses: IN_PROGRESS },
-  to_invoice: { label: "Ready to Invoice (all)", statuses: TO_INVOICE },
-  attention: { label: "Pending Review + Declined", statuses: ["pending_review", "rejected_by_affiliate"] },
-};
-const ALL_STATUSES: WoStatus[] = [...STATUS_ORDER, "rejected_by_affiliate"];
 
 type Named = { name: string } | null;
 type Shop = { display_name: string } | null;
@@ -45,14 +50,6 @@ type ProblemShipment = {
   work_orders: WoRow | WoRow[] | null;
 };
 
-type Financials = {
-  work_order_id: string;
-  shop_subtotal: number;
-  customer_subtotal: number;
-  margin: number;
-  supplier_cost_tbd: boolean;
-};
-
 type AttentionItem = {
   key: string;
   red: boolean;
@@ -69,45 +66,33 @@ const ATTENTION_SHOWN = 12;
 const WO_COLUMNS =
   "id, wo_number, status, location_label, unit_number, po_number, customers(name), affiliates(display_name)";
 
-/** Strips characters that have meaning in a PostgREST filter string. */
-function cleanSearch(q: string): string {
-  return q.replace(/[,()*%\\:"']/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
-}
+/** Unit and PO numbers up to this length stay on one line in the table. */
+const ID_NOWRAP = 22;
 
-function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
+function idClass(value: string | null): string {
+  return (value ?? "").length > ID_NOWRAP ? styles.idCol : styles.idShort;
 }
 
 export default async function DashboardPage({ searchParams }: PageProps<"/cds">) {
   await requireCds();
   const sp = await searchParams;
-  const q = cleanSearch(typeof sp.q === "string" ? sp.q : "");
-  const statusParam = typeof sp.status === "string" ? sp.status : "";
-  const groupFilter = GROUPS[statusParam];
-  const statusFilter = ALL_STATUSES.includes(statusParam as WoStatus) ? (statusParam as WoStatus) : null;
+  const filters = parseFilters(sp);
+  const { q, status: statusParam } = filters;
+  const period = parsePeriod(sp.period);
+  const range = periodRange(period);
 
   const supabase = await createClient();
-  const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
   const countOf = (statuses: WoStatus[]) =>
     supabase.from("work_orders").select("id", { count: "exact", head: true }).in("status", statuses);
+  let invoicedQuery = supabase
+    .from("work_order_internal")
+    .select("work_order_id", { count: "exact", head: true })
+    .not("invoiced_at", "is", null);
+  if (range.from) invoicedQuery = invoicedQuery.gte("invoiced_at", range.from.toISOString());
+  if (range.to) invoicedQuery = invoicedQuery.lt("invoiced_at", range.to.toISOString());
 
-  // Work order table query.
-  let list = supabase.from("work_orders").select(WO_COLUMNS).order("created_at", { ascending: false }).limit(200);
-  if (groupFilter) list = list.in("status", groupFilter.statuses);
-  else if (statusFilter) list = list.eq("status", statusFilter);
-  if (q) {
-    const { data: custs } = await supabase.from("customers").select("id").ilike("name", `%${q}%`).limit(100);
-    const like = `"*${q}*"`;
-    const ors = [`po_number.ilike.${like}`, `unit_number.ilike.${like}`, `location_label.ilike.${like}`];
-    const woDigits = q.replace(/^wo\s*-?\s*/i, "");
-    if (/^\d{1,12}$/.test(woDigits)) ors.push(`wo_number.eq.${woDigits}`);
-    const custIds = (custs ?? []).map((c: { id: string }) => c.id);
-    if (custIds.length) ors.push(`customer_id.in.(${custIds.join(",")})`);
-    list = list.or(ors.join(","));
-  }
+  // Work order table query (same filters as the CSV export).
+  const list = (await filteredWorkOrders(supabase, filters, WO_COLUMNS)).query.limit(200);
 
   // Declined jobs and pending reviews are fetched separately, newest first, so a burst
   // of pending reviews can never push a declined job out of the queue.
@@ -132,29 +117,21 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
     countOf(IN_PROGRESS),
     countOf(TO_INVOICE),
     countOf(["pending_review"]),
-    supabase
-      .from("work_order_internal")
-      .select("work_order_id", { count: "exact", head: true })
-      .gte("invoiced_at", monthStart),
+    invoicedQuery,
   ]);
 
   const rows = (listRes.data ?? []) as unknown as WoRow[];
 
-  // Financials for the listed orders, in chunks to keep URLs short.
-  const finById = new Map<string, Financials>();
-  const finResults = await Promise.all(
-    chunk(
+  // Financials for the listed orders.
+  let finById = new Map<string, Financials>();
+  let finError: string | null = null;
+  try {
+    finById = await financialsFor(
+      supabase,
       rows.map((r) => r.id),
-      60,
-    ).map((ids) =>
-      supabase
-        .from("work_order_financials")
-        .select("work_order_id, shop_subtotal, customer_subtotal, margin, supplier_cost_tbd")
-        .in("work_order_id", ids),
-    ),
-  );
-  for (const res of finResults) {
-    for (const f of (res.data ?? []) as Financials[]) finById.set(f.work_order_id, f);
+    );
+  } catch (e) {
+    finError = e instanceof Error ? e.message : "unknown error";
   }
 
   // Needs Attention items.
@@ -204,18 +181,22 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
     { k: "Needs Attention", v: attention.length, sub: "CDS action or exception", href: "#attention" },
     { k: "In Progress", v: inProgress.count ?? 0, sub: "Shop / logistics moving", href: "/cds?status=in_progress#orders" },
     { k: "Ready to Invoice", v: toInvoice.count ?? 0, sub: "Work complete / billing next", href: "/cds?status=to_invoice#orders" },
-    { k: "Invoiced", v: invoiced.count ?? 0, sub: "This month", href: null },
+    { k: `Invoiced: ${range.label}`, v: invoiced.count ?? 0, sub: "By invoice date, Pacific time", href: null },
     { k: "Pending Review", v: pendingReview.count ?? 0, sub: "Not sent to a shop yet", href: "/cds?status=pending_review#orders" },
   ];
 
-  const loadError = listRes.error ?? declinedRes.error ?? reviewRes.error ?? shipRes.error;
+  const loadError = listRes.error?.message ?? declinedRes.error?.message ?? reviewRes.error?.message ?? shipRes.error?.message ?? finError;
+  const keepForPeriod = filterQuery(filters).replace(/^\?/, "");
+  const exportHref = `/cds/export${filterQuery(filters)}`;
 
   return (
     <>
       <div className="row between">
         <div className="title">
           <h1>Operations Dashboard</h1>
-          <p>Routine work stays in the background. Work the exception queue; everything else moves on its own.</p>
+          <p>
+            Routine work stays in the background. Work the exception queue; completed activity shown for {range.label}.
+          </p>
         </div>
         <div style={{ display: "grid", gap: 8, width: 220 }}>
           <Link className="btn btn-primary" href="/cds?status=pending_review#orders">
@@ -227,7 +208,16 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
         </div>
       </div>
 
-      {loadError && <div className="notice danger">Could not load work orders: {loadError.message}</div>}
+      <div className={styles.periodBar} style={{ marginTop: 14 }}>
+        <label className="small" htmlFor="dashboard-period" style={{ fontWeight: 750 }}>
+          Dashboard Period
+        </label>
+        <PeriodSelect id="dashboard-period" value={period} options={PERIODS} keep={keepForPeriod} />
+        <span className={`pill ${styles.periodPill}`}>{range.label}</span>
+        <span className="small">The period applies to the Invoiced count; everything else is current.</span>
+      </div>
+
+      {loadError && <div className="notice danger">Could not load work orders: {loadError}</div>}
 
       <div className="cards">
         {kpis.map((m) => {
@@ -280,7 +270,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                     <div style={{ fontWeight: 750, margin: "6px 0" }}>
                       {customer} - {a.wo.location_label}
                     </div>
-                    <div className="small" style={{ color: "#3c4850" }}>
+                    <div className={`small ${styles.clamp3}`} style={{ color: "#3c4850" }} title={a.detail.length > 180 ? a.detail.slice(0, 600) : undefined}>
                       {a.detail}
                     </div>
                     <div className="small" style={{ marginTop: 6 }}>
@@ -312,7 +302,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
             placeholder="Search WO, PO, unit, customer, location..."
             aria-label="Search work orders"
           />
-          <select name="status" defaultValue={groupFilter || statusFilter ? statusParam : ""} style={{ maxWidth: 260 }} aria-label="Status">
+          <select name="status" defaultValue={statusParam} style={{ maxWidth: 260 }} aria-label="Status">
             <option value="">All statuses</option>
             <optgroup label="Groups">
               {Object.entries(GROUPS).map(([value, g]) => (
@@ -329,17 +319,21 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
               ))}
             </optgroup>
           </select>
+          {period !== "month" && <input type="hidden" name="period" value={period} />}
           <button className="btn btn-secondary" type="submit">
             Search
           </button>
           {(q || statusParam) && (
-            <Link className="link small" href="/cds#orders">
+            <Link className="link small" href={`/cds${period !== "month" ? `?period=${period}` : ""}#orders`}>
               Clear
             </Link>
           )}
+          <a className="btn btn-secondary btn-small" href={exportHref} download style={{ marginLeft: "auto" }}>
+            Export CSV
+          </a>
         </Form>
         <div className="tablewrap">
-          <table className="wide">
+          <table className={`wide ${styles.woTable}`}>
             <thead>
               <tr>
                 <th>WO</th>
@@ -365,6 +359,10 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                 rows.map((r) => {
                   const f = finById.get(r.id);
                   const tbd = f?.supplier_cost_tbd;
+                  const customer = one(r.customers)?.name ?? "-";
+                  const shop = one(r.affiliates)?.display_name ?? null;
+                  const fullStatus = STATUS_LABEL[r.status] ?? r.status;
+                  const shortStatus = TABLE_STATUS_LABEL[r.status] ?? fullStatus;
                   return (
                     <tr key={r.id}>
                       <td className="nowrap">
@@ -372,13 +370,17 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                           {woLabel(r.wo_number)}
                         </Link>
                       </td>
-                      <td>{one(r.customers)?.name ?? "-"}</td>
-                      <td className={wrapCell(r.location_label)}>{r.location_label}</td>
-                      <td className={idCell(r.unit_number)}>{r.unit_number}</td>
-                      <td className={idCell(r.po_number)}>{r.po_number ?? <span className="small">Missing</span>}</td>
-                      <td>{one(r.affiliates)?.display_name ?? <span className="small">Not assigned</span>}</td>
+                      <td className={`${styles.textCol} ${wrapCell(customer) ?? ""}`}>{customer}</td>
+                      <td className={`${styles.textCol} ${wrapCell(r.location_label) ?? ""}`}>{r.location_label}</td>
+                      <td className={idClass(r.unit_number)}>{r.unit_number}</td>
+                      <td className={idClass(r.po_number)}>{r.po_number ?? <span className="small">Missing</span>}</td>
+                      <td className={`${styles.textCol} ${wrapCell(shop) ?? ""}`}>
+                        {shop ?? <span className="small">Not assigned</span>}
+                      </td>
                       <td>
-                        <StatusBadge status={r.status} />
+                        <span className={`status ${r.status}`} title={shortStatus !== fullStatus ? fullStatus : undefined}>
+                          {shortStatus}
+                        </span>
                       </td>
                       <td className="num money">{tbd ? "TBD" : money(f?.shop_subtotal)}</td>
                       <td className="num money">{money(f?.customer_subtotal)}</td>

@@ -1,0 +1,103 @@
+/* CDS admin, catalog and pricing screens. */
+
+/* Negative margin: a warning only, saving stays allowed. */
+.warn {
+  margin: 6px 0 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: #fff8e5;
+  border: 1px solid #f5d788;
+  color: #7a5200;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: normal;
+  white-space: normal;
+}
+.warnTag {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #fff1f0;
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.negative {
+  color: var(--red);
+}
+
+/* Search and filter bar: one row on desktop, stacked full width on a phone. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  margin: 14px 0;
+}
+.filters .grow {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.filters .fixed {
+  flex: 0 1 200px;
+  min-width: 0;
+}
+.filters label {
+  display: block;
+  font-size: 12px;
+  font-weight: 750;
+  color: #5e6a72;
+  margin-bottom: 5px;
+}
+.filterActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+@media (max-width: 640px) {
+  .filters .grow,
+  .filters .fixed {
+    flex: 1 1 100%;
+  }
+}
+
+/* Page links under a long table. */
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 12px 0;
+}
+.pager .gap {
+  padding: 0 4px;
+  color: var(--muted);
+}
+
+/* Locations on a phone: each row becomes a card, so the page is not wider than the screen. */
+@media (max-width: 640px) {
+  .cardTable {
+    min-width: 0 !important;
+  }
+  .cardTable thead {
+    display: none;
+  }
+  .cardTable tr {
+    display: block;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .cardTable td {
+    display: block;
+    border: 0 !important;
+    padding: 2px 0 !important;
+  }
+  .cardTable td[data-label]::before {
+    content: attr(data-label) ": ";
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+}

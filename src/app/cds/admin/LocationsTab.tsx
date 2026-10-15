@@ -1,5 +1,8 @@
 import Link from "next/link";
+import { SearchSelect, type SearchOption } from "@/components/SearchSelect";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
+import styles from "@/components/cds-admin/cds-admin.module.css";
+import { Pager } from "@/components/cds-admin/Pager";
 import { one } from "@/components/cds-admin/server-utils";
 import { FULFILLMENT_LABEL, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -24,41 +27,81 @@ type Location = {
   customers: { name: string } | { name: string }[] | null;
   affiliates: { display_name: string; short_code: string } | { display_name: string; short_code: string }[] | null;
 };
-type Option = { id: string; label: string };
+type CustomerRow = { id: string; code: string; name: string };
+type ShopRow = { id: string; short_code: string; display_name: string; active: boolean; city: string | null; region: string | null };
 
-export async function LocationsTab({ edit, q }: { edit?: string; q: string }) {
+export type LocationFilters = { q: string; customer: string; shop: string; fulfillment: string; page: number };
+
+const PAGE_SIZE = 50;
+const COLUMNS =
+  "id, customer_id, code, location_number, name, address_raw, address_line1, city, region, postal_code, default_affiliate_id, fulfillment, dock_note, routing_notes, active, customers(name), affiliates(display_name, short_code)";
+/** Location columns the search box looks in (customer and shop names are matched separately). */
+const SEARCH_COLUMNS = ["code", "location_number", "name", "address_raw", "address_line1", "city", "region", "postal_code"];
+
+/** Search words, without characters that have a meaning in a PostgREST filter. */
+function searchWords(q: string): string[] {
+  return q
+    .replace(/[",()*%\\]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+function href(f: LocationFilters, extra: Record<string, string> = {}): string {
+  const params = new URLSearchParams({ tab: "locations" });
+  if (f.q) params.set("q", f.q);
+  if (f.customer) params.set("customer", f.customer);
+  if (f.shop) params.set("shop", f.shop);
+  if (f.fulfillment) params.set("fulfillment", f.fulfillment);
+  if (f.page > 1) params.set("page", String(f.page));
+  for (const [k, v] of Object.entries(extra)) params.set(k, v);
+  return `/cds/admin?${params.toString()}`;
+}
+
+export async function LocationsTab({ edit, filters }: { edit?: string; filters: LocationFilters }) {
+  const f = filters;
   const supabase = await createClient();
-  const [{ data: locData, error }, { data: custData }, { data: shopData }] = await Promise.all([
-    supabase
-      .from("customer_locations")
-      .select(
-        "id, customer_id, code, location_number, name, address_raw, address_line1, city, region, postal_code, default_affiliate_id, fulfillment, dock_note, routing_notes, active, customers(name), affiliates(display_name, short_code)",
-      )
-      .order("code")
-      .limit(2000),
+  const [{ data: custData }, { data: shopData }] = await Promise.all([
     supabase.from("customers").select("id, code, name").order("name"),
-    supabase.from("affiliates").select("id, short_code, display_name, active").order("display_name"),
+    supabase.from("affiliates").select("id, short_code, display_name, active, city, region").order("display_name"),
   ]);
-  const locations = (locData ?? []) as Location[];
-  const customers: Option[] = ((custData ?? []) as { id: string; code: string; name: string }[]).map((c) => ({
-    id: c.id,
-    label: `${c.name} (${c.code})`,
-  }));
-  const shops: Option[] = ((shopData ?? []) as { id: string; short_code: string; display_name: string; active: boolean }[]).map((s) => ({
-    id: s.id,
-    label: `${s.display_name} (${s.short_code})${s.active ? "" : " - inactive"}`,
+  const customerRows = (custData ?? []) as CustomerRow[];
+  const shopRows = (shopData ?? []) as ShopRow[];
+  const customers: SearchOption[] = customerRows.map((c) => ({ value: c.id, label: `${c.name} (${c.code})` }));
+  const shops: SearchOption[] = shopRows.map((s) => ({
+    value: s.id,
+    label: `${s.display_name} (${s.short_code})${s.active ? "" : ", inactive"}`,
+    hint: [s.city, s.region].filter(Boolean).join(", ") || undefined,
   }));
 
-  const needle = q.toLowerCase();
-  const shown = needle
-    ? locations.filter((l) =>
-        [l.code, l.location_number ?? "", l.name, l.address_raw, l.city ?? "", one(l.customers)?.name ?? "", one(l.affiliates)?.display_name ?? ""].some(
-          (v) => v.toLowerCase().includes(needle),
-        ),
-      )
-    : locations;
-  const editing = edit && edit !== "new" ? locations.find((l) => l.id === edit) : undefined;
-  const backHref = q ? `/cds/admin?tab=locations&q=${encodeURIComponent(q)}` : "/cds/admin?tab=locations";
+  let query = supabase.from("customer_locations").select(COLUMNS, { count: "exact" });
+  if (f.customer) query = query.eq("customer_id", f.customer);
+  if (f.shop === "none") query = query.is("default_affiliate_id", null);
+  else if (f.shop) query = query.eq("default_affiliate_id", f.shop);
+  if (f.fulfillment) query = query.eq("fulfillment", f.fulfillment);
+  // Every word must match a location column, the customer or the default shop.
+  for (const word of searchWords(f.q)) {
+    const w = word.toLowerCase();
+    const or = SEARCH_COLUMNS.map((c) => `${c}.ilike."*${word}*"`);
+    const customerIds = customerRows.filter((c) => `${c.name} ${c.code}`.toLowerCase().includes(w)).map((c) => c.id);
+    const shopIds = shopRows.filter((s) => `${s.display_name} ${s.short_code}`.toLowerCase().includes(w)).map((s) => s.id);
+    if (customerIds.length) or.push(`customer_id.in.(${customerIds.join(",")})`);
+    if (shopIds.length) or.push(`default_affiliate_id.in.(${shopIds.join(",")})`);
+    query = query.or(or.join(","));
+  }
+  const from = (f.page - 1) * PAGE_SIZE;
+  const [{ data: locData, error, count }, { data: editData }] = await Promise.all([
+    query.order("code").order("id").range(from, from + PAGE_SIZE - 1),
+    edit && edit !== "new"
+      ? supabase.from("customer_locations").select(COLUMNS).eq("id", edit).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  const shown = (locData ?? []) as Location[];
+  const total = count ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const editing = (editData ?? undefined) as Location | undefined;
+  const filtered = Boolean(f.q || f.customer || f.shop || f.fulfillment);
+  const backHref = href(f);
 
   return (
     <>
@@ -89,21 +132,76 @@ export async function LocationsTab({ edit, q }: { edit?: string; q: string }) {
         </details>
       )}
 
-      <form className="toolbar" method="get" action="/cds/admin">
+      <form className={styles.filters} method="get" action="/cds/admin">
         <input type="hidden" name="tab" value="locations" />
-        <input className="input search" type="search" name="q" defaultValue={q} placeholder="Search code, name, address, customer or shop" aria-label="Search locations" />
-        <button className="btn btn-secondary" type="submit">
-          Search
-        </button>
-        <span className="pill">
-          {shown.length} of {locations.length} locations
-        </span>
+        <div className={styles.grow}>
+          <label htmlFor="loc-q">Search</label>
+          <input
+            className="input"
+            id="loc-q"
+            type="search"
+            name="q"
+            defaultValue={f.q}
+            placeholder="Code, number, name, address, city, ZIP or shop"
+          />
+        </div>
+        <div className={styles.fixed}>
+          <label htmlFor="loc-customer">Customer</label>
+          <SearchSelect
+            key={`c-${f.customer}`}
+            id="loc-customer"
+            name="customer"
+            defaultValue={f.customer}
+            placeholder="All customers"
+            options={[{ value: "", label: "All customers" }, ...customers]}
+          />
+        </div>
+        <div className={styles.fixed}>
+          <label htmlFor="loc-shop">Default shop</label>
+          <SearchSelect
+            key={`s-${f.shop}`}
+            id="loc-shop"
+            name="shop"
+            defaultValue={f.shop}
+            placeholder="Any shop"
+            options={[{ value: "", label: "Any shop" }, { value: "none", label: "No default shop" }, ...shops]}
+          />
+        </div>
+        <div className={styles.fixed}>
+          <label htmlFor="loc-fulfillment">Fulfillment</label>
+          <select id="loc-fulfillment" name="fulfillment" defaultValue={f.fulfillment}>
+            <option value="">Any fulfillment</option>
+            {Object.entries(FULFILLMENT_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className={styles.filterActions}>
+          <button className="btn btn-secondary" type="submit">
+            Search
+          </button>
+          {filtered && (
+            <Link className="link small" href="/cds/admin?tab=locations">
+              Clear
+            </Link>
+          )}
+        </div>
       </form>
+
+      <p className="small" role="status">
+        {total === 0
+          ? filtered
+            ? "No locations match."
+            : "No locations yet."
+          : `Showing ${from + 1} to ${Math.min(from + shown.length, total)} of ${total} ${filtered ? "matching " : ""}locations`}
+      </p>
 
       {error && <div className="notice danger">Could not load locations. Refresh the page to try again.</div>}
 
       <div className="tablewrap">
-        <table className="wide">
+        <table className={`wide ${styles.cardTable}`}>
           <thead>
             <tr>
               <th>Customer</th>
@@ -120,27 +218,35 @@ export async function LocationsTab({ edit, q }: { edit?: string; q: string }) {
             {shown.length === 0 && (
               <tr>
                 <td colSpan={8} className="small">
-                  {locations.length === 0 ? "No locations yet." : "No locations match this search."}
+                  {total > 0 ? (
+                    <>
+                      This page is empty. <Link className="link" href={href({ ...f, page: 1 })}>Go to the first page</Link>
+                    </>
+                  ) : filtered ? (
+                    "No locations match this search."
+                  ) : (
+                    "No locations yet."
+                  )}
                 </td>
               </tr>
             )}
             {shown.map((l) => (
               <tr key={l.id} style={l.active ? undefined : { opacity: 0.6 }}>
-                <td>{one(l.customers)?.name ?? "-"}</td>
+                <td data-label="Customer">{one(l.customers)?.name ?? "-"}</td>
                 <td className="nowrap">
                   <b>{l.code}</b>
-                  {l.location_number && <div className="small">#{l.location_number}</div>}
+                  {l.location_number && <span className="small"> #{l.location_number}</span>}
                 </td>
                 <td className={wrapCell(l.name)}>{l.name}</td>
                 <td className={wrapCell(l.address_raw, l.routing_notes)}>
                   {l.address_raw}
                   {l.routing_notes && <div className="small">{l.routing_notes}</div>}
                 </td>
-                <td>{one(l.affiliates)?.display_name ?? <span className="small">Not set</span>}</td>
-                <td>{FULFILLMENT_LABEL[l.fulfillment] ?? l.fulfillment}</td>
+                <td data-label="Default shop">{one(l.affiliates)?.display_name ?? <span className="small">Not set</span>}</td>
+                <td data-label="Fulfillment">{FULFILLMENT_LABEL[l.fulfillment] ?? l.fulfillment}</td>
                 <td>{l.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}</td>
                 <td>
-                  <Link className="link small" href={`${backHref}&edit=${l.id}`}>
+                  <Link className="link small" href={href(f, { edit: l.id })}>
                     Edit
                   </Link>
                 </td>
@@ -149,11 +255,13 @@ export async function LocationsTab({ edit, q }: { edit?: string; q: string }) {
           </tbody>
         </table>
       </div>
+
+      <Pager page={f.page} pages={pages} href={(page) => href({ ...f, page })} label="Location pages" />
     </>
   );
 }
 
-function LocationFields({ loc, customers, shops }: { loc?: Location; customers: Option[]; shops: Option[] }) {
+function LocationFields({ loc, customers, shops }: { loc?: Location; customers: SearchOption[]; shops: SearchOption[] }) {
   const k = loc?.id ?? "new";
   const input = (name: keyof Location, label: string, opts: { required?: boolean; placeholder?: string } = {}) => (
     <div className="field">
@@ -177,16 +285,14 @@ function LocationFields({ loc, customers, shops }: { loc?: Location; customers: 
           <label htmlFor={`customer-${k}`}>
             Customer <span className="req">*</span>
           </label>
-          <select id={`customer-${k}`} name="customer_id" required defaultValue={loc?.customer_id ?? ""}>
-            <option value="" disabled>
-              Choose a customer
-            </option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
-          </select>
+          <SearchSelect
+            id={`customer-${k}`}
+            name="customer_id"
+            required
+            defaultValue={loc?.customer_id ?? ""}
+            placeholder="Type a customer name or code"
+            options={customers}
+          />
         </div>
         {input("code", "Location code", { required: true, placeholder: "DAL-04" })}
         {input("location_number", "Location number")}
@@ -200,14 +306,13 @@ function LocationFields({ loc, customers, shops }: { loc?: Location; customers: 
         </div>
         <div className="field">
           <label htmlFor={`shop-${k}`}>Default shop</label>
-          <select id={`shop-${k}`} name="default_affiliate_id" defaultValue={loc?.default_affiliate_id ?? ""}>
-            <option value="">None</option>
-            {shops.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
+          <SearchSelect
+            id={`shop-${k}`}
+            name="default_affiliate_id"
+            defaultValue={loc?.default_affiliate_id ?? ""}
+            placeholder="Type a shop name, code or city"
+            options={[{ value: "", label: "None" }, ...shops]}
+          />
         </div>
         <div className="field">
           <label htmlFor={`fulfillment-${k}`}>Fulfillment</label>

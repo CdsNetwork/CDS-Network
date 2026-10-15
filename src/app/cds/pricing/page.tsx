@@ -1,4 +1,9 @@
+import Link from "next/link";
+import { SearchSelect } from "@/components/SearchSelect";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
+import styles from "@/components/cds-admin/cds-admin.module.css";
+import { BELOW_SHOP_RATE_MESSAGE, belowShopRate } from "@/components/cds-admin/margin";
+import { OverrideInput } from "@/components/cds-admin/PriceWarning";
 import { one, today } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { CATEGORY_LABEL, date, money } from "@/lib/format";
@@ -14,11 +19,12 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
   await requireCds();
   const sp = await searchParams;
   const q = typeof sp.q === "string" ? sp.q.trim() : "";
+  const below = sp.below === "1";
   const supabase = await createClient();
   const day = today();
   const current = `effective_to.is.null,effective_to.gt.${day}`;
 
-  const [{ data: custData }, { data: itemData }, { data: sellData }] = await Promise.all([
+  const [{ data: custData }, { data: itemData }, { data: sellData }, { data: rateData }] = await Promise.all([
     supabase.from("customers").select("id, code, name").eq("active", true).order("name"),
     supabase.from("catalog_items").select("id, sku, category, name, oe_cross").eq("active", true).order("sku"),
     supabase
@@ -28,10 +34,20 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
       .lte("effective_from", day)
       .or(current)
       .order("effective_from", { ascending: true }),
+    supabase
+      .from("shop_rates")
+      .select("id, catalog_item_id, amount, effective_from")
+      .is("affiliate_id", null)
+      .eq("market", "US")
+      .lte("effective_from", day)
+      .or(current)
+      .order("effective_from", { ascending: true }),
   ]);
   const customers = (custData ?? []) as Customer[];
   const items = (itemData ?? []) as Item[];
   const sells = new Map(((sellData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
+  // Default shop rate (what CDS pays a shop without its own rate).
+  const rates = new Map(((rateData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
 
   const customerId = typeof sp.customer === "string" && customers.some((c) => c.id === sp.customer) ? sp.customer : customers[0]?.id;
   const customer = customers.find((c) => c.id === customerId);
@@ -64,10 +80,23 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
     }
   }
 
+  const effectiveOf = (id: string) => overrides.get(id)?.amount ?? sells.get(id)?.amount ?? null;
+  const isBelow = (id: string) => belowShopRate(rates.get(id)?.amount, effectiveOf(id));
+  const belowCount = customer ? items.filter((i) => isBelow(i.id)).length : 0;
+
   const needle = q.toLowerCase();
-  const shown = needle
-    ? items.filter((i) => [i.sku, i.name, i.oe_cross ?? "", CATEGORY_LABEL[i.category] ?? ""].some((v) => v.toLowerCase().includes(needle)))
-    : items;
+  const shown = items.filter(
+    (i) =>
+      (!below || isBelow(i.id)) &&
+      (!needle || [i.sku, i.name, i.oe_cross ?? "", CATEGORY_LABEL[i.category] ?? ""].some((v) => v.toLowerCase().includes(needle))),
+  );
+  const hrefWith = (onlyBelow: boolean) => {
+    const params = new URLSearchParams();
+    if (customer) params.set("customer", customer.id);
+    if (q) params.set("q", q);
+    if (onlyBelow) params.set("below", "1");
+    return `/cds/pricing?${params.toString()}`;
+  };
 
   return (
     <>
@@ -80,18 +109,25 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
         <form method="get" action="/cds/pricing" className="grid3" style={{ alignItems: "end" }}>
           <div className="field">
             <label htmlFor="customer">Customer</label>
-            <select id="customer" name="customer" defaultValue={customer?.id ?? ""}>
-              {customers.length === 0 && <option value="">No customers yet</option>}
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.code})
-                </option>
-              ))}
-            </select>
+            {customers.length === 0 ? (
+              <select id="customer" name="customer" defaultValue="">
+                <option value="">No customers yet</option>
+              </select>
+            ) : (
+              <SearchSelect
+                key={customer?.id ?? ""}
+                id="customer"
+                name="customer"
+                defaultValue={customer?.id ?? ""}
+                placeholder="Type a customer name or code"
+                options={customers.map((c) => ({ value: c.id, label: `${c.name} (${c.code})` }))}
+              />
+            )}
           </div>
           <div className="field">
             <label htmlFor="q">Filter catalog</label>
             <input className="input" id="q" name="q" type="search" defaultValue={q} placeholder="Search service or part" />
+            {below && <input type="hidden" name="below" value="1" />}
           </div>
           <div className="field">
             <button className="btn btn-secondary" type="submit">
@@ -103,6 +139,17 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
           Blank override = use Fleet Price. A new override applies from today; existing work orders keep the prices they were
           created with.
         </div>
+        {belowCount > 0 && (
+          <div className="notice warning" style={{ marginBottom: 0 }}>
+            <b>
+              {belowCount} {belowCount === 1 ? "item is" : "items are"} priced below the shop rate for {customer?.name}.
+            </b>{" "}
+            {BELOW_SHOP_RATE_MESSAGE}.{" "}
+            <Link className="link" href={hrefWith(!below)}>
+              {below ? "Show all items" : "Show only these"}
+            </Link>
+          </div>
+        )}
       </div>
 
       <div className="section">
@@ -116,6 +163,7 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
                 <tr>
                   <th>Item</th>
                   <th>Description</th>
+                  <th className="num">Shop Rate</th>
                   <th className="num">Fleet Default</th>
                   <th>{customer.name} Override</th>
                   <th className="num">Effective Sell</th>
@@ -124,7 +172,7 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
               <tbody>
                 {shown.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="small">
+                    <td colSpan={6} className="small">
                       No catalog items match this filter.
                     </td>
                   </tr>
@@ -133,6 +181,7 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
                   const fleet = sells.get(i.id)?.amount ?? null;
                   const override = overrides.get(i.id);
                   const effective = override?.amount ?? fleet;
+                  const rate = rates.get(i.id)?.amount ?? null;
                   const change = override ? lastChange.get(override.id) : undefined;
                   return (
                     <tr key={i.id}>
@@ -145,22 +194,18 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
                         {i.oe_cross && <div className="small">{i.oe_cross}</div>}
                       </td>
                       <td className="num">
+                        <span className="money">{money(rate)}</span>
+                      </td>
+                      <td className="num">
                         <span className="money">{money(fleet)}</span>
                       </td>
                       <td style={{ minWidth: 260 }}>
                         <ActionForm key={`${customer.id}-${i.id}-${override?.amount ?? ""}`} action={setOverride.bind(null, customer.id, i.id)}>
-                          <div className="row" style={{ flexWrap: "nowrap", gap: 6 }}>
-                            <input
-                              className="input"
-                              style={{ maxWidth: 110, padding: "6px 8px" }}
-                              name="amount"
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              placeholder="Default"
-                              aria-label={`${customer.name} override for ${i.sku}`}
-                              defaultValue={override?.amount ?? ""}
-                            />
+                          <OverrideInput
+                            shopRate={rate}
+                            defaultValue={override?.amount ?? ""}
+                            ariaLabel={`${customer.name} override for ${i.sku}`}
+                          >
                             <button className="btn btn-secondary btn-small" type="submit" name="intent" value="save">
                               Save
                             </button>
@@ -169,7 +214,7 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
                                 Clear
                               </button>
                             )}
-                          </div>
+                          </OverrideInput>
                           {override && (
                             <div className="small">
                               {change
@@ -182,6 +227,11 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
                       <td className="num">
                         <span className="money">{money(effective)}</span>
                         <div className="small">{override ? "Override" : fleet !== null ? "Fleet" : "No price"}</div>
+                        {belowShopRate(rate, effective) && (
+                          <span className={styles.warnTag} title={BELOW_SHOP_RATE_MESSAGE}>
+                            Below shop rate
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );

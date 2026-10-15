@@ -1,0 +1,115 @@
+/* CDS work order screens: dashboard table, detail warnings, affiliate view. */
+
+/* Dashboard work order table (BUG-10). Ten columns must fit the card at 1440 px with
+   ordinary values. Cells are a little tighter than the default table, the status pill uses
+   a short label, and customer, location and shop wrap between words. WO numbers, statuses
+   and money stay on one line. */
+.woTable th,
+.woTable td {
+  padding: 10px 6px;
+}
+.woTable th:first-child,
+.woTable td:first-child {
+  padding-left: 12px;
+}
+.woTable th:last-child,
+.woTable td:last-child {
+  padding-right: 12px;
+}
+/* Ordinary unit and PO numbers (up to ID_NOWRAP characters) stay on one line; a longer
+   value wraps inside its own cell, at most 10.5rem wide. */
+.woTable td.idShort {
+  white-space: nowrap;
+}
+.woTable td.idCol {
+  min-width: 6.5rem;
+  max-width: 10.5rem;
+  overflow-wrap: anywhere;
+}
+/* Customer, location and shop take the space left over and wrap between words. */
+.woTable td.textCol {
+  min-width: 4.5rem;
+}
+
+/* Needs Attention: long reasons stop after three lines; the full text is on the order. */
+.clamp3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+.periodBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.periodBar select {
+  width: auto;
+  min-width: 170px;
+}
+.periodPill {
+  font-weight: 800;
+  color: var(--ink);
+}
+
+/* Line priced below the shop rate. */
+.negRow td {
+  background: #fff5f4;
+}
+.negTag {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #ffe8e5;
+  color: #a1261d;
+  display: inline-block;
+  white-space: nowrap;
+  margin-top: 4px;
+}
+
+/* Affiliate View */
+.previewBanner {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #e8f1ff;
+  border: 1px solid #b8d0f5;
+  color: #17448f;
+  font-weight: 700;
+  margin: 12px 0 18px;
+}
+.pickerBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: end;
+}
+.jobList {
+  display: grid;
+  gap: 8px;
+  max-height: 560px;
+  overflow: auto;
+}
+.lineRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.lineRow:last-child {
+  border-bottom: 0;
+}
+.lineMoney {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+@media (max-width: 950px) {
+  .pickerBar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

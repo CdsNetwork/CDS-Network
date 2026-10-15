@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import { ActionForm } from "./ActionForm";
-import type { ActionState, Option } from "./types";
+import { CatalogPicker } from "./CatalogPicker";
+import type { ActionState, CatalogOption } from "./types";
 
 export function AuthRequestForm({
   action,
   options,
 }: {
   action: (prev: ActionState, fd: FormData) => Promise<ActionState>;
-  options: (Option & { kind: "service" | "part" })[];
+  options: (CatalogOption & { kind: "service" | "part" })[];
 }) {
   const [itemId, setItemId] = useState("");
   const kind = options.find((o) => o.id === itemId)?.kind;
@@ -22,14 +23,13 @@ export function AuthRequestForm({
             <label htmlFor="ar-item">
               Service / Part <span className="req">*</span>
             </label>
-            <select id="ar-item" name="catalog_item" required value={itemId} onChange={(e) => setItemId(e.target.value)}>
-              <option value="">Select from the CDS catalog...</option>
-              {options.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+            <CatalogPicker
+              id="ar-item"
+              options={options}
+              value={itemId}
+              onChange={setItemId}
+              placeholder="Search the CDS catalog: SKU, name or OE number..."
+            />
           </div>
           <div className="row" style={{ alignItems: "flex-end" }}>
             <div className="field" style={{ width: 110 }}>

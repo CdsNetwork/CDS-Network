@@ -28,12 +28,13 @@ import {
 } from "@/app/shop/actions";
 import type { JobDetailData } from "@/app/shop/data";
 import { ActionButton, ActionForm } from "./ActionForm";
+import { AddPartForm } from "./AddPartForm";
 import { AttachmentForm } from "./AttachmentForm";
 import { AuthRequestForm } from "./AuthRequestForm";
 import { ComponentCard } from "./ComponentCard";
 import { DeclineJob } from "./DeclineJob";
 import styles from "./shop.module.css";
-import { EDITABLE_STATUSES, componentLabel, type ComponentRow, type LineRow, type QueueTab } from "./types";
+import { EDITABLE_STATUSES, componentLabel, type ComponentRow, type LineRow } from "./types";
 
 const ORIGIN_LABEL: Record<LineRow["origin"], string> = {
   cds_order: "Ordered by CDS",
@@ -50,7 +51,7 @@ const AUTH_STATUS_LABEL: Record<string, string> = {
 
 const qtyText = (n: number) => String(n);
 
-export function JobDetail({ data, tab }: { data: JobDetailData; tab: QueueTab }) {
+export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: string }) {
   const { job, lines, components, authRequests, attachments, shipments } = data;
   const id = job.id;
   const editable = EDITABLE_STATUSES.includes(job.status);
@@ -68,7 +69,7 @@ export function JobDetail({ data, tab }: { data: JobDetailData; tab: QueueTab })
 
   return (
     <div>
-      <Link href={`/shop?tab=${tab}`} className={`link ${styles.back}`}>
+      <Link href={backHref} className={`link ${styles.back}`}>
         ← Back to queue
       </Link>
 
@@ -248,44 +249,7 @@ export function JobDetail({ data, tab }: { data: JobDetailData; tab: QueueTab })
         {editable && (
           <div className="uploadBox" style={{ marginTop: 14 }}>
             <h4 style={{ margin: "0 0 8px" }}>Add Parts</h4>
-            <ActionForm action={addPart.bind(null, id)} submitLabel="+ Add Part" pendingLabel="Adding..." resetOnSuccess>
-              <div className="row" style={{ alignItems: "flex-end" }}>
-                <div className="field" style={{ flex: "1 1 220px" }}>
-                  <label htmlFor="part-item">
-                    Part <span className="req">*</span>
-                  </label>
-                  <select id="part-item" name="catalog_item" required defaultValue="">
-                    <option value="">Select a part...</option>
-                    {data.partOptions.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="field" style={{ width: 90 }}>
-                  <label htmlFor="part-qty">Qty</label>
-                  <input
-                    className="input"
-                    id="part-qty"
-                    name="qty"
-                    type="number"
-                    inputMode="decimal"
-                    min="0.01"
-                    step="any"
-                    defaultValue={1}
-                    required
-                  />
-                </div>
-              </div>
-              <div className="notice warning" style={{ margin: "4px 0 0" }}>
-                Select from the CDS catalog; prices cannot be typed manually by the affiliate.
-              </div>
-              <p className="small">
-                Parts include gaskets, clamps, bungs and other CDS catalog parts. Services cannot be added here: if more
-                work is needed, use Request Additional Authorization below.
-              </p>
-            </ActionForm>
+            <AddPartForm action={addPart.bind(null, id)} options={data.partOptions} />
           </div>
         )}
       </section>

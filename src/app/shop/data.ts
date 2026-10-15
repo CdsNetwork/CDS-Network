@@ -1,6 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import { money } from "@/lib/format";
+import { CATEGORY_LABEL, money } from "@/lib/format";
+import { pacificToday } from "@/lib/dates";
 import {
   TAB_STATUSES,
   type AttachmentView,
@@ -8,7 +9,7 @@ import {
   type ComponentRow,
   type JobRow,
   type LineRow,
-  type Option,
+  type CatalogOption,
   type QueueJob,
   type QueueTab,
   type ShipmentRow,
@@ -28,26 +29,55 @@ type Item = { sku: string; name: string; category?: string } | null;
 
 const COMPLETED_LIMIT = 50;
 
-export async function loadQueue(): Promise<{ jobs: Record<QueueTab, QueueJob[]>; counts: Record<QueueTab, number> }> {
+/** Characters that would change a PostgREST filter expression; dropped from a search. */
+const FILTER_CHARS = /[,()*%\\"':]/g;
+
+/** Cleans a queue search: trimmed, at most 60 characters, no filter syntax. */
+export function cleanQueueSearch(raw: string | undefined): string {
+  return (raw ?? "").replace(FILTER_CHARS, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+}
+
+/**
+ * The shop's work queue. With `search`, only jobs whose WO number, unit, PO, customer or
+ * location match are returned, and the counts are the counts of matches.
+ */
+export async function loadQueue(
+  search = "",
+): Promise<{ jobs: Record<QueueTab, QueueJob[]>; counts: Record<QueueTab, number> }> {
   const supabase = await createClient();
-  const cols = "id, wo_number, status, location_label, requested_work, customers(name)";
+  const cols = "id, wo_number, status, location_label, requested_work, unit_number, po_number, customers(name)";
+
+  // One OR filter shared by the three queries. Customer names are looked up first (RLS
+  // only returns customers on this shop's own work orders).
+  let filter: string | null = null;
+  if (search) {
+    const like = `*${search}*`;
+    const parts = [`unit_number.ilike.${like}`, `po_number.ilike.${like}`, `location_label.ilike.${like}`];
+    const woNumber = search.replace(/^wo[\s-]*/i, "");
+    if (/^\d{1,9}$/.test(woNumber)) parts.push(`wo_number.eq.${Number(woNumber)}`);
+    const { data: customers } = await supabase.from("customers").select("id").ilike("name", `%${search}%`).limit(200);
+    const ids = (customers ?? []).map((c) => c.id as string);
+    if (ids.length) parts.push(`customer_id.in.(${ids.join(",")})`);
+    filter = parts.join(",");
+  }
+  const where = <Q extends { or: (f: string) => Q }>(q: Q): Q => (filter ? q.or(filter) : q);
 
   const [open, done, doneCount] = await Promise.all([
-    supabase
-      .from("work_orders")
-      .select(cols)
-      .in("status", [...TAB_STATUSES.awaiting, ...TAB_STATUSES.active])
-      .order("wo_number", { ascending: false }),
-    supabase
-      .from("work_orders")
-      .select(cols)
-      .in("status", TAB_STATUSES.completed)
+    where(
+      supabase
+        .from("work_orders")
+        .select(cols)
+        .in("status", [...TAB_STATUSES.awaiting, ...TAB_STATUSES.active]),
+    ).order("wo_number", { ascending: false }),
+    where(supabase.from("work_orders").select(cols).in("status", TAB_STATUSES.completed))
       .order("wo_number", { ascending: false })
       .limit(COMPLETED_LIMIT),
-    supabase
-      .from("work_orders")
-      .select("id", { count: "exact", head: true })
-      .in("status", TAB_STATUSES.completed),
+    where(
+      supabase
+        .from("work_orders")
+        .select("id", { count: "exact", head: true })
+        .in("status", TAB_STATUSES.completed),
+    ),
   ]);
 
   const toJob = (r: Record<string, unknown>): QueueJob => ({
@@ -56,6 +86,8 @@ export async function loadQueue(): Promise<{ jobs: Record<QueueTab, QueueJob[]>;
     status: r.status as QueueJob["status"],
     location_label: r.location_label as string,
     requested_work: r.requested_work as string,
+    unit_number: (r.unit_number as string | null) ?? "",
+    po_number: (r.po_number as string | null) ?? null,
     customer_name: (r.customers as Named)?.name ?? "",
   });
 
@@ -82,10 +114,10 @@ export type JobDetailData = {
   authRequests: AuthRequestRow[];
   attachments: AttachmentView[];
   shipments: ShipmentRow[];
-  /** Parts the shop may add, with its own pay rate in the label. */
-  partOptions: Option[];
+  /** Parts the shop may add, with its own pay rate in the hint. */
+  partOptions: CatalogOption[];
   /** Whole active catalog for extra work requests, with the request kind. */
-  authOptions: (Option & { kind: "service" | "part" })[];
+  authOptions: (CatalogOption & { kind: "service" | "part" })[];
 };
 
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -205,7 +237,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     status: s.status,
   }));
 
-  let partOptions: Option[] = [];
+  let partOptions: CatalogOption[] = [];
   let authOptions: JobDetailData["authOptions"] = [];
   if (editable(job)) {
     ({ partOptions, authOptions } = await loadCatalogOptions(job.market));
@@ -225,10 +257,10 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
 
 async function loadCatalogOptions(market: string) {
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = pacificToday();
 
   const [items, rates] = await Promise.all([
-    supabase.from("catalog_items").select("id, sku, name, category, shop_selectable").eq("active", true).order("sku"),
+    supabase.from("catalog_items").select("id, sku, name, category, oe_cross, shop_selectable").eq("active", true).order("sku"),
     // RLS returns the default rows plus this shop's own rows only.
     supabase
       .from("shop_rates")
@@ -248,17 +280,24 @@ async function loadCatalogOptions(market: string) {
   }
 
   const all = items.data ?? [];
-  const partOptions: Option[] = all
+  // Only shop-safe text: SKU, name, category, OE cross reference and the shop's own rate.
+  const base = (i: (typeof all)[number]) => ({
+    id: i.id as string,
+    label: `${i.sku} - ${i.name}`,
+    category: CATEGORY_LABEL[i.category as string] ?? String(i.category),
+    keywords: (i.oe_cross as string | null) ?? undefined,
+  });
+  const partOptions: CatalogOption[] = all
     .filter((i) => i.shop_selectable && i.category !== "service")
     .map((i) => {
       const amount = best.get(i.id)?.amount ?? null;
-      const rate = amount === null ? "rate set by CDS" : `Rate ${money(amount)}`;
-      return { id: i.id, label: `${i.sku} - ${i.name} (${rate})` };
+      const o = base(i);
+      const rate = amount === null ? "Rate set by CDS" : `Your rate ${money(amount)}`;
+      return { ...o, hint: `${o.category} • ${rate}` };
     });
-  const authOptions = all.map((i) => ({
-    id: i.id,
-    label: `${i.sku} - ${i.name}`,
-    kind: (i.category === "service" ? "service" : "part") as "service" | "part",
-  }));
+  const authOptions = all.map((i) => {
+    const o = base(i);
+    return { ...o, hint: o.category, kind: (i.category === "service" ? "service" : "part") as "service" | "part" };
+  });
   return { partOptions, authOptions };
 }

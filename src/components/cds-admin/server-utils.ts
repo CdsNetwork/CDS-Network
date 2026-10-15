@@ -1,8 +1,9 @@
 import "server-only";
+import { pacificToday } from "@/lib/dates";
 
-/** Today's date as the database sees it (Supabase runs in UTC). */
+/** Today's Pacific date, the date the database starts and ends prices on (private.today()). */
 export function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return pacificToday();
 }
 
 export function text(formData: FormData, name: string): string {

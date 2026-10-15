@@ -4,6 +4,7 @@ import { one } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createWorkOrder } from "./actions";
+import { pacificToday } from "@/lib/dates";
 
 type PriceRow = { catalog_item_id: string; amount: number; effective_from: string };
 type OverrideRow = PriceRow & { customer_id: string };
@@ -18,7 +19,7 @@ function newest<T extends { effective_from: string }>(rows: T[], key: (r: T) => 
 export default async function NewWorkOrderPage() {
   await requireCds();
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = pacificToday();
   const current = `effective_to.is.null,effective_to.gt.${today}`;
 
   const [customersRes, locationsRes, catalogRes, sellRes, overrideRes] = await Promise.all([
@@ -26,12 +27,12 @@ export default async function NewWorkOrderPage() {
     supabase
       .from("customer_locations")
       .select(
-        "id, customer_id, code, location_number, name, address_raw, fulfillment, routing_notes, dock_note, affiliates(display_name)",
+        "id, customer_id, code, location_number, name, address_raw, city, region, postal_code, fulfillment, routing_notes, dock_note, affiliates(display_name)",
       )
       .eq("active", true)
       .eq("market", "US")
       .order("code"),
-    supabase.from("catalog_items").select("id, sku, name, category").eq("active", true).order("category").order("sku"),
+    supabase.from("catalog_items").select("id, sku, name, category, oe_cross").eq("active", true).order("category").order("sku"),
     supabase
       .from("sell_prices")
       .select("catalog_item_id, amount, effective_from")
@@ -55,7 +56,7 @@ export default async function NewWorkOrderPage() {
   }
 
   const catalog: CatalogOption[] = (
-    (catalogRes.data ?? []) as { id: string; sku: string; name: string; category: string }[]
+    (catalogRes.data ?? []) as { id: string; sku: string; name: string; category: string; oe_cross: string | null }[]
   ).map((c) => ({ ...c, fleetPrice: fleet.has(c.id) ? Number(fleet.get(c.id)!.amount) : null }));
 
   type LocRow = Omit<LocationOption, "shopName"> & {

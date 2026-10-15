@@ -25,6 +25,8 @@ export type QueueJob = {
   status: WoStatus;
   location_label: string;
   requested_work: string;
+  unit_number: string;
+  po_number: string | null;
   customer_name: string;
 };
 
@@ -105,6 +107,13 @@ export type ShipmentRow = {
 
 /** An option for a select: id plus the text shown. */
 export type Option = { id: string; label: string };
+
+/**
+ * A catalog item for a search picker. Only shop-safe text: "SKU - name", category, the
+ * shop's own pay rate (parts) and the OE cross reference as search words. Never customer
+ * prices, margins or CDS notes.
+ */
+export type CatalogOption = Option & { category: string; hint: string; keywords?: string };
 
 export function componentLabel(c: Pick<ComponentRow, "component_type" | "seq">): string {
   return `${c.component_type} #${c.seq}`;

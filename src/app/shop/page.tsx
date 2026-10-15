@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { JobDetail } from "@/components/shop/JobDetail";
-import { JobQueue } from "@/components/shop/JobQueue";
+import { JobQueue, queueHref } from "@/components/shop/JobQueue";
 import styles from "@/components/shop/shop.module.css";
 import { EDITABLE_STATUSES, tabForStatus, type QueueTab } from "@/components/shop/types";
 import { requireShop } from "@/lib/auth";
-import { loadJob, loadQueue } from "./data";
+import { cleanQueueSearch, loadJob, loadQueue } from "./data";
 
 const TABS: QueueTab[] = ["awaiting", "active", "completed"];
 
@@ -15,9 +15,10 @@ export default async function ShopQueuePage({ searchParams }: PageProps<"/shop">
   const jobId = one(params.job);
   const tabParam = one(params.tab);
   const declined = one(params.declined) === "1";
+  const search = cleanQueueSearch(one(params.q));
 
   const [queue, detail] = await Promise.all([
-    loadQueue(),
+    loadQueue(search),
     jobId ? loadJob(jobId, (j) => EDITABLE_STATUSES.includes(j.status)) : Promise.resolve(null),
   ]);
 
@@ -25,9 +26,11 @@ export default async function ShopQueuePage({ searchParams }: PageProps<"/shop">
     ? (tabParam as QueueTab)
     : detail
       ? tabForStatus(detail.job.status)
-      : queue.counts.awaiting > 0
-        ? "awaiting"
-        : "active";
+      : search
+        ? (TABS.find((t) => queue.counts[t] > 0) ?? "awaiting")
+        : queue.counts.awaiting > 0
+          ? "awaiting"
+          : "active";
   const showingJob = Boolean(jobId);
 
   return (
@@ -43,17 +46,23 @@ export default async function ShopQueuePage({ searchParams }: PageProps<"/shop">
       )}
       <div className="shopGrid">
         <div className={showingJob ? styles.hideOnPhone : undefined}>
-          <JobQueue tab={tab} jobs={queue.jobs[tab]} counts={queue.counts} selectedId={detail?.job.id} />
+          <JobQueue
+            tab={tab}
+            jobs={queue.jobs[tab]}
+            counts={queue.counts}
+            selectedId={detail?.job.id}
+            search={search}
+          />
         </div>
         <div style={{ minWidth: 0 }}>
           {detail ? (
-            <JobDetail data={detail} tab={tab} />
+            <JobDetail data={detail} backHref={queueHref(tab, search)} />
           ) : jobId ? (
             <div className="section" style={{ marginTop: 0 }}>
               <div className="notice warning">
                 This job is not available. It may have been declined, reassigned or removed by CDS.
               </div>
-              <Link className="link" href={`/shop?tab=${tab}`} style={{ display: "inline-flex", minHeight: 44, alignItems: "center" }}>
+              <Link className="link" href={queueHref(tab, search)} style={{ display: "inline-flex", minHeight: 44, alignItems: "center" }}>
                 Back to queue
               </Link>
             </div>

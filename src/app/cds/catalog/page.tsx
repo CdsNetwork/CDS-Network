@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
+import styles from "@/components/cds-admin/cds-admin.module.css";
+import { BELOW_SHOP_RATE_MESSAGE, belowShopRate } from "@/components/cds-admin/margin";
+import { CatalogPriceFields } from "@/components/cds-admin/PriceWarning";
 import { today } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { CATEGORY_LABEL, money } from "@/lib/format";
@@ -26,6 +29,7 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
   const q = typeof sp.q === "string" ? sp.q.trim() : "";
   const cat = typeof sp.cat === "string" && sp.cat in CATEGORY_LABEL ? sp.cat : "";
   const editId = typeof sp.edit === "string" ? sp.edit : "";
+  const below = sp.below === "1";
 
   const supabase = await createClient();
   const day = today();
@@ -53,10 +57,14 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
   const rates = new Map(((rateData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
   const sells = new Map(((sellData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
 
+  const isBelow = (id: string) => belowShopRate(rates.get(id)?.amount, sells.get(id)?.amount);
+  const belowCount = items.filter((i) => isBelow(i.id)).length;
+
   const needle = q.toLowerCase();
   const shown = items.filter(
     (i) =>
       (!cat || i.category === cat) &&
+      (!below || isBelow(i.id)) &&
       (!needle ||
         [i.sku, i.name, i.oe_cross ?? "", CATEGORY_LABEL[i.category] ?? ""].some((v) => v.toLowerCase().includes(needle))),
   );
@@ -79,11 +87,29 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
         prices they were created with.
       </div>
 
+      {belowCount > 0 && (
+        <div className="notice warning">
+          <b>
+            {belowCount} {belowCount === 1 ? "item has a" : "items have a"} Fleet Price below the Shop Rate.
+          </b>{" "}
+          {BELOW_SHOP_RATE_MESSAGE}.{" "}
+          {below ? (
+            <Link className="link" href={backHref(q, cat, false)}>
+              Show all items
+            </Link>
+          ) : (
+            <Link className="link" href={backHref(q, cat, true)}>
+              Show only these
+            </Link>
+          )}
+        </div>
+      )}
+
       {editing && (
         <div className="section" id="edit">
           <div className="row between">
             <h3>Edit {editing.sku}</h3>
-            <Link className="btn btn-secondary btn-small" href={backHref(q, cat)}>
+            <Link className="btn btn-secondary btn-small" href={backHref(q, cat, below)}>
               Close
             </Link>
           </div>
@@ -103,6 +129,7 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
       </details>
 
       <form className="toolbar" method="get" action="/cds/catalog">
+        {below && <input type="hidden" name="below" value="1" />}
         <input
           className="input search"
           style={{ maxWidth: 520 }}
@@ -123,7 +150,7 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
         <button className="btn btn-secondary" type="submit">
           Filter
         </button>
-        {(q || cat) && (
+        {(q || cat || below) && (
           <Link className="link small" href="/cds/catalog">
             Clear
           </Link>
@@ -179,14 +206,21 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
                     <span className="money">{money(sell)}</span>
                   </td>
                   <td className="num">
-                    <span className="money" style={margin !== null && margin < 0 ? { color: "var(--red)" } : undefined}>
+                    <span className={`money${margin !== null && margin < 0 ? ` ${styles.negative}` : ""}`}>
                       {money(margin)}
                     </span>
                     {pct !== null && <div className="small">{pct}%</div>}
+                    {belowShopRate(rate, sell) && (
+                      <div>
+                        <span className={styles.warnTag} title={BELOW_SHOP_RATE_MESSAGE}>
+                          Below shop rate
+                        </span>
+                      </div>
+                    )}
                   </td>
                   <td>{i.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}</td>
                   <td>
-                    <Link className="link small" href={`${backHref(q, cat)}${backHref(q, cat).includes("?") ? "&" : "?"}edit=${i.id}#edit`}>
+                    <Link className="link small" href={`${backHref(q, cat, below)}${backHref(q, cat, below).includes("?") ? "&" : "?"}edit=${i.id}#edit`}>
                       Edit
                     </Link>
                   </td>
@@ -204,10 +238,11 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
   );
 }
 
-function backHref(q: string, cat: string): string {
+function backHref(q: string, cat: string, below: boolean): string {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (cat) params.set("cat", cat);
+  if (below) params.set("below", "1");
   const s = params.toString();
   return s ? `/cds/catalog?${s}` : "/cds/catalog";
 }
@@ -261,14 +296,7 @@ function ItemFields({ item, rate, sell }: { item?: Item; rate?: string | null; s
             <input type="checkbox" name="active" defaultChecked={item?.active ?? true} /> Active
           </label>
         </div>
-        <div className="field">
-          <label htmlFor={`rate-${item?.id ?? "new"}`}>Shop Rate (USD)</label>
-          <input className="input" id={`rate-${item?.id ?? "new"}`} name="shop_rate" type="number" min="0" step="0.01" defaultValue={rate ?? ""} placeholder="What CDS pays the shop" />
-        </div>
-        <div className="field">
-          <label htmlFor={`fleet-${item?.id ?? "new"}`}>Fleet Price (USD)</label>
-          <input className="input" id={`fleet-${item?.id ?? "new"}`} name="fleet_price" type="number" min="0" step="0.01" defaultValue={sell ?? ""} placeholder="Default customer price" />
-        </div>
+        <CatalogPriceFields k={item?.id ?? "new"} rate={rate} sell={sell} />
       </div>
       {item && (
         <p className="small" style={{ marginTop: 0 }}>

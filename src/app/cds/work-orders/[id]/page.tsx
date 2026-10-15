@@ -3,6 +3,9 @@ import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ActionForm } from "@/components/cds-wo/ActionForm";
+import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
+import styles from "@/components/cds-wo/cds-wo.module.css";
+import type { SearchOption } from "@/components/SearchSelect";
 import {
   CUSTOMER_APPROVAL_LABEL,
   isUuid,
@@ -18,6 +21,7 @@ import {
 import { requireCds } from "@/lib/auth";
 import {
   ATTACHMENT_CATEGORY_LABEL,
+  CATEGORY_LABEL,
   COMPONENT_RESULT_LABEL,
   dateTime,
   DIRECTION_LABEL,
@@ -164,6 +168,44 @@ type Shipment = {
   shipment_internal: MaybeOne<{ notes: string | null; quoted_cost: number | null; actual_cost: number | null }>;
 };
 
+type ShopRow = {
+  id: string;
+  display_name: string;
+  kind: string;
+  city: string | null;
+  region: string | null;
+  can_egr: boolean | null;
+  can_oil_soaked: boolean | null;
+};
+
+const DEMO_RE = /\(demo\)/i;
+
+function yesNo(v: boolean | null): string {
+  return v === null ? "not set" : v ? "yes" : "no";
+}
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+/** Active customer locations per default shop, in pages (PostgREST returns at most 1000 rows). */
+async function loadLocationCounts(supabase: Supabase): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  for (let from = 0; from < 20000; from += 1000) {
+    const { data, error } = await supabase
+      .from("customer_locations")
+      .select("default_affiliate_id")
+      .eq("active", true)
+      .not("default_affiliate_id", "is", null)
+      .order("id")
+      .range(from, from + 999);
+    if (error || !data) break;
+    for (const r of data as { default_affiliate_id: string }[]) {
+      counts.set(r.default_affiliate_id, (counts.get(r.default_affiliate_id) ?? 0) + 1);
+    }
+    if (data.length < 1000) break;
+  }
+  return counts;
+}
+
 type WoEvent = { id: number; at: string; message: string; shop_visible: boolean; to_status: WoStatus | null };
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -214,7 +256,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   if (!woData) notFound();
   const wo = woData as unknown as WorkOrder;
 
-  const [internalRes, finRes, linesRes, compRes, authRes, attRes, shipRes, eventRes, shopsRes, catalogRes] =
+  const [internalRes, finRes, linesRes, compRes, authRes, attRes, shipRes, eventRes, shopsRes, catalogRes, locationCounts] =
     await Promise.all([
       supabase
         .from("work_order_internal")
@@ -250,8 +292,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         .eq("work_order_id", id)
         .order("created_at"),
       supabase.from("work_order_events").select("id, at, message, shop_visible, to_status").eq("work_order_id", id).order("at"),
-      supabase.from("affiliates").select("id, display_name, kind").eq("active", true).order("display_name"),
-      supabase.from("catalog_items").select("id, sku, name").eq("active", true).order("sku"),
+      supabase
+        .from("affiliates")
+        .select("id, display_name, kind, city, region, can_egr, can_oil_soaked")
+        .eq("active", true)
+        .order("display_name"),
+      supabase.from("catalog_items").select("id, sku, name, category, oe_cross").eq("active", true).order("sku"),
+      loadLocationCounts(supabase),
     ]);
 
   const internal = internalRes.data as unknown as Internal | null;
@@ -262,8 +309,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const attachments = (attRes.data ?? []) as Attachment[];
   const shipments = (shipRes.data ?? []) as unknown as Shipment[];
   const events = (eventRes.data ?? []) as WoEvent[];
-  const shops = (shopsRes.data ?? []) as { id: string; display_name: string; kind: string }[];
-  const catalog = (catalogRes.data ?? []) as { id: string; sku: string; name: string }[];
+  const shops = (shopsRes.data ?? []) as ShopRow[];
+  const catalog = (catalogRes.data ?? []) as { id: string; sku: string; name: string; category: string; oe_cross: string | null }[];
 
   // Signed links for files (bucket is private; checked as CDS above).
   const signed = new Map<string, string>();
@@ -312,6 +359,41 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const salesTax = round2((taxable * rate) / 100);
   const compName = new Map(components.map((c) => [c.id, `${c.component_type} #${c.seq}`]));
   const defaultShop = location?.default_affiliate_id ?? wo.affiliate_id ?? "";
+
+  // Dispatch picker: the location's default shop first, then the rest by name.
+  const locationDefault = location?.default_affiliate_id ?? null;
+  const shopOptions: SearchOption[] = [...shops]
+    .sort((a, b) => Number(b.id === locationDefault) - Number(a.id === locationDefault))
+    .map((s) => {
+      const marks = [
+        s.id === locationDefault ? "(location default)" : "",
+        declined && s.id === wo.affiliate_id ? "(declined)" : "",
+        // Demo shops carry "(demo)" in their name on staging; mark any other "demo" shop too.
+        /\bdemo\b/i.test(s.display_name) && !DEMO_RE.test(s.display_name) ? "(demo)" : "",
+        s.kind === "parts_supplier" ? "(parts supplier)" : "",
+      ].filter(Boolean);
+      const place = [s.city, s.region].filter(Boolean).join(", ") || "No city";
+      const n = locationCounts.get(s.id) ?? 0;
+      return {
+        value: s.id,
+        label: [s.display_name, ...marks].join(" "),
+        hint: `${place} - EGR ${yesNo(s.can_egr)} - oil soaked ${yesNo(s.can_oil_soaked)} - ${n} ${n === 1 ? "location" : "locations"}`,
+        keywords: s.kind === "parts_supplier" ? "supplier parts" : undefined,
+      };
+    });
+  const catalogOptions: SearchOption[] = catalog.map((c) => ({
+    value: c.id,
+    label: `${c.sku} - ${c.name}`,
+    hint: CATEGORY_LABEL[c.category] ?? c.category,
+    keywords: c.oe_cross ?? undefined,
+  }));
+
+  // Lines priced below what the shop is paid lose money on every unit.
+  const isNegative = (l: Line) => {
+    const p = one(l.work_order_line_pricing);
+    return l.shop_unit_rate !== null && p !== null && Number(p.customer_unit_price) < Number(l.shop_unit_rate);
+  };
+  const negativeLines = lines.filter(isNegative);
 
   return (
     <>
@@ -536,6 +618,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
 
           <section className="section">
             <h3>Services &amp; parts</h3>
+            {negativeLines.length > 0 && (
+              <div className="notice danger" role="status">
+                <b>Negative margin:</b> {negativeLines.length === 1 ? "1 line is" : `${negativeLines.length} lines are`} priced
+                below the shop rate ({negativeLines.map((l) => one(l.catalog_items)?.sku ?? "item").join(", ")}). Check the
+                customer price before dispatch and invoicing.
+              </div>
+            )}
             <div className="tablewrap">
               <table style={{ minWidth: 820 }}>
                 <thead>
@@ -563,11 +652,19 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                     const p = one(l.work_order_line_pricing);
                     const shopAmt = (l.shop_unit_rate ?? 0) * l.qty;
                     const custAmt = (p?.customer_unit_price ?? 0) * l.qty;
+                    const negative = isNegative(l);
                     return (
-                      <tr key={l.id}>
+                      <tr key={l.id} className={negative ? styles.negRow : undefined}>
                         <td>
                           <b>{item?.sku}</b>
                           <div className="small">{item?.name}</div>
+                          {negative && (
+                            <div>
+                              <span className={styles.negTag} title="The customer price is lower than the shop rate">
+                                Below shop rate
+                              </span>
+                            </div>
+                          )}
                           {l.origin !== "cds_order" && (
                             <span className="tag blue">{l.origin === "shop_added" ? "Added by shop" : "Extra work request"}</span>
                           )}
@@ -622,16 +719,14 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   <label className="small" htmlFor="line-item">
                     Catalog item
                   </label>
-                  <select id="line-item" name="catalog_item_id" required defaultValue="">
-                    <option value="" disabled>
-                      Select service or part...
-                    </option>
-                    {catalog.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.sku} - {c.name}
-                      </option>
-                    ))}
-                  </select>
+                  <FormSearchSelect
+                    id="line-item"
+                    name="catalog_item_id"
+                    options={catalogOptions}
+                    required
+                    placeholder="Type SKU, name or OE number..."
+                    limit={150}
+                  />
                 </div>
                 <div style={{ width: 90 }}>
                   <label className="small" htmlFor="line-qty">
@@ -788,17 +883,15 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               <ActionForm action={dispatchWorkOrder.bind(null, wo.id)} submitLabel="Approve & Dispatch to Affiliate" pendingLabel="Dispatching...">
                 <div className="field">
                   <label htmlFor="dispatch-shop">Shop</label>
-                  <select id="dispatch-shop" name="affiliate_id" defaultValue={defaultShop} required>
-                    <option value="">Select shop...</option>
-                    {shops.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.display_name}
-                        {s.id === location?.default_affiliate_id ? " (location default)" : ""}
-                        {declined && s.id === wo.affiliate_id ? " (declined)" : ""}
-                        {s.kind === "parts_supplier" ? " (parts supplier)" : ""}
-                      </option>
-                    ))}
-                  </select>
+                  <FormSearchSelect
+                    id="dispatch-shop"
+                    name="affiliate_id"
+                    options={shopOptions}
+                    defaultValue={defaultShop}
+                    required
+                    placeholder="Type shop name, city or state..."
+                    limit={150}
+                  />
                 </div>
               </ActionForm>
             </section>

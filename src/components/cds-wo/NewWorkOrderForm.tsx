@@ -2,6 +2,7 @@
 
 import { startTransition, useActionState, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { CATEGORY_LABEL, FULFILLMENT_LABEL, money } from "@/lib/format";
+import { SearchSelect, type SearchOption } from "@/components/SearchSelect";
 import type { ActionState } from "./ActionForm";
 
 export type LocationOption = {
@@ -11,6 +12,9 @@ export type LocationOption = {
   location_number: string | null;
   name: string;
   address_raw: string;
+  city: string | null;
+  region: string | null;
+  postal_code: string | null;
   fulfillment: string;
   routing_notes: string | null;
   dock_note: string | null;
@@ -22,6 +26,7 @@ export type CatalogOption = {
   sku: string;
   name: string;
   category: string;
+  oe_cross: string | null;
   fleetPrice: number | null;
 };
 
@@ -45,15 +50,31 @@ function codeNumber(l: LocationOption): number {
 
 const byNumber = (a: LocationOption, b: LocationOption) => codeNumber(a) - codeNumber(b) || a.code.localeCompare(b.code);
 
-/** Codes that start with the query first, then code or name containing it; each sorted by number. */
+const norm = (v: string | null | undefined) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+
+/** Everything a location can be found by besides its code and name: address, city, state, ZIP. */
+function addressText(l: LocationOption): string {
+  return norm(`${l.address_raw} ${l.city ?? ""} ${l.region ?? ""} ${l.postal_code ?? ""}`);
+}
+
+/**
+ * Codes that start with the query first, then code or name containing it, then address,
+ * city, state or ZIP matches (every typed word must match); each group sorted by number.
+ */
 function matchLocations(all: LocationOption[], query: string): LocationOption[] {
-  const q = query.trim().toLowerCase();
+  const q = norm(query);
   if (!q) return [...all].sort(byNumber).slice(0, MAX_SUGGESTIONS);
   const prefix = all.filter((l) => l.code.toLowerCase().startsWith(q) || (l.location_number ?? "").toLowerCase().startsWith(q));
-  const rest = all.filter(
-    (l) => !prefix.includes(l) && (l.code.toLowerCase().includes(q) || l.name.toLowerCase().includes(q)),
-  );
-  return [...prefix.sort(byNumber), ...rest.sort(byNumber)].slice(0, MAX_SUGGESTIONS);
+  const taken = new Set(prefix);
+  const named = all.filter((l) => !taken.has(l) && (l.code.toLowerCase().includes(q) || l.name.toLowerCase().includes(q)));
+  for (const l of named) taken.add(l);
+  const words = q.split(" ");
+  const other = all.filter((l) => {
+    if (taken.has(l)) return false;
+    const text = `${norm(l.code)} ${norm(l.name)} ${addressText(l)}`;
+    return words.every((w) => text.includes(w));
+  });
+  return [...prefix.sort(byNumber), ...named.sort(byNumber), ...other.sort(byNumber)].slice(0, MAX_SUGGESTIONS);
 }
 
 export function NewWorkOrderForm({ action, customers, locations, catalog, overrides }: Props) {
@@ -121,10 +142,21 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
     startTransition(() => formAction(fd));
   }
 
+  const catalogOptions: SearchOption[] = catalog.map((c) => {
+    const p = customerId ? priceFor(c.id) : { price: c.fleetPrice, source: "Fleet price" };
+    const price = p.price === null ? "no price" : `${money(p.price)}${customerId && p.source === "Customer price" ? " (customer price)" : ""}`;
+    return {
+      value: c.id,
+      label: `${c.sku} - ${c.name}`,
+      hint: `${CATEGORY_LABEL[c.category] ?? c.category} · ${price}`,
+      keywords: c.oe_cross ?? undefined,
+    };
+  });
+
   const linesTotal = lines.reduce((sum, l) => sum + (priceFor(l.catalog_item_id).price ?? 0) * l.qty, 0);
   const missingPrice = lines.some((l) => priceFor(l.catalog_item_id).price === null);
 
-  let locationHelper: ReactNode = "Start typing a location number or name. Results are sorted numerically by location number.";
+  let locationHelper: ReactNode = "Start typing a location number, name, address, city, state or ZIP. Location number matches come first, sorted numerically.";
   if (!customerId) locationHelper = "Choose a customer first.";
   else if (location)
     locationHelper = (
@@ -182,7 +214,7 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
               name="location_text"
               className="input"
               autoComplete="off"
-              placeholder="Type location # or name..."
+              placeholder="Type location #, name, city or ZIP..."
               maxLength={200}
               disabled={!customerId}
               required
@@ -229,6 +261,7 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
                       <div className="small">
                         {l.name} • {l.shopName ?? "No default shop"} • {FULFILLMENT_LABEL[l.fulfillment]}
                       </div>
+                      {l.address_raw && <div className="small">{l.address_raw}</div>}
                     </button>
                   ))
                 )}
@@ -310,17 +343,14 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
                 <label className="small" htmlFor="pick_item">
                   Catalog item
                 </label>
-                <select id="pick_item" value={pickItem} onChange={(e) => setPickItem(e.target.value)}>
-                  <option value="">Select service or part...</option>
-                  {catalog.map((c) => {
-                    const p = customerId ? priceFor(c.id) : { price: c.fleetPrice, source: "Fleet price" };
-                    return (
-                      <option key={c.id} value={c.id}>
-                        {c.sku} - {c.name} ({CATEGORY_LABEL[c.category] ?? c.category}) {p.price === null ? "no price" : money(p.price)}
-                      </option>
-                    );
-                  })}
-                </select>
+                <SearchSelect
+                  id="pick_item"
+                  options={catalogOptions}
+                  value={pickItem}
+                  onChange={(v) => setPickItem(v)}
+                  placeholder="Type SKU, name or OE number..."
+                  limit={150}
+                />
               </div>
               <div style={{ width: 90 }}>
                 <label className="small" htmlFor="pick_qty">

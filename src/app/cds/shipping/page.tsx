@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SearchSelect } from "@/components/SearchSelect";
 import { ActionForm, M2Button } from "@/components/cds-admin/ActionForm";
 import { one } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
@@ -121,16 +122,19 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
               <label htmlFor="work_order_id">
                 Work Order <span className="req">*</span>
               </label>
-              <select id="work_order_id" name="work_order_id" required defaultValue="">
-                <option value="" disabled>
-                  Choose an open work order
-                </option>
-                {openWos.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {woLabel(w.wo_number)} • {one(w.customers)?.name ?? "Customer"} • {w.location_label}
-                  </option>
-                ))}
-              </select>
+              <SearchSelect
+                id="work_order_id"
+                name="work_order_id"
+                required
+                placeholder="Type a WO number, customer or location"
+                emptyText="No open work order matches"
+                options={openWos.map((w) => ({
+                  value: w.id,
+                  label: woLabel(w.wo_number),
+                  hint: `${one(w.customers)?.name ?? "Customer"} • ${w.location_label}`,
+                  keywords: String(w.wo_number),
+                }))}
+              />
             </div>
             <ShipmentFields />
             <div className="row" style={{ margin: "4px 0 10px" }}>

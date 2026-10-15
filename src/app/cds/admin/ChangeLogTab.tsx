@@ -1,3 +1,4 @@
+import { changedFields, isVisibleChange } from "@/components/cds-admin/audit";
 import { one } from "@/components/cds-admin/server-utils";
 import { dateTime } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -31,7 +32,6 @@ const TABLE_LABEL: Record<string, string> = {
 };
 
 const ACTION_LABEL: Record<string, string> = { insert: "Added", update: "Changed", delete: "Removed" };
-const SKIP = new Set(["id", "updated_at", "created_at", "updated_by"]);
 // Fields that best name a row, in order of preference.
 const NAME_FIELDS = ["sku", "display_name", "full_name", "name", "code", "email", "key", "short_code", "billing_email"];
 
@@ -45,9 +45,7 @@ function summary(row: AuditRow): string {
   const data = row.new_data ?? row.old_data ?? {};
   if (row.action === "update" && row.old_data && row.new_data) {
     const oldData = row.old_data;
-    const changed = Object.keys(row.new_data).filter(
-      (k) => !SKIP.has(k) && JSON.stringify(oldData[k]) !== JSON.stringify(row.new_data![k]),
-    );
+    const changed = changedFields(oldData, row.new_data);
     if (changed.length === 0) return "No visible change";
     const parts = changed.slice(0, 4).map((k) => `${k}: ${show(oldData[k])} → ${show(row.new_data![k])}`);
     return parts.join("; ") + (changed.length > 4 ? `; and ${changed.length - 4} more` : "");
@@ -80,6 +78,8 @@ function actor(row: AuditRow) {
   return <span className="small">System</span>;
 }
 
+const SHOWN = 100;
+
 export async function ChangeLogTab() {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -87,8 +87,9 @@ export async function ChangeLogTab() {
     .select("id, at, table_name, row_id, action, old_data, new_data, actor_id, actor_name, profiles(full_name)")
     .order("at", { ascending: false })
     .order("id", { ascending: false })
-    .limit(100);
-  const rows = (data ?? []) as AuditRow[];
+    // Older rows that changed only updated_at are skipped, so read a few more than shown.
+    .limit(300);
+  const rows = ((data ?? []) as AuditRow[]).filter(isVisibleChange).slice(0, SHOWN);
 
   return (
     <>
