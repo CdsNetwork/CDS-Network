@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
 import { isUuid, LINES_LOCKED_STATUSES, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
+import { createInvoice, type CreatedInvoice } from "@/lib/qbo/api";
+import { QboError } from "@/lib/qbo/client";
+import { loadInvoice } from "@/lib/qbo/invoice-input";
+import { qboApi } from "@/lib/qbo/tokens";
 import { createClient } from "@/lib/supabase/server";
 
 const REQUEST_TYPES = ["service", "parts_only"];
@@ -276,4 +280,105 @@ export async function updateTax(woId: string, _prev: ActionState, formData: Form
     shop_visible: false,
   });
   return done(woId, "Tax settings saved.");
+}
+
+// ---------------------------------------------------------------- QuickBooks invoice
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+async function logSync(
+  supabase: Supabase,
+  woId: string,
+  status: "ok" | "rejected" | "error",
+  externalId: string | null,
+  error: string | null,
+) {
+  await supabase.from("integration_sync").insert({
+    system: "quickbooks",
+    entity: "invoice",
+    entity_id: woId,
+    external_id: externalId,
+    direction: "push",
+    status,
+    error: error ? error.slice(0, 2000) : null,
+  });
+}
+
+/**
+ * Creates the customer invoice in QuickBooks and marks the work order Invoiced.
+ *
+ * Never creates a second invoice for a work order:
+ *   * nothing is sent once the order has a QuickBooks invoice or is no longer Ready to Invoice;
+ *   * the request carries Intuit's requestid (the work order id), so a retry after a timeout,
+ *     a lost response or a failed portal update gets the original invoice back instead of
+ *     a new one. Only after QuickBooks has refused a request outright (HTTP 4xx, so nothing
+ *     was created) does the next attempt use a new id ("<id>-r<n>"), because QuickBooks
+ *     would otherwise answer the corrected request with the stored refusal.
+ */
+export async function createQuickBooksInvoice(woId: string): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const supabase = await createClient();
+
+  let invoice;
+  try {
+    invoice = await loadInvoice(supabase, woId);
+  } catch {
+    return { error: "The work order could not be read. Try again." };
+  }
+  if (!invoice) return { error: "Work order not found." };
+  if (invoice.qbInvoiceId) {
+    return { error: `This work order already has QuickBooks invoice ${invoice.qbInvoiceNumber ?? invoice.qbInvoiceId}.` };
+  }
+  if (invoice.status !== "ready_to_invoice") return { error: "Only a work order that is Ready to Invoice can be invoiced." };
+  if (!invoice.result.ok) return { error: `Fix these first: ${invoice.result.problems.join(" ")}` };
+  const payload = invoice.result.payload;
+
+  const { count, error: countError } = await supabase
+    .from("integration_sync")
+    .select("id", { count: "exact", head: true })
+    .eq("system", "quickbooks")
+    .eq("entity", "invoice")
+    .eq("entity_id", woId)
+    .eq("status", "rejected");
+  if (countError) return { error: "The QuickBooks history of this order could not be read. Try again." };
+  const requestId = count ? `${woId}-r${count}` : woId;
+
+  let created: CreatedInvoice;
+  try {
+    let api = await qboApi();
+    try {
+      created = await createInvoice(api, payload, requestId);
+    } catch (e) {
+      if (!(e instanceof QboError && e.unauthorized)) throw e;
+      // The access token was revoked or expired early: refresh once and send the same request.
+      api = await qboApi({ forceRefresh: true });
+      created = await createInvoice(api, payload, requestId);
+    }
+  } catch (e) {
+    const qbo = e instanceof QboError ? e : null;
+    const message = e instanceof Error ? e.message : "unknown error";
+    if (qbo?.faultType === "Config") return { error: message };
+    await logSync(supabase, woId, qbo?.rejected ? "rejected" : "error", null,
+      `${message}${qbo?.intuitTid ? ` (intuit_tid ${qbo.intuitTid})` : ""}`);
+    return {
+      error: qbo?.rejected
+        ? `QuickBooks refused the invoice: ${message}`
+        : `QuickBooks did not confirm the invoice (${message}). Try again: a retry never creates a second invoice.`,
+    };
+  }
+
+  await logSync(supabase, woId, "ok", created.Id, null);
+  const { error } = await supabase.rpc("cds_mark_invoiced", {
+    p_work_order: woId,
+    p_qb_invoice_id: created.Id,
+    p_qb_invoice_number: created.DocNumber ?? null,
+  });
+  if (error) {
+    await logSync(supabase, woId, "error", created.Id, `Invoice created in QuickBooks, portal not updated: ${error.message}`);
+    return {
+      error: `QuickBooks invoice ${created.DocNumber ?? created.Id} was created, but the work order could not be updated (${error.message}). Click again to finish; no second invoice is created.`,
+    };
+  }
+  return done(woId, `QuickBooks invoice ${created.DocNumber ?? created.Id} created. The work order is now Invoiced.`);
 }

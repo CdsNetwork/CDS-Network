@@ -1,0 +1,238 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildInvoicePayload,
+  cents,
+  type CustomerMapping,
+  type InvoiceLine,
+  type InvoiceLocation,
+  type InvoiceWorkOrder,
+  type ItemMapping,
+} from "@/lib/qbo/invoice";
+import { faultMessage, QboError } from "@/lib/qbo/client";
+import { qboConfig } from "@/lib/qbo/config";
+import { createState, decryptToken, encryptToken, verifyState } from "@/lib/qbo/secure";
+
+const SERVICE = "11111111-1111-4111-8111-111111111111";
+const PART = "22222222-2222-4222-8222-222222222222";
+const FREIGHT = "33333333-3333-4333-8333-333333333333";
+const EXEMPT = "44444444-4444-4444-8444-444444444444";
+
+const wo = (over: Partial<InvoiceWorkOrder> = {}): InvoiceWorkOrder => ({
+  id: "99999999-9999-4999-8999-999999999999",
+  woNumber: 100123,
+  market: "US",
+  customerName: "First Student",
+  poNumber: "PO-778",
+  unitNumber: "BUS 42",
+  taxParts: true,
+  taxLabor: false,
+  taxShipping: true,
+  customerTaxExempt: false,
+  ...over,
+});
+
+const lines: InvoiceLine[] = [
+  { catalogItemId: SERVICE, sku: "SVC-DPF", name: "DPF cleaning", qty: 1, customerUnitPrice: 325, taxClass: "labor" },
+  { catalogItemId: PART, sku: "GSK-1", name: "Gasket", qty: 2, customerUnitPrice: 12.5, taxClass: "parts" },
+  { catalogItemId: FREIGHT, sku: "SHIP", name: "Freight", qty: 1, customerUnitPrice: 40, taxClass: "shipping" },
+  { catalogItemId: EXEMPT, sku: "FEE", name: "Core fee", qty: 1, customerUnitPrice: 10, taxClass: "exempt" },
+];
+
+const customer: CustomerMapping = { qboCustomerId: "58", qboDisplayName: "First Student Inc" };
+const items: Record<string, ItemMapping> = {
+  [SERVICE]: { qboItemId: "1", qboItemName: "DPF Cleaning" },
+  [PART]: { qboItemId: "2", qboItemName: "Gasket" },
+  [FREIGHT]: { qboItemId: "3", qboItemName: "Shipping" },
+  [EXEMPT]: { qboItemId: "4", qboItemName: "Core Fee" },
+};
+const location: InvoiceLocation = {
+  label: "FS-DAL Dallas yard",
+  addressLine1: "1200 Example Rd",
+  city: "Dallas",
+  region: "tx",
+  postalCode: "75201",
+  country: "US",
+};
+
+function build(over: Partial<{
+  wo: InvoiceWorkOrder;
+  lines: InvoiceLine[];
+  customer: CustomerMapping | null;
+  items: Record<string, ItemMapping | undefined>;
+  aliases: Record<string, string>;
+  location: InvoiceLocation | null;
+}> = {}) {
+  return buildInvoicePayload(
+    over.wo ?? wo(),
+    over.lines ?? lines,
+    over.customer === undefined ? customer : over.customer,
+    over.items ?? items,
+    over.aliases ?? {},
+    over.location === undefined ? location : over.location,
+  );
+}
+
+describe("buildInvoicePayload", () => {
+  it("builds the invoice: customer, ship-to, lines at the customer price, no tax detail", () => {
+    const r = build();
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const p = r.payload;
+    expect(p.CustomerRef).toEqual({ value: "58", name: "First Student Inc" });
+    expect(p.ShipAddr).toEqual({
+      Line1: "1200 Example Rd",
+      City: "Dallas",
+      CountrySubDivisionCode: "TX",
+      PostalCode: "75201",
+      Country: "US",
+    });
+    expect(p.Line).toHaveLength(4);
+    expect(p.Line[1]).toEqual({
+      DetailType: "SalesItemLineDetail",
+      Amount: 25,
+      Description: "Gasket",
+      SalesItemLineDetail: { ItemRef: { value: "2", name: "Gasket" }, Qty: 2, UnitPrice: 12.5, TaxCodeRef: { value: "TAX" } },
+    });
+    expect(p).not.toHaveProperty("TxnTaxDetail");
+    expect(p).not.toHaveProperty("DocNumber");
+    expect(p.PrivateNote).toBe("Portal WO-100123 | PO PO-778");
+  });
+
+  it("marks lines taxable from the work order's tax flags; exempt lines are never taxable", () => {
+    const r = build();
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line.map((l) => l.SalesItemLineDetail.TaxCodeRef.value)).toEqual(["NON", "TAX", "TAX", "NON"]);
+
+    const flipped = build({ wo: wo({ taxParts: false, taxLabor: true, taxShipping: false }) });
+    if (!flipped.ok) throw new Error(flipped.problems.join("; "));
+    expect(flipped.payload.Line.map((l) => l.SalesItemLineDetail.TaxCodeRef.value)).toEqual(["TAX", "NON", "NON", "NON"]);
+  });
+
+  it("a tax exempt customer gets every line non-taxable", () => {
+    const r = build({ wo: wo({ customerTaxExempt: true }) });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line.every((l) => l.SalesItemLineDetail.TaxCodeRef.value === "NON")).toBe(true);
+  });
+
+  it("shows the customer's own part number in the description when there is one", () => {
+    const r = build({ aliases: { [PART]: "FS-99812" } });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line[1].Description).toBe("Part # FS-99812 - Gasket");
+    expect(r.payload.Line[0].Description).toBe("DPF cleaning");
+  });
+
+  it("lists every unmapped item once and the missing customer link instead of a payload", () => {
+    const twice = [...lines, { ...lines[1], qty: 1 }];
+    const r = build({ lines: twice, customer: null, items: { [SERVICE]: items[SERVICE], [FREIGHT]: items[FREIGHT], [EXEMPT]: items[EXEMPT] } });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.problems).toEqual([
+      "First Student is not linked to a QuickBooks customer. Link it on Admin > QuickBooks mappings.",
+      "GSK-1 Gasket is not linked to a QuickBooks item. Link it on Admin > QuickBooks mappings.",
+    ]);
+  });
+
+  it("needs a 5-digit ZIP, a street, a city and a state on the ship-to location", () => {
+    const noZip = build({ location: { ...location, postalCode: "752" } });
+    expect(noZip.ok).toBe(false);
+    if (!noZip.ok) expect(noZip.problems).toEqual(["Location FS-DAL Dallas yard needs a 5-digit ZIP code (Admin > Locations)."]);
+
+    const blank = build({ location: { ...location, addressLine1: " ", city: null, region: "Texas", postalCode: null } });
+    expect(blank.ok).toBe(false);
+    if (!blank.ok) {
+      expect(blank.problems).toEqual([
+        "Location FS-DAL Dallas yard needs its street, city, 2-letter state filled in (Admin > Locations).",
+        "Location FS-DAL Dallas yard needs a 5-digit ZIP code (Admin > Locations).",
+      ]);
+    }
+
+    const zip4 = build({ location: { ...location, postalCode: "75201-1234" } });
+    expect(zip4.ok).toBe(true);
+  });
+
+  it("needs a location at all, a US order and at least one line", () => {
+    const r = build({ location: null, lines: [], wo: wo({ market: "CA" }) });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.problems).toEqual([
+      "QuickBooks invoices are set up for US work orders only.",
+      "The work order has no customer location, so there is no ship-to address for sales tax.",
+      "The work order has no lines to invoice.",
+    ]);
+  });
+
+  it("reports a line without a customer price", () => {
+    const r = build({ lines: [{ ...lines[0], customerUnitPrice: null }] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problems).toEqual(["SVC-DPF has no customer price."]);
+  });
+
+  it("puts the PO in the internal note and the customer memo, and leaves both out when there is no PO", () => {
+    const r = build();
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.CustomerMemo).toEqual({ value: "PO PO-778 | Unit BUS 42" });
+
+    const noPo = build({ wo: wo({ poNumber: null, unitNumber: null }) });
+    if (!noPo.ok) throw new Error(noPo.problems.join("; "));
+    expect(noPo.payload.PrivateNote).toBe("Portal WO-100123");
+    expect(noPo.payload).not.toHaveProperty("CustomerMemo");
+  });
+
+  it("rounds line amounts to cents", () => {
+    expect(cents(1.005)).toBe(1.01);
+    const r = build({ lines: [{ ...lines[1], qty: 3, customerUnitPrice: 0.335 }] });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line[0].Amount).toBe(1.01);
+  });
+});
+
+describe("QuickBooks helpers", () => {
+  it("reads the configuration only when every value is set and the environment is valid", () => {
+    const env = { QBO_CLIENT_ID: "id", QBO_CLIENT_SECRET: "s", QBO_ENVIRONMENT: "sandbox", QBO_REDIRECT_URI: "https://x/cb" };
+    expect(qboConfig(env)?.environment).toBe("sandbox");
+    expect(qboConfig({ ...env, QBO_ENVIRONMENT: "prod" })).toBeNull();
+    expect(qboConfig({ ...env, QBO_CLIENT_SECRET: "" })).toBeNull();
+  });
+
+  it("turns an Intuit fault into a readable message", () => {
+    const body = {
+      Fault: {
+        type: "ValidationFault",
+        Error: [{ Message: "Invalid Reference Id", Detail: "Invalid Reference Id : Item assigned to this transaction has been deleted", code: "2500" }],
+      },
+    };
+    expect(faultMessage(body, "x")).toEqual({
+      message: "Invalid Reference Id: Invalid Reference Id : Item assigned to this transaction has been deleted",
+      type: "ValidationFault",
+      code: "2500",
+    });
+    expect(faultMessage(null, "fallback").message).toBe("fallback");
+  });
+
+  it("treats a 400 as a refusal (nothing created) but not a timeout, 401 or 5xx", () => {
+    expect(new QboError("x", 400).rejected).toBe(true);
+    expect(new QboError("x", 401).rejected).toBe(false);
+    expect(new QboError("x", 500).rejected).toBe(false);
+    expect(new QboError("x", 0).rejected).toBe(false);
+  });
+
+  it("accepts the OAuth state only from the same login, unexpired and unchanged", () => {
+    const now = Date.parse("2026-10-16T12:00:00Z");
+    const { state, cookie } = createState("secret", "user-1", now);
+    expect(verifyState("secret", cookie, state, "user-1", now + 1000)).toBe(true);
+    expect(verifyState("secret", cookie, state, "user-2", now)).toBe(false);
+    expect(verifyState("secret", cookie, "other", "user-1", now)).toBe(false);
+    expect(verifyState("other-secret", cookie, state, "user-1", now)).toBe(false);
+    expect(verifyState("secret", cookie, state, "user-1", now + 11 * 60 * 1000)).toBe(false);
+    expect(verifyState("secret", undefined, state, "user-1", now)).toBe(false);
+    const [s, p, exp, sig] = cookie.split(".");
+    expect(verifyState("secret", [s, p, String(Number(exp) + 9999), sig].join("."), state, "user-1", now)).toBe(false);
+  });
+
+  it("encrypts tokens so the stored value is not the token, and decrypts them back", () => {
+    const stored = encryptToken("secret", "access-token-value");
+    expect(stored).not.toContain("access-token-value");
+    expect(decryptToken("secret", stored)).toBe("access-token-value");
+    expect(() => decryptToken("other", stored)).toThrow();
+  });
+});

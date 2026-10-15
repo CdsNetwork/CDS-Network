@@ -35,11 +35,14 @@ import {
   type WoStatus,
   wrapCell,
 } from "@/lib/format";
+import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
+import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   addLine,
   addShipment,
+  createQuickBooksInvoice,
   decideAuthorization,
   dispatchWorkOrder,
   removeLine,
@@ -236,6 +239,94 @@ function Milestone2() {
   return <span className="small"> Milestone 2</span>;
 }
 
+/** Customer invoice in QuickBooks: create it when Ready to Invoice, show it once invoiced. */
+function InvoicePanel({
+  woId,
+  status,
+  qbo,
+  invoice,
+  loadError,
+}: {
+  woId: string;
+  status: WoStatus;
+  qbo: QboStatus | null;
+  invoice: InvoiceState | null;
+  loadError: boolean;
+}) {
+  const emailButton = (
+    <div className="row" style={{ marginTop: 10 }}>
+      {/* QuickBooks can send the invoice email (Invoice send); not built yet. */}
+      <button className="btn btn-secondary btn-small" type="button" disabled>
+        Email customer
+      </button>
+      <Milestone2 />
+    </div>
+  );
+
+  if (status === "invoiced" || invoice?.qbInvoiceId) {
+    return (
+      <section className="section panel-invoice">
+        <h3>Invoiced</h3>
+        {invoice?.qbInvoiceId ? (
+          <p>
+            QuickBooks invoice <b>{invoice.qbInvoiceNumber ?? `id ${invoice.qbInvoiceId}`}</b>
+            {invoice.invoicedAt ? <span className="small"> created {dateTime(invoice.invoicedAt)}</span> : null}
+          </p>
+        ) : (
+          <p className="small">No QuickBooks invoice is recorded for this order.</p>
+        )}
+        {emailButton}
+      </section>
+    );
+  }
+
+  const problems = invoice && !invoice.result.ok ? invoice.result.problems : [];
+  return (
+    <section className="section panel-invoice">
+      <h3>Ready to Invoice</h3>
+      {loadError && <div className="notice danger">The invoice details could not be loaded. Reload the page.</div>}
+      {qbo && !qbo.connected ? (
+        <div className="notice warning">
+          QuickBooks is not connected.{" "}
+          <Link className="link" href="/cds/admin?tab=settings">
+            Connect it in Admin &gt; Settings
+          </Link>{" "}
+          to create the invoice.
+        </div>
+      ) : (
+        <>
+          <p className="small">
+            Work is complete. This creates the customer invoice in QuickBooks
+            {qbo?.companyName ? ` (${qbo.companyName})` : ""}; QuickBooks calculates the sales tax from the ship-to address.
+          </p>
+          {problems.length > 0 && (
+            <div className="notice warning" role="status">
+              <b>Fix these before invoicing:</b>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {problems.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {qbo?.astEnabled === false && (
+            <div className="notice warning">Automated Sales Tax is off in QuickBooks: the invoice will have no sales tax.</div>
+          )}
+          <ActionForm
+            action={createQuickBooksInvoice.bind(null, woId)}
+            submitLabel="Create QuickBooks invoice"
+            pendingLabel="Creating invoice..."
+            buttonClass="btn btn-blue"
+            disabled={problems.length > 0 || loadError}
+            confirmText="Create the customer invoice in QuickBooks and mark this work order Invoiced?"
+          />
+        </>
+      )}
+      {emailButton}
+    </section>
+  );
+}
+
 function num(v: number | null, unit = ""): string {
   return v === null || v === undefined ? "-" : `${v}${unit}`;
 }
@@ -300,6 +391,18 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase.from("catalog_items").select("id, sku, name, category, oe_cross").eq("active", true).order("sku"),
       loadLocationCounts(supabase),
     ]);
+
+  // QuickBooks: only for orders that are ready to invoice or invoiced.
+  let qbo: QboStatus | null = null;
+  let invoice: InvoiceState | null = null;
+  let invoiceLoadError = false;
+  if (wo.status === "ready_to_invoice" || wo.status === "invoiced") {
+    try {
+      [qbo, invoice] = await Promise.all([qboStatus(supabase), loadInvoice(supabase, id)]);
+    } catch {
+      invoiceLoadError = true;
+    }
+  }
 
   const internal = internalRes.data as unknown as Internal | null;
   const fin = finRes.data as Financials | null;
@@ -950,17 +1053,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
             </section>
           )}
 
-          {wo.status === "ready_to_invoice" && (
-            <section className="section panel-invoice">
-              <h3>Ready to Invoice</h3>
-              <p className="small">
-                Work is complete. One action will create the customer invoice in QuickBooks and email it to the customer.
-              </p>
-              <button className="btn btn-blue" type="button" disabled>
-                Create in QuickBooks &amp; Email Customer
-              </button>
-              <Milestone2 />
-            </section>
+          {(wo.status === "ready_to_invoice" || wo.status === "invoiced") && (
+            <InvoicePanel woId={wo.id} status={wo.status} qbo={qbo} invoice={invoice} loadError={invoiceLoadError} />
           )}
 
           <section className="section">

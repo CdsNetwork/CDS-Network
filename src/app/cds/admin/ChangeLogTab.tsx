@@ -29,11 +29,15 @@ const TABLE_LABEL: Record<string, string> = {
   customer_billing: "Customer billing",
   customer_locations: "Location",
   app_settings: "Setting",
+  qbo_connection: "QuickBooks connection",
+  qbo_customer_map: "QuickBooks customer link",
+  qbo_item_map: "QuickBooks item link",
+  customer_item_aliases: "Customer part number",
 };
 
 const ACTION_LABEL: Record<string, string> = { insert: "Added", update: "Changed", delete: "Removed" };
 // Fields that best name a row, in order of preference.
-const NAME_FIELDS = ["sku", "display_name", "full_name", "name", "code", "email", "key", "short_code", "billing_email"];
+const NAME_FIELDS = ["sku", "display_name", "full_name", "name", "code", "email", "key", "short_code", "billing_email", "qbo_display_name", "qbo_item_name", "customer_part_number", "company_name"];
 
 function show(value: unknown): string {
   if (value === null || value === undefined || value === "") return "empty";

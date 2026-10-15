@@ -1,10 +1,22 @@
 import { ActionForm } from "@/components/cds-admin/ActionForm";
 import { dateTime } from "@/lib/format";
+import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createClient } from "@/lib/supabase/server";
 import { saveSettings } from "./actions";
+import { disconnectQuickBooks } from "./qbo-actions";
 
-export async function SettingsTab() {
+/** Messages for the result of the QuickBooks connect flow (?qbo=...). */
+const QBO_RESULT: Record<string, { ok: boolean; text: string }> = {
+  connected: { ok: true, text: "QuickBooks is connected." },
+  denied: { ok: false, text: "The connection was cancelled on the Intuit screen. Nothing was changed." },
+  state: { ok: false, text: "The connection could not be verified (the link expired or was opened in another browser). Start again." },
+  failed: { ok: false, text: "QuickBooks could not be connected. Try again; if it keeps failing, check the Intuit app settings." },
+  not_configured: { ok: false, text: "QuickBooks is not configured on this server yet." },
+};
+
+export async function SettingsTab({ qboResult }: { qboResult?: string }) {
   const supabase = await createClient();
+  const qbo = await qboStatus(supabase);
   const { data } = await supabase
     .from("app_settings")
     .select("value, updated_at, profiles(full_name)")
@@ -14,6 +26,8 @@ export async function SettingsTab() {
   const by = (Array.isArray(data?.profiles) ? data?.profiles[0] : data?.profiles) as { full_name: string } | null | undefined;
 
   return (
+    <>
+    <QuickBooksSection status={qbo} result={qboResult ? QBO_RESULT[qboResult] : undefined} />
     <div className="section">
       <h3>Dispatch</h3>
       <div className="notice warning">
@@ -33,6 +47,62 @@ export async function SettingsTab() {
           Last changed {dateTime(data.updated_at)}
           {by?.full_name ? ` by ${by.full_name}` : ""}.
         </p>
+      )}
+    </div>
+    </>
+  );
+}
+
+function QuickBooksSection({ status, result }: { status: QboStatus; result?: { ok: boolean; text: string } }) {
+  return (
+    <div className="section">
+      <h3>QuickBooks Online</h3>
+      {result && (
+        <div className={`notice${result.ok ? "" : " danger"}`} role="status">
+          {result.text}
+        </div>
+      )}
+      {status.error && <div className="notice danger">{status.error}</div>}
+      {!status.configured ? (
+        <p className="small">
+          QuickBooks is not configured on this server. The Intuit app keys (QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_ENVIRONMENT,
+          QBO_REDIRECT_URI) must be set first.
+        </p>
+      ) : status.connected ? (
+        <>
+          <p>
+            Connected to <b>{status.companyName ?? "a QuickBooks company"}</b>
+            {status.environment === "sandbox" && <span className="tag">Sandbox</span>}
+          </p>
+          <p className="small">
+            Connected {status.connectedAt ? dateTime(status.connectedAt) : ""}
+            {status.connectedByName ? ` by ${status.connectedByName}` : ""}.
+          </p>
+          {status.astEnabled === false && (
+            <div className="notice warning">
+              Automated Sales Tax is not turned on in this QuickBooks company, so invoices will not get sales tax calculated.
+              Turn on sales tax in QuickBooks (Taxes), then connect again.
+            </div>
+          )}
+          <ActionForm action={disconnectQuickBooks} submitLabel="Disconnect QuickBooks" submitClassName="btn btn-secondary" pendingLabel="Disconnecting..." />
+        </>
+      ) : (
+        <>
+          {status.environment && status.environment !== status.serverEnvironment ? (
+            <p className="small">
+              The saved connection is for the {status.environment} company, but this server uses {status.serverEnvironment}. Connect
+              again.
+            </p>
+          ) : (
+            <p className="small">Not connected. Invoices cannot be created in QuickBooks until it is connected.</p>
+          )}
+          <p className="small">
+            You will sign in to Intuit. Only a QuickBooks Primary Admin or Company Admin can approve the connection.
+          </p>
+          <a className="btn btn-blue" href="/cds/quickbooks/connect">
+            Connect to QuickBooks
+          </a>
+        </>
       )}
     </div>
   );

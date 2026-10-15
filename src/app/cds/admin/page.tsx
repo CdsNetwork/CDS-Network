@@ -3,6 +3,7 @@ import { requireCds } from "@/lib/auth";
 import { ChangeLogTab } from "./ChangeLogTab";
 import { CustomersTab } from "./CustomersTab";
 import { LocationsTab } from "./LocationsTab";
+import { QuickBooksTab } from "./QuickBooksTab";
 import { SettingsTab } from "./SettingsTab";
 import { SHOP_KIND_LABEL, ShopsTab } from "./ShopsTab";
 import { FULFILLMENT_LABEL } from "@/lib/format";
@@ -13,6 +14,7 @@ const TABS = [
   { key: "shops", label: "Shops" },
   { key: "locations", label: "Locations" },
   { key: "customers", label: "Customers" },
+  { key: "quickbooks", label: "QuickBooks mappings" },
   { key: "settings", label: "Settings" },
   { key: "log", label: "Change log" },
 ] as const;
@@ -40,7 +42,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/cds/admin"
       <div className="row between">
         <div className="title">
           <h1>Admin</h1>
-          <p>Staff logins, network shops, customer locations, customers, portal settings and the change log.</p>
+          <p>Staff logins, network shops, customer locations, customers, QuickBooks mappings, portal settings and the change log.</p>
         </div>
       </div>
 
@@ -81,7 +83,8 @@ export default async function AdminPage({ searchParams }: PageProps<"/cds/admin"
         />
       )}
       {tab === "customers" && <CustomersTab edit={edit} />}
-      {tab === "settings" && <SettingsTab />}
+      {tab === "quickbooks" && <QuickBooksTab />}
+      {tab === "settings" && <SettingsTab qboResult={str("qbo")} />}
       {tab === "log" && <ChangeLogTab />}
     </>
   );
