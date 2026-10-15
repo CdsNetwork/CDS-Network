@@ -58,13 +58,17 @@ export async function createLogin(
 export async function deleteLogin(id: string): Promise<void> {
   const index = createdUsers.indexOf(id);
   if (index >= 0) createdUsers.splice(index, 1);
-  await admin.auth.admin.deleteUser(id);
+  const { error } = await admin.auth.admin.deleteUser(id);
+  if (error) throw new Error(`could not delete login ${id}: ${error.message}`);
 }
 
 export async function deleteLogins(): Promise<void> {
+  const failed: string[] = [];
   for (const id of createdUsers.splice(0)) {
-    await admin.auth.admin.deleteUser(id);
+    const { error } = await admin.auth.admin.deleteUser(id);
+    if (error) failed.push(`${id}: ${error.message}`);
   }
+  if (failed.length) throw new Error(`could not delete logins: ${failed.join("; ")}`);
 }
 
 /** Unwraps a Supabase response and fails loudly on error. */

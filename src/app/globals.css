@@ -44,7 +44,10 @@ aside.sidebar { background: #fff; border-right: 1px solid var(--line); padding: 
    a single word that is longer than the whole column. */
 .main { overflow-wrap: anywhere; }
 .main table { overflow-wrap: normal; }
-.main td { overflow-wrap: break-word; }
+.main td { overflow-wrap: anywhere; max-width: 320px; }
+/* Amounts, badges and labels never break mid-value. */
+.money, .bigAmount, .amount, .status, .pill, .tag, .badge, td.num, th { overflow-wrap: normal; white-space: nowrap; }
+.money, .bigAmount, .amount { flex-shrink: 0; }
 .row > *, .summaryrow > *, .bottomTotal > *, .footerAction > *,
 .cards > *, .split > *, .grid2 > *, .grid3 > *, .grid4 > *,
 .attentionGrid > *, .shopGrid > *, .attachmentGrid > * { min-width: 0; }

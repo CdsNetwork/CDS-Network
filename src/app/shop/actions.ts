@@ -380,7 +380,7 @@ export async function registerUpload(
     file_name: label,
     mime_type: stored.type,
     size_bytes: stored.size,
-    note: meta.note?.trim().slice(0, 1000) || null,
+    note: meta.note?.trim().slice(0, 2000) || null,
     uploaded_by: profile.id,
     shop_visible: true,
   });

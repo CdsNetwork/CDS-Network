@@ -801,3 +801,33 @@ describe("QA round 1 follow-up: files and requests after reassignment", () => {
     expect((await must(cds.client.from("attachments").select("id").eq("work_order_id", wo.id))).length).toBe(1);
   });
 });
+
+describe("QA round 2 regressions (2026-10-15)", () => {
+  it("a login that has history (events, components, audit rows) can still be deleted", async () => {
+    const shopD = await insertOne("affiliates", { short_code: `D-${runId}`, display_name: `Shop D ${runId}` });
+    const login = await createLogin("shop", shopD.id);
+    const wo = await insertOne("work_orders", {
+      customer_id: f.customerY,
+      location_label: `TEST-${runId}`,
+      fulfillment: "shipping",
+      affiliate_id: shopD.id,
+      status: "awaiting_acceptance",
+      unit_number: "Q2-1",
+      requested_work: "Test cleaning",
+    });
+    await must(login.client.rpc("shop_accept_work_order", { p_work_order: wo.id, p_pickup_window: null }));
+    await must(
+      login.client.rpc("shop_save_component", {
+        p_work_order: wo.id, p_component: null, p_type: "EGR", p_manufacturer: "M", p_part_number: "P",
+        p_serial_number: "S", p_dp_before: null, p_dp_after: null, p_weight_before_g: null,
+        p_weight_after_g: null, p_result: "passed", p_result_note: null,
+      }),
+    );
+    await deleteLogin(login.id);
+    const events = await must(admin.from("work_order_events").select("actor_id").eq("work_order_id", wo.id));
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((e: { actor_id: string | null }) => e.actor_id === null)).toBe(true);
+    await admin.from("work_orders").delete().eq("id", wo.id);
+    await admin.from("affiliates").delete().eq("id", shopD.id);
+  });
+});
