@@ -60,6 +60,7 @@ export function AuthRequestForm({
             name="note"
             rows={4}
             required
+            maxLength={2000}
             placeholder="Describe what was found and why approval is needed"
           />
         </div>

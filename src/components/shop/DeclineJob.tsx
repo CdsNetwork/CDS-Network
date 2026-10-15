@@ -40,6 +40,7 @@ export function DeclineJob({ action }: { action: (prev: ActionState, fd: FormDat
             name="reason"
             rows={3}
             required
+            maxLength={2000}
             placeholder="For example: no capacity this week, cannot service this component"
           />
         </div>

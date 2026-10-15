@@ -6,9 +6,11 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const notice =
     reason === "no-access"
       ? "This login has no access yet. Ask CDS to set up your account."
-      : reason === "link-expired"
-        ? "That link has expired or was already used. Ask CDS for a new invite, or reset your password."
-        : undefined;
+      : reason === "signed-out"
+        ? "Your session has ended. Sign in again to continue."
+        : reason === "link-expired"
+          ? "That link has expired or was already used. Ask CDS for a new invite, or reset your password."
+          : undefined;
   return (
     <main className="auth-page">
       <div className="auth-card">

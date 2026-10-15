@@ -674,12 +674,130 @@ describe("CDS login", () => {
   it("keeps prices snapshotted on existing lines when the price list changes", async () => {
     await must(admin.from("sell_prices").update({ amount: 99 }).eq("catalog_item_id", f.part));
     await must(admin.from("shop_rates").update({ amount: 50 }).eq("catalog_item_id", f.part));
+    try {
+      const pricing = await must(
+        cds.client.from("work_order_line_pricing").select("customer_unit_price").eq("line_id", f.linesA[1]).single(),
+      );
+      expect(Number(pricing.customer_unit_price)).toBe(12);
+      const line = await must(cds.client.from("work_order_lines").select("shop_unit_rate").eq("id", f.linesA[1]).single());
+      expect(Number(line.shop_unit_rate)).toBe(10);
+    } finally {
+      // Later tests rely on the fixture prices.
+      await must(admin.from("sell_prices").update({ amount: 12 }).eq("catalog_item_id", f.part));
+      await must(admin.from("shop_rates").update({ amount: 10 }).eq("catalog_item_id", f.part));
+    }
+  });
+});
 
-    const pricing = await must(
-      cds.client.from("work_order_line_pricing").select("customer_unit_price").eq("line_id", f.linesA[1]).single(),
+describe("QA round 1 regressions (2026-10-15)", () => {
+  const newWo = async (affiliate: string | null, status: string, unit: string, fulfillment = "shipping") => {
+    const wo = await insertOne("work_orders", {
+      customer_id: f.customerX,
+      location_label: `TEST-${runId}`,
+      fulfillment,
+      affiliate_id: affiliate,
+      status,
+      unit_number: unit,
+      requested_work: "Test cleaning",
+    });
+    await must(admin.from("work_order_internal").insert({ work_order_id: wo.id }));
+    return wo;
+  };
+
+  it("BUG-1: after reassignment the new shop sees no history naming the previous shop", async () => {
+    const wo = await newWo(null, "pending_review", "Q1-1");
+    await must(admin.from("work_order_lines").insert({ work_order_id: wo.id, catalog_item_id: f.service, qty: 1 }));
+    await must(cds.client.rpc("cds_dispatch_work_order", { p_work_order: wo.id, p_affiliate: f.shopA }));
+    await must(cds.client.rpc("cds_set_status", { p_work_order: wo.id, p_status: "pending_review", p_note: null }));
+    await must(cds.client.rpc("cds_dispatch_work_order", { p_work_order: wo.id, p_affiliate: f.shopB }));
+
+    const events = await must(shopB.client.from("work_order_events").select("message").eq("work_order_id", wo.id));
+    expect(events.length).toBeGreaterThan(0);
+    for (const e of events as { message: string }[]) {
+      expect(e.message).not.toContain(`Shop A ${runId}`);
+    }
+  });
+
+  it("BUG-2: a job moved to another shop does not show the previous shop's work", async () => {
+    const wo = await newWo(f.shopA, "awaiting_acceptance", "Q1-2");
+    await must(admin.from("work_order_lines").insert({ work_order_id: wo.id, catalog_item_id: f.service, qty: 1 }));
+    await must(shopA.client.rpc("shop_accept_work_order", { p_work_order: wo.id, p_pickup_window: null }));
+    await must(
+      shopA.client.rpc("shop_save_component", {
+        p_work_order: wo.id, p_component: null, p_type: "DPF", p_manufacturer: "M", p_part_number: "P",
+        p_serial_number: `SN-Q1-${runId}`, p_dp_before: 4, p_dp_after: 1, p_weight_before_g: 100,
+        p_weight_after_g: 90, p_result: "cleaned", p_result_note: null,
+      }),
     );
-    expect(Number(pricing.customer_unit_price)).toBe(12);
-    const line = await must(cds.client.from("work_order_lines").select("shop_unit_rate").eq("id", f.linesA[1]).single());
-    expect(Number(line.shop_unit_rate)).toBe(10);
+    await must(shopA.client.rpc("shop_add_part", { p_work_order: wo.id, p_catalog_item: f.part, p_qty: 2 }));
+    await must(
+      shopA.client.rpc("shop_request_authorization", { p_work_order: wo.id, p_catalog_item: f.service, p_qty: 1, p_note: "A asks" }),
+    );
+    await must(shopA.client.rpc("shop_decline_work_order", { p_work_order: wo.id, p_reason: "Cannot do it" }));
+    await must(cds.client.rpc("cds_dispatch_work_order", { p_work_order: wo.id, p_affiliate: f.shopB }));
+
+    expect(await must(shopB.client.from("work_order_components").select("id").eq("work_order_id", wo.id))).toEqual([]);
+    expect(await must(shopB.client.from("authorization_requests").select("id").eq("work_order_id", wo.id))).toEqual([]);
+    const lines = await must(shopB.client.from("work_order_lines").select("origin").eq("work_order_id", wo.id));
+    expect(lines.map((l: { origin: string }) => l.origin)).toEqual(["cds_order"]);
+    // CDS still has the record of what shop A entered.
+    expect((await must(cds.client.from("work_order_components").select("id").eq("work_order_id", wo.id))).length).toBe(1);
+  });
+
+  it("BUG-4: dispatching after a default rate change keeps the rate the line was created with", async () => {
+    const wo = await newWo(null, "pending_review", "Q1-4");
+    await must(admin.from("work_order_lines").insert({ work_order_id: wo.id, catalog_item_id: f.part, qty: 1 }));
+    await must(cds.client.rpc("cds_set_price", { p_kind: "shop_rate", p_catalog_item: f.part, p_customer: null, p_amount: 10.5 }));
+    try {
+      await must(cds.client.rpc("cds_dispatch_work_order", { p_work_order: wo.id, p_affiliate: f.shopA }));
+      const lines = await must(shopA.client.from("work_order_lines").select("shop_unit_rate").eq("work_order_id", wo.id));
+      expect(lines.map((l: { shop_unit_rate: string }) => Number(l.shop_unit_rate))).toEqual([10]);
+    } finally {
+      await must(cds.client.rpc("cds_set_price", { p_kind: "shop_rate", p_catalog_item: f.part, p_customer: null, p_amount: 10 }));
+    }
+  });
+
+  it("BUG-6: free text is limited in length", async () => {
+    const { error } = await shopA.client.rpc("shop_decline_work_order", { p_work_order: f.woA, p_reason: "x".repeat(10_000) });
+    expect(error?.message).toMatch(/too long/i);
+    const row = await must(admin.from("work_orders").select("status").eq("id", f.woA).single());
+    expect(row.status).toBe("awaiting_acceptance");
+  });
+});
+
+describe("QA round 1 follow-up: files and requests after reassignment", () => {
+  it("the new shop cannot download the previous shop's file, and its pending request is withdrawn", async () => {
+    const wo = await insertOne("work_orders", {
+      customer_id: f.customerX,
+      location_label: `TEST-${runId}`,
+      fulfillment: "shipping",
+      affiliate_id: f.shopA,
+      status: "accepted",
+      unit_number: "Q1-F",
+      requested_work: "Test cleaning",
+    });
+    await must(admin.from("work_order_internal").insert({ work_order_id: wo.id }));
+    await must(admin.from("work_order_lines").insert({ work_order_id: wo.id, catalog_item_id: f.service, qty: 1 }));
+    const path = `${wo.id}/shop-a-photo.txt`;
+    const { error: uploadError } = await admin.storage
+      .from("wo-files")
+      .upload(path, new Blob(["photo"], { type: "text/plain" }), { upsert: true });
+    if (uploadError) throw uploadError;
+    await must(
+      admin.from("attachments").insert({ work_order_id: wo.id, category: "other", storage_path: path, file_name: "a.txt" }),
+    );
+    const req = await must(
+      shopA.client.rpc("shop_request_authorization", { p_work_order: wo.id, p_catalog_item: f.service, p_qty: 1, p_note: "A asks" }),
+    );
+    expect((await shopA.client.storage.from("wo-files").download(path)).error).toBeNull();
+
+    await must(cds.client.from("work_orders").update({ affiliate_id: f.shopB }).eq("id", wo.id));
+
+    const download = await shopB.client.storage.from("wo-files").download(path);
+    expect(download.error).not.toBeNull();
+    expect(await must(shopB.client.from("attachments").select("id").eq("work_order_id", wo.id))).toEqual([]);
+    const row = await must(cds.client.from("authorization_requests").select("status").eq("id", req).single());
+    expect(row.status).toBe("withdrawn");
+    expect((await must(cds.client.from("attachments").select("id").eq("work_order_id", wo.id))).length).toBe(1);
   });
 });

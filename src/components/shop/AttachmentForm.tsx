@@ -3,6 +3,7 @@
 import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { prepareUpload, registerUpload, type UploadMeta } from "@/app/shop/actions";
 import { ATTACHMENT_CATEGORY_LABEL } from "@/lib/format";
+import { isNextControlError } from "@/lib/next-errors";
 import { browserClient } from "./browserClient";
 import type { Option } from "./types";
 
@@ -93,7 +94,12 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
           continue;
         }
         update(i, "done");
-      } catch {
+      } catch (err) {
+        // A redirect (session ended) is already taking the browser to /login.
+        if (isNextControlError(err)) {
+          setBusy(false);
+          return;
+        }
         failed++;
         update(i, "error", "Upload did not go through. Check your connection and try again.");
       }
@@ -150,7 +156,7 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
       {names.length > 0 && !busy && <p className="small">Selected: {names.join(", ")}</p>}
       <div className="field">
         <label htmlFor="att-note">Note</label>
-        <input className="input" id="att-note" name="note" placeholder="Optional note" maxLength={1000} />
+        <input className="input" id="att-note" name="note" placeholder="Optional note" maxLength={2000} />
       </div>
 
       {progress.length > 0 && (

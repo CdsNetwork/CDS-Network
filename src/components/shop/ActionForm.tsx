@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useActionState, useEffect, useRef, type FormEvent, type ReactNode } from "react";
+import { unstable_rethrow } from "next/navigation";
 import type { ActionState } from "./types";
 
 type Action = (prev: ActionState, fd: FormData) => Promise<ActionState>;
@@ -13,9 +14,9 @@ function safe<A extends unknown[]>(action: (...args: A) => Promise<ActionState>,
     try {
       return await action(...args);
     } catch (err) {
-      // Let Next.js handle its own control flow (redirect, notFound).
-      const digest = (err as { digest?: unknown } | null)?.digest;
-      if (typeof digest === "string" && digest.startsWith("NEXT_")) throw err;
+      // Let Next.js handle its own control flow (redirect to /login when the session
+      // has ended, notFound).
+      unstable_rethrow(err);
       return { error: message };
     }
   };

@@ -98,7 +98,7 @@ export function ComponentCard({
               <label htmlFor={key(name)}>
                 {label} <span className="req">*</span>
               </label>
-              <input className="input" id={key(name)} name={name} defaultValue={value ?? ""} autoComplete="off" />
+              <input className="input" id={key(name)} name={name} defaultValue={value ?? ""} autoComplete="off" maxLength={100} />
             </div>
           ))}
           {!isEgr && (
@@ -178,7 +178,7 @@ export function ComponentCard({
               <label htmlFor={key("note")}>
                 Failure / Condemn Reason <span className="req">*</span>
               </label>
-              <textarea id={key("note")} name="result_note" rows={2} required defaultValue={c.result_note ?? ""} />
+              <textarea id={key("note")} name="result_note" rows={2} required maxLength={2000} defaultValue={c.result_note ?? ""} />
             </div>
             <p className="small" style={{ color: "inherit", margin: 0 }}>
               <strong>Damage / Condition Photo *</strong>{" "}

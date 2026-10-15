@@ -1,6 +1,7 @@
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { safeNext } from "@/lib/safe-next";
 
 /**
  * Landing point for invite and password-reset emails. Supports the token_hash link
@@ -21,8 +22,4 @@ export async function GET(request: NextRequest) {
     ok = !(await supabase.auth.exchangeCodeForSession(code)).error;
   }
   return NextResponse.redirect(new URL(ok ? next : "/login?reason=link-expired", origin));
-}
-
-function safeNext(value: string | null): string {
-  return value && value.startsWith("/") && !value.startsWith("//") ? value : "/account/password";
 }

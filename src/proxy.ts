@@ -27,7 +27,12 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const isPublic = PUBLIC_PATHS.some((p) => request.nextUrl.pathname.startsWith(p));
-  if (!user && !isPublic) {
+  // A server action call (POST with a Next-Action header) must not get a plain redirect:
+  // the browser would follow it and hand the action an HTML page, which the form shows as
+  // a connection error. Each action checks the login itself (requireShop / requireCds)
+  // and redirects to /login in a way the client understands.
+  const isServerAction = request.method === "POST" && request.headers.has("next-action");
+  if (!user && !isPublic && !isServerAction) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";

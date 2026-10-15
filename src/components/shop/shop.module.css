@@ -49,6 +49,10 @@
   flex-wrap: wrap;
 }
 
+.lineRow > * {
+  min-width: 0;
+}
+
 .lineMoney {
   display: flex;
   align-items: center;

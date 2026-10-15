@@ -438,6 +438,7 @@ export function JobDetail({ data, tab }: { data: JobDetailData; tab: QueueTab })
                 id="invoice-ref"
                 name="invoice_ref"
                 required
+                maxLength={100}
                 placeholder="Enter invoice or billing reference #"
                 defaultValue={job.affiliate_invoice_ref ?? ""}
               />

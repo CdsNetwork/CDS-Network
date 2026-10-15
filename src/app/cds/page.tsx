@@ -31,13 +31,17 @@ type WoRow = {
   affiliates: Shop | Shop[];
 };
 
-type AttentionWo = WoRow & { work_order_internal: { review_reason: string | null } | { review_reason: string | null }[] | null };
+type AttentionWo = WoRow & {
+  updated_at: string;
+  work_order_internal: { review_reason: string | null } | { review_reason: string | null }[] | null;
+};
 
 type ProblemShipment = {
   id: string;
   carrier: string | null;
   tracking_number: string | null;
   status: string;
+  updated_at: string;
   work_orders: WoRow | WoRow[] | null;
 };
 
@@ -55,7 +59,12 @@ type AttentionItem = {
   title: string;
   wo: WoRow;
   detail: string;
+  /** When the item last changed, for newest-first ordering. */
+  at: string;
 };
+
+/** Cards shown in Needs Attention; the rest are reachable through the table filter. */
+const ATTENTION_SHOWN = 12;
 
 const WO_COLUMNS =
   "id, wo_number, status, location_label, unit_number, po_number, customers(name), affiliates(display_name)";
@@ -100,17 +109,23 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
     list = list.or(ors.join(","));
   }
 
-  const [listRes, reviewRes, shipRes, inProgress, toInvoice, pendingReview, invoiced] = await Promise.all([
-    list,
+  // Declined jobs and pending reviews are fetched separately, newest first, so a burst
+  // of pending reviews can never push a declined job out of the queue.
+  const attentionQuery = (status: WoStatus) =>
     supabase
       .from("work_orders")
-      .select(`${WO_COLUMNS}, work_order_internal(review_reason)`)
-      .in("status", ["pending_review", "rejected_by_affiliate"])
-      .order("created_at", { ascending: true })
-      .limit(100),
+      .select(`${WO_COLUMNS}, updated_at, work_order_internal(review_reason)`)
+      .eq("status", status)
+      .order("updated_at", { ascending: false })
+      .limit(100);
+
+  const [listRes, declinedRes, reviewRes, shipRes, inProgress, toInvoice, pendingReview, invoiced] = await Promise.all([
+    list,
+    attentionQuery("rejected_by_affiliate"),
+    attentionQuery("pending_review"),
     supabase
       .from("shipments")
-      .select(`id, carrier, tracking_number, status, work_orders(${WO_COLUMNS})`)
+      .select(`id, carrier, tracking_number, status, updated_at, work_orders(${WO_COLUMNS})`)
       .in("status", [...SHIPMENT_PROBLEM_STATUSES])
       .order("updated_at", { ascending: false })
       .limit(100),
@@ -144,7 +159,8 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
 
   // Needs Attention items.
   const attention: AttentionItem[] = [];
-  for (const wo of (reviewRes.data ?? []) as unknown as AttentionWo[]) {
+  const attentionWos = [...(declinedRes.data ?? []), ...(reviewRes.data ?? [])] as unknown as AttentionWo[];
+  for (const wo of attentionWos) {
     const reason = one(wo.work_order_internal)?.review_reason;
     if (wo.status === "rejected_by_affiliate") {
       attention.push({
@@ -153,6 +169,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
         title: "Declined by shop",
         wo,
         detail: reason || "The shop declined this job. Choose a shop and dispatch it again.",
+        at: wo.updated_at,
       });
     } else {
       attention.push({
@@ -161,6 +178,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
         title: "Review required",
         wo,
         detail: reason || "A required routing or request field could not be validated automatically.",
+        at: wo.updated_at,
       });
     }
   }
@@ -175,9 +193,12 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
       detail: `${s.carrier ?? "Carrier"} • ${SHIPMENT_STATUS_LABEL[s.status] ?? s.status} • ${
         s.tracking_number ?? "no tracking #"
       }. Customer update may be required.`,
+      at: s.updated_at,
     });
   }
-  const shownAttention = attention.slice(0, 9);
+  // Red (declined jobs, carrier exceptions) first, then amber; newest first in each group.
+  attention.sort((a, b) => Number(b.red) - Number(a.red) || Date.parse(b.at) - Date.parse(a.at));
+  const shownAttention = attention.slice(0, ATTENTION_SHOWN);
 
   const kpis = [
     { k: "Needs Attention", v: attention.length, sub: "CDS action or exception", href: "#attention" },
@@ -187,7 +208,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
     { k: "Pending Review", v: pendingReview.count ?? 0, sub: "Not sent to a shop yet", href: "/cds?status=pending_review#orders" },
   ];
 
-  const loadError = listRes.error ?? reviewRes.error ?? shipRes.error;
+  const loadError = listRes.error ?? declinedRes.error ?? reviewRes.error ?? shipRes.error;
 
   return (
     <>
@@ -271,7 +292,10 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
             </div>
             {attention.length > shownAttention.length && (
               <p className="small">
-                Showing {shownAttention.length} of {attention.length}. Filter the table below by status to see the rest.
+                Showing {shownAttention.length} of {attention.length}, most urgent first.{" "}
+                <Link className="link" href="/cds?status=attention#orders">
+                  See all Pending Review and Declined orders
+                </Link>
               </p>
             )}
           </>

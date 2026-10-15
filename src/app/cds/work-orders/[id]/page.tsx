@@ -435,11 +435,11 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   </div>
                   <div className="field">
                     <label htmlFor="ship-service">Service level</label>
-                    <input id="ship-service" name="service_level" className="input" placeholder="Ground" />
+                    <input id="ship-service" name="service_level" className="input" placeholder="Ground" maxLength={100} />
                   </div>
                   <div className="field">
                     <label htmlFor="ship-tracking">Tracking #</label>
-                    <input id="ship-tracking" name="tracking_number" className="input" />
+                    <input id="ship-tracking" name="tracking_number" className="input" maxLength={100} />
                   </div>
                   <div className="field">
                     <label htmlFor="ship-status">Status</label>
@@ -462,7 +462,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 </div>
                 <div className="field">
                   <label htmlFor="ship-notes">Notes (CDS only)</label>
-                  <input id="ship-notes" name="notes" className="input" />
+                  <input id="ship-notes" name="notes" className="input" maxLength={2000} />
                 </div>
               </ActionForm>
             </details>
@@ -659,11 +659,11 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                             <label htmlFor={`appr-by-${r.id}`}>
                               Customer approved by <span className="req">*</span>
                             </label>
-                            <input id={`appr-by-${r.id}`} name="customer_approved_by" className="input" required placeholder="Name at the customer" />
+                            <input id={`appr-by-${r.id}`} name="customer_approved_by" className="input" required maxLength={200} placeholder="Name at the customer" />
                           </div>
                           <div className="field">
                             <label htmlFor={`appr-note-${r.id}`}>Note (CDS only)</label>
-                            <input id={`appr-note-${r.id}`} name="decision_note" className="input" />
+                            <input id={`appr-note-${r.id}`} name="decision_note" className="input" maxLength={2000} />
                           </div>
                         </ActionForm>
                         <ActionForm
@@ -674,7 +674,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                         >
                           <div className="field">
                             <label htmlFor={`decl-note-${r.id}`}>Reason (optional, CDS only)</label>
-                            <input id={`decl-note-${r.id}`} name="decision_note" className="input" />
+                            <input id={`decl-note-${r.id}`} name="decision_note" className="input" maxLength={2000} />
                           </div>
                         </ActionForm>
                       </div>
@@ -797,22 +797,22 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                     <label htmlFor="edit-unit">
                       Unit # <span className="req">*</span>
                     </label>
-                    <input id="edit-unit" name="unit_number" className="input" defaultValue={wo.unit_number} required />
+                    <input id="edit-unit" name="unit_number" className="input" defaultValue={wo.unit_number} required maxLength={100} />
                   </div>
                   <div className="field">
                     <label htmlFor="edit-po">PO #</label>
-                    <input id="edit-po" name="po_number" className="input" defaultValue={wo.po_number ?? ""} />
+                    <input id="edit-po" name="po_number" className="input" defaultValue={wo.po_number ?? ""} maxLength={100} />
                   </div>
                 </div>
                 <div className="field">
                   <label htmlFor="edit-loc">
                     Location label <span className="req">*</span>
                   </label>
-                  <input id="edit-loc" name="location_label" className="input" defaultValue={wo.location_label} required />
+                  <input id="edit-loc" name="location_label" className="input" defaultValue={wo.location_label} required maxLength={200} />
                 </div>
                 <div className="field">
                   <label htmlFor="edit-addr">Site / ship-to address</label>
-                  <input id="edit-addr" name="site_address" className="input" defaultValue={wo.site_address ?? ""} />
+                  <input id="edit-addr" name="site_address" className="input" defaultValue={wo.site_address ?? ""} maxLength={500} />
                 </div>
                 <div className="field">
                   <label htmlFor="edit-type">Request Type</label>
@@ -835,7 +835,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   <label htmlFor="edit-work">
                     Requested work <span className="req">*</span>
                   </label>
-                  <textarea id="edit-work" name="requested_work" rows={3} defaultValue={wo.requested_work} required />
+                  <textarea id="edit-work" name="requested_work" rows={3} defaultValue={wo.requested_work} required maxLength={2000} />
                 </div>
               </ActionForm>
             </section>
@@ -887,7 +887,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   >
                     <div className="field" style={{ marginTop: 8 }}>
                       <label htmlFor="cancel-note">Reason (optional)</label>
-                      <input id="cancel-note" name="note" className="input" />
+                      <input id="cancel-note" name="note" className="input" maxLength={2000} />
                     </div>
                   </ActionForm>
                 </details>

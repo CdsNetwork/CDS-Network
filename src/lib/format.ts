@@ -130,12 +130,39 @@ export function woLabel(n: number | string): string {
   return `WO-${n}`;
 }
 
-export function dateTime(value: string | null | undefined): string {
-  if (!value) return "-";
+/** CDS works from California: every time on screen is Pacific time. */
+const TIME_ZONE = "America/Los_Angeles";
+
+const ptParts = new Intl.DateTimeFormat("en-US", {
+  timeZone: TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/** Pacific date and time parts of a timestamp, or null when it is not a valid date. */
+function pacific(value: string): Record<string, string> | null {
   const d = new Date(value);
-  return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC`;
+  if (Number.isNaN(d.getTime())) return null;
+  const out: Record<string, string> = {};
+  for (const p of ptParts.formatToParts(d)) out[p.type] = p.value;
+  return out;
 }
 
+/** "2026-10-14 15:19 PT" */
+export function dateTime(value: string | null | undefined): string {
+  if (!value) return "-";
+  const p = pacific(value);
+  return p ? `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} PT` : "-";
+}
+
+/** "2026-10-14" (Pacific date of a timestamp; a plain date is shown as it is). */
 export function date(value: string | null | undefined): string {
-  return value ? new Date(value).toISOString().slice(0, 10) : "-";
+  if (!value) return "-";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const p = pacific(value);
+  return p ? `${p.year}-${p.month}-${p.day}` : "-";
 }

@@ -183,6 +183,7 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
               className="input"
               autoComplete="off"
               placeholder="Type location # or name..."
+              maxLength={200}
               disabled={!customerId}
               required
               value={locQuery}
@@ -251,11 +252,11 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
               <label htmlFor="unit_number">
                 Unit # <span className="req">*</span>
               </label>
-              <input id="unit_number" name="unit_number" className="input" required />
+              <input id="unit_number" name="unit_number" className="input" required maxLength={100} />
             </div>
             <div className="field">
               <label htmlFor="po_number">PO #</label>
-              <input id="po_number" name="po_number" className="input" />
+              <input id="po_number" name="po_number" className="input" maxLength={100} />
               <div className="small" style={{ marginTop: 5 }}>
                 A missing PO is flagged on review.
               </div>
@@ -270,6 +271,7 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
               name="site_address"
               className="input"
               placeholder="Street, City, State, ZIP"
+              maxLength={500}
               value={siteAddress}
               onChange={(e) => setSiteAddress(e.target.value)}
             />
@@ -292,7 +294,7 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
             <label htmlFor="requested_work">
               Requested work <span className="req">*</span>
             </label>
-            <textarea id="requested_work" name="requested_work" rows={4} required placeholder="DPF Cleaning, clamps/gaskets..." />
+            <textarea id="requested_work" name="requested_work" rows={4} required maxLength={2000} placeholder="DPF Cleaning, clamps/gaskets..." />
           </div>
         </section>
 
@@ -399,7 +401,7 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
           <h3 style={{ marginTop: 22 }}>Assignment</h3>
           <div className="field">
             <label htmlFor="internal_notes">Internal notes</label>
-            <textarea id="internal_notes" name="internal_notes" rows={4} placeholder="Only CDS staff see these notes." />
+            <textarea id="internal_notes" name="internal_notes" rows={4} maxLength={2000} placeholder="Only CDS staff see these notes." />
           </div>
           <div className="notice">The affiliate sees approved work and its settlement amount, but not the customer sell price.</div>
           {state.error && (

@@ -65,6 +65,17 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
   if (!label) return { error: "Location is required." };
   if (!REQUEST_TYPES.includes(requestType)) return { error: "Choose a request type." };
   if (!FULFILLMENT.includes(fulfillment)) return { error: "Choose a fulfillment method." };
+  const poNumber = text(formData.get("po_number"));
+  const siteAddress = text(formData.get("site_address"));
+  const limits: [string, number][] = [
+    [unit, 100],
+    [poNumber, 100],
+    [label, 200],
+    [siteAddress, 500],
+    [requested, 2000],
+  ];
+  const tooLong = limits.find(([value, max]) => value.length > max);
+  if (tooLong) return { error: `Text is too long (max ${tooLong[1]} characters)` };
 
   const supabase = await createClient();
   const status = await currentStatus(supabase, woId);
@@ -75,9 +86,9 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
     .from("work_orders")
     .update({
       unit_number: unit,
-      po_number: text(formData.get("po_number")) || null,
+      po_number: poNumber || null,
       location_label: label,
-      site_address: text(formData.get("site_address")) || null,
+      site_address: siteAddress || null,
       requested_work: requested,
       request_type: requestType,
       fulfillment,

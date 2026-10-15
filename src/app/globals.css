@@ -39,6 +39,15 @@ aside.sidebar { background: #fff; border-right: 1px solid var(--line); padding: 
 .navbtn span { font-size: 18px; min-width: 22px; text-align: center; }
 .mobile-nav { display: none; }
 .main { padding: 26px; max-width: 1500px; width: 100%; margin: auto; min-width: 0; }
+/* Long unbroken text (serial numbers, notes, pasted links) wraps instead of widening the
+   page. Tables keep normal word sizing so columns do not collapse; a cell may still break
+   a single word that is longer than the whole column. */
+.main { overflow-wrap: anywhere; }
+.main table { overflow-wrap: normal; }
+.main td { overflow-wrap: break-word; }
+.row > *, .summaryrow > *, .bottomTotal > *, .footerAction > *,
+.cards > *, .split > *, .grid2 > *, .grid3 > *, .grid4 > *,
+.attentionGrid > *, .shopGrid > *, .attachmentGrid > * { min-width: 0; }
 
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .row.between { justify-content: space-between; align-items: flex-start; }
