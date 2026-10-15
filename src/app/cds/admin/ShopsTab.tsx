@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
 import { createClient } from "@/lib/supabase/server";
 import { inviteShopLogin, saveShop, setProfileActive, setShopActive } from "./actions";
+import { wrapCell } from "@/lib/format";
 
 export type Shop = {
   id: string;
@@ -88,7 +89,7 @@ export async function ShopsTab({ edit }: { edit?: string }) {
               const login = loginsFor(s.id).find((l) => l.active);
               return (
                 <tr key={s.id} style={s.active ? undefined : { opacity: 0.6 }}>
-                  <td>
+                  <td className="nowrap">
                     <b>{s.short_code}</b>
                   </td>
                   <td>
@@ -100,7 +101,7 @@ export async function ShopsTab({ edit }: { edit?: string }) {
                   <td>
                     <Capabilities shop={s} />
                   </td>
-                  <td>{login ? login.email : <span className="small">No login</span>}</td>
+                  <td className={wrapCell(login?.email)}>{login ? login.email : <span className="small">No login</span>}</td>
                   <td>{s.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}</td>
                   <td>
                     <Link className="link small" href={`/cds/admin?tab=shops&edit=${s.id}`}>

@@ -237,20 +237,94 @@ async function buildFixture(): Promise<Fixture> {
   };
 }
 
-/** Removes everything this run created, found by run id, so a half-built fixture is cleaned too. */
-async function removeFixture(): Promise<void> {
-  const wos = await must(admin.from("work_orders").select("id").eq("location_label", `TEST-${runId}`));
-  const woIds = wos.map((w: { id: string }) => w.id);
-  for (const id of woIds) {
-    const { data: objects } = await admin.storage.from("wo-files").list(id);
-    if (objects?.length) await admin.storage.from("wo-files").remove(objects.map((o) => `${id}/${o.name}`));
+/** Auth users of this run: every test login has the run id in its @test.invalid address. */
+async function runLogins(): Promise<{ id: string; email: string }[]> {
+  const tag = runId.toLowerCase();
+  const found: { id: string; email: string }[] = [];
+  for (let page = 1; ; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(`could not list logins: ${error.message}`);
+    for (const u of data.users) {
+      const email = u.email ?? "";
+      if (email.endsWith("@test.invalid") && email.includes(tag)) found.push({ id: u.id, email });
+    }
+    if (data.users.length < 1000) return found;
   }
-  if (woIds.length) await must(admin.from("work_orders").delete().in("id", woIds));
-  await deleteLogins();
-  await must(admin.from("customer_locations").delete().eq("code", `LOC-${runId}`));
-  await must(admin.from("customers").delete().in("code", [`X-${runId}`, `Y-${runId}`]));
-  await must(admin.from("catalog_items").delete().in("sku", [`SVC-${runId}`, `PRT-${runId}`]));
-  await must(admin.from("affiliates").delete().in("short_code", [`A-${runId}`, `B-${runId}`]));
+}
+
+/**
+ * Removes everything this run created, found by run id, so a half-built fixture is cleaned
+ * too. Every step runs even if an earlier one fails; afterwards it checks that nothing of
+ * this run is left and fails loudly if a step failed or a row survived.
+ */
+async function removeFixture(): Promise<void> {
+  const errors: string[] = [];
+  const step = async (name: string, run: () => Promise<unknown>) => {
+    try {
+      await run();
+    } catch (error) {
+      errors.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const suffix = `%-${runId}`;
+
+  let woIds: string[] = [];
+  await step("find work orders", async () => {
+    const wos = await must(admin.from("work_orders").select("id").eq("location_label", `TEST-${runId}`));
+    woIds = wos.map((w: { id: string }) => w.id);
+  });
+  for (const id of woIds) {
+    await step(`remove files of ${id}`, async () => {
+      const { data: objects, error } = await admin.storage.from("wo-files").list(id);
+      if (error) throw new Error(error.message);
+      if (objects?.length) {
+        const { error: removeError } = await admin.storage.from("wo-files").remove(objects.map((o) => `${id}/${o.name}`));
+        if (removeError) throw new Error(removeError.message);
+      }
+    });
+  }
+  await step("delete work orders", () => must(admin.from("work_orders").delete().eq("location_label", `TEST-${runId}`)));
+  await step("delete tracked logins", () => deleteLogins());
+  await step("delete other logins of this run", async () => {
+    const failed: string[] = [];
+    for (const u of await runLogins()) {
+      const { error } = await admin.auth.admin.deleteUser(u.id);
+      if (error) failed.push(`${u.email}: ${error.message}`);
+    }
+    if (failed.length) throw new Error(failed.join("; "));
+  });
+  await step("delete locations", () => must(admin.from("customer_locations").delete().eq("code", `LOC-${runId}`)));
+  await step("delete customers", () => must(admin.from("customers").delete().like("code", suffix)));
+  await step("delete catalog items", () => must(admin.from("catalog_items").delete().like("sku", suffix)));
+  await step("delete shops", () => must(admin.from("affiliates").delete().like("short_code", suffix)));
+
+  // Sweep: anything of this run still in the database is a cleanup failure.
+  const left: string[] = [];
+  const count = async (label: string, query: PromiseLike<{ count: number | null; error: { message: string } | null }>) => {
+    const { count: n, error } = await query;
+    if (error) errors.push(`check ${label}: ${error.message}`);
+    else if (n) left.push(`${n} ${label}`);
+  };
+  const head = { count: "exact" as const, head: true };
+  await count("work orders", admin.from("work_orders").select("id", head).eq("location_label", `TEST-${runId}`));
+  await count("shops", admin.from("affiliates").select("id", head).like("short_code", suffix));
+  await count("customers", admin.from("customers").select("id", head).like("code", suffix));
+  await count("catalog items", admin.from("catalog_items").select("id", head).like("sku", suffix));
+  await count("locations", admin.from("customer_locations").select("id", head).eq("code", `LOC-${runId}`));
+  try {
+    const logins = await runLogins();
+    if (logins.length) left.push(`${logins.length} logins (${logins.map((u) => u.email).join(", ")})`);
+  } catch (error) {
+    errors.push(`check logins: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (errors.length || left.length) {
+    throw new Error(
+      `cleanup of run ${runId} incomplete.` +
+        (errors.length ? ` Failed steps: ${errors.join("; ")}.` : "") +
+        (left.length ? ` Left in the database: ${left.join(", ")}.` : ""),
+    );
+  }
 }
 
 /** Rows a client can see among this run's work orders. */
@@ -266,7 +340,11 @@ beforeAll(async () => {
     shopA = await createLogin("shop", f.shopA);
     shopB = await createLogin("shop", f.shopB);
   } catch (error) {
-    await removeFixture();
+    try {
+      await removeFixture();
+    } catch (cleanupError) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)} (and ${String(cleanupError)})`);
+    }
     throw error;
   }
 }, 120_000);
@@ -829,5 +907,30 @@ describe("QA round 2 regressions (2026-10-15)", () => {
     expect(events.every((e: { actor_id: string | null }) => e.actor_id === null)).toBe(true);
     await admin.from("work_orders").delete().eq("id", wo.id);
     await admin.from("affiliates").delete().eq("id", shopD.id);
+  });
+});
+
+describe("QA round 3 regressions (2026-10-15)", () => {
+  it("BUG-14: the approver's name stays on the order after that CDS login is deleted", async () => {
+    const approver = await createLogin("cds", null);
+    const wo = await insertOne("work_orders", {
+      customer_id: f.customerX,
+      location_label: `TEST-${runId}`,
+      fulfillment: "shipping",
+      status: "pending_review",
+      unit_number: "Q3-14",
+      requested_work: "Test cleaning",
+    });
+    await must(admin.from("work_order_internal").insert({ work_order_id: wo.id }));
+    await must(admin.from("work_order_lines").insert({ work_order_id: wo.id, catalog_item_id: f.service, qty: 1 }));
+    await must(approver.client.rpc("cds_dispatch_work_order", { p_work_order: wo.id, p_affiliate: f.shopA }));
+    await deleteLogin(approver.id);
+
+    const row = await must(
+      cds.client.from("work_order_internal").select("approved_by, approved_by_name, approved_at").eq("work_order_id", wo.id).single(),
+    );
+    expect(row.approved_by).toBeNull();
+    expect(row.approved_by_name).toBe(`RLS cds ${runId}`);
+    expect(row.approved_at).not.toBeNull();
   });
 });

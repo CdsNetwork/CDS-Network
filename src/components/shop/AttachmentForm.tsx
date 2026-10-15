@@ -27,6 +27,45 @@ function precheck(f: File): string | null {
   return null;
 }
 
+type FieldValues = Record<string, string>;
+
+/** What each field holds right now. Files are compared by name, size and date. */
+function readFields(form: HTMLFormElement): FieldValues {
+  const values: FieldValues = {};
+  for (const el of Array.from(form.elements)) {
+    if (el instanceof HTMLInputElement && el.type === "file") {
+      values[el.id] = Array.from(el.files ?? [])
+        .map((f) => `${f.name}:${f.size}:${f.lastModified}`)
+        .join("|");
+    } else if ((el instanceof HTMLInputElement || el instanceof HTMLSelectElement) && el.id) {
+      values[el.id] = el.value;
+    }
+  }
+  return values;
+}
+
+/**
+ * Clears what was submitted. The fields are locked during the upload, so normally nothing
+ * changed and the whole form resets; if a field does hold something new, it is kept.
+ */
+function clearSubmitted(form: HTMLFormElement, submitted: FieldValues) {
+  const now = readFields(form);
+  if (Object.keys(submitted).every((id) => now[id] === submitted[id])) {
+    form.reset();
+    return;
+  }
+  for (const el of Array.from(form.elements)) {
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement) || !el.id) continue;
+    if (now[el.id] !== submitted[el.id]) continue;
+    if (el instanceof HTMLSelectElement) {
+      const initial = Array.from(el.options).find((o) => o.defaultSelected) ?? el.options[0];
+      if (initial) el.value = initial.value;
+    } else {
+      el.value = "";
+    }
+  }
+}
+
 export function AttachmentForm({ workOrderId, components }: { workOrderId: string; components: Option[] }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -47,7 +86,8 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const files = fd.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
     if (!files.length) {
       setProblem("Select at least one photo or file.");
@@ -64,6 +104,7 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
       note: String(fd.get("note") ?? "").trim() || null,
     };
 
+    const submitted = readFields(form);
     setProblem(null);
     setBusy(true);
     setProgress(files.map((f) => ({ name: f.name, step: "waiting" })));
@@ -107,8 +148,11 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
 
     setBusy(false);
     if (!failed) {
-      formRef.current?.reset();
-      setPicked({});
+      if (formRef.current) {
+        clearSubmitted(formRef.current, submitted);
+        const left = readFields(formRef.current);
+        setPicked((p) => Object.fromEntries(Object.entries(p).filter(([id]) => left[id])));
+      }
     } else {
       setProblem(
         failed === files.length
@@ -120,44 +164,47 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
 
   return (
     <form ref={formRef} onSubmit={onSubmit} className="uploadBox" id="attachment-form">
-      <div className="field">
-        <label htmlFor="att-category">Category</label>
-        <select id="att-category" name="category" defaultValue="condition_damage">
-          {Object.entries(ATTACHMENT_CATEGORY_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </div>
-      {components.length > 0 && (
+      {/* Locked while files upload, so nothing typed or picked meanwhile is lost. */}
+      <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div className="field">
-          <label htmlFor="att-component">Linked component</label>
-          <select id="att-component" name="component_id" defaultValue="">
-            <option value="">Not linked to a component</option>
-            {components.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
+          <label htmlFor="att-category">Category</label>
+          <select id="att-category" name="category" defaultValue="condition_damage">
+            {Object.entries(ATTACHMENT_CATEGORY_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </select>
-          <span className="small">Failed or condemned components need a photo linked here.</span>
         </div>
-      )}
-      <div className="field">
-        <label htmlFor="att-camera">Take a photo</label>
-        <input className="input" id="att-camera" name="files" type="file" accept="image/*" capture="environment" onChange={onPick} />
-      </div>
-      <div className="field">
-        <label htmlFor="att-files">Photo / File</label>
-        <input className="input" id="att-files" name="files" type="file" accept="image/*,.pdf" multiple onChange={onPick} />
-        <span className="small">Photos or PDF, up to 25 MB each.</span>
-      </div>
-      {names.length > 0 && !busy && <p className="small">Selected: {names.join(", ")}</p>}
-      <div className="field">
-        <label htmlFor="att-note">Note</label>
-        <input className="input" id="att-note" name="note" placeholder="Optional note" maxLength={2000} />
-      </div>
+        {components.length > 0 && (
+          <div className="field">
+            <label htmlFor="att-component">Linked component</label>
+            <select id="att-component" name="component_id" defaultValue="">
+              <option value="">Not linked to a component</option>
+              {components.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+            <span className="small">Failed or condemned components need a photo linked here.</span>
+          </div>
+        )}
+        <div className="field">
+          <label htmlFor="att-camera">Take a photo</label>
+          <input className="input" id="att-camera" name="files" type="file" accept="image/*" capture="environment" onChange={onPick} />
+        </div>
+        <div className="field">
+          <label htmlFor="att-files">Photo / File</label>
+          <input className="input" id="att-files" name="files" type="file" accept="image/*,.pdf" multiple onChange={onPick} />
+          <span className="small">Photos or PDF, up to 25 MB each.</span>
+        </div>
+        {names.length > 0 && !busy && <p className="small">Selected: {names.join(", ")}</p>}
+        <div className="field">
+          <label htmlFor="att-note">Note</label>
+          <input className="input" id="att-note" name="note" placeholder="Optional note" maxLength={2000} />
+        </div>
+      </fieldset>
 
       {progress.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: "0 0 8px" }} aria-live="polite">

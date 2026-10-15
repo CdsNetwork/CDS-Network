@@ -11,6 +11,8 @@ type AuditRow = {
   action: "insert" | "update" | "delete";
   old_data: Json | null;
   new_data: Json | null;
+  actor_id: string | null;
+  actor_name: string | null;
   profiles: { full_name: string } | { full_name: string }[] | null;
 };
 
@@ -59,11 +61,30 @@ function summary(row: AuditRow): string {
   return bits.join(", ") || row.row_id;
 }
 
+/**
+ * Who made the change. The name is stored on the audit row, so a change by a login that was
+ * deleted later still shows that person. Rows without a person were made by the system.
+ * Rows written before names were stored (2026-10-15) by a login that is now deleted cannot
+ * be told apart from system changes and show "System".
+ */
+function actor(row: AuditRow) {
+  const current = one(row.profiles)?.full_name;
+  if (current) return current;
+  if (row.actor_name) {
+    return (
+      <>
+        {row.actor_name} <span className="small">(deleted login)</span>
+      </>
+    );
+  }
+  return <span className="small">System</span>;
+}
+
 export async function ChangeLogTab() {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("audit_log")
-    .select("id, at, table_name, row_id, action, old_data, new_data, profiles(full_name)")
+    .select("id, at, table_name, row_id, action, old_data, new_data, actor_id, actor_name, profiles(full_name)")
     .order("at", { ascending: false })
     .order("id", { ascending: false })
     .limit(100);
@@ -96,8 +117,8 @@ export async function ChangeLogTab() {
             )}
             {rows.map((r) => (
               <tr key={r.id}>
-                <td style={{ whiteSpace: "nowrap" }}>{dateTime(r.at)}</td>
-                <td>{one(r.profiles)?.full_name ?? <span className="small">System</span>}</td>
+                <td className="nowrap">{dateTime(r.at)}</td>
+                <td>{actor(r)}</td>
                 <td>{TABLE_LABEL[r.table_name] ?? r.table_name}</td>
                 <td>
                   <span className={r.action === "delete" ? "tag" : r.action === "insert" ? "tag green" : "tag blue"}>

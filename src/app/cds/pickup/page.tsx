@@ -2,7 +2,7 @@ import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
 import { one } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
-import { pickupWindowLabel, woLabel, type WoStatus } from "@/lib/format";
+import { pickupWindowLabel, woLabel, type WoStatus, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
 type PickupRow = {
@@ -87,15 +87,15 @@ export default async function PickupPage() {
             )}
             {rows.map((r) => (
               <tr key={r.id}>
-                <td style={{ whiteSpace: "nowrap" }}>
+                <td className="nowrap">
                   <Link className="link" href={`/cds/work-orders/${r.id}`}>
                     {woLabel(r.wo_number)}
                   </Link>
                 </td>
                 <td>{one(r.customers)?.name ?? "-"}</td>
-                <td>{r.location_label}</td>
+                <td className={wrapCell(r.location_label)}>{r.location_label}</td>
                 <td>{one(r.affiliates)?.display_name ?? <span className="small">Not assigned</span>}</td>
-                <td>{r.site_address ?? "-"}</td>
+                <td className={wrapCell(r.site_address)}>{r.site_address ?? "-"}</td>
                 <td>
                   <b>{pickupWindowLabel(r.pickup_window)}</b>
                 </td>

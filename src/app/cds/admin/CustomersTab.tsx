@@ -3,6 +3,7 @@ import { ActionForm } from "@/components/cds-admin/ActionForm";
 import { one } from "@/components/cds-admin/server-utils";
 import { createClient } from "@/lib/supabase/server";
 import { saveCustomer } from "./actions";
+import { wrapCell } from "@/lib/format";
 
 type Customer = {
   id: string;
@@ -69,11 +70,11 @@ export async function CustomersTab({ edit }: { edit?: string }) {
             )}
             {customers.map((c) => (
               <tr key={c.id} style={c.active ? undefined : { opacity: 0.6 }}>
-                <td>
+                <td className="nowrap">
                   <b>{c.code}</b>
                 </td>
                 <td>{c.name}</td>
-                <td>{one(c.customer_billing)?.billing_email ?? <span className="small">Not set</span>}</td>
+                <td className={wrapCell(one(c.customer_billing)?.billing_email)}>{one(c.customer_billing)?.billing_email ?? <span className="small">Not set</span>}</td>
                 <td className="num">{c.customer_locations?.[0]?.count ?? 0}</td>
                 <td>{c.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}</td>
                 <td>

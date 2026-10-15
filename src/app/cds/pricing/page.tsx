@@ -8,7 +8,7 @@ import { setOverride } from "./actions";
 type Customer = { id: string; code: string; name: string };
 type Item = { id: string; sku: string; category: string; name: string; oe_cross: string | null };
 type PriceRow = { id: string; catalog_item_id: string; amount: string; effective_from: string };
-type AuditRow = { row_id: string; at: string; profiles: { full_name: string } | { full_name: string }[] | null };
+type AuditRow = { row_id: string; at: string; actor_name: string | null; profiles: { full_name: string } | { full_name: string }[] | null };
 
 export default async function PricingPage({ searchParams }: PageProps<"/cds/pricing">) {
   await requireCds();
@@ -53,13 +53,13 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
     if (ids.length > 0) {
       const { data: audit } = await supabase
         .from("audit_log")
-        .select("row_id, at, profiles(full_name)")
+        .select("row_id, at, actor_name, profiles(full_name)")
         .eq("table_name", "customer_price_overrides")
         .in("row_id", ids)
         .order("at", { ascending: false })
         .limit(2000);
       for (const a of (audit ?? []) as AuditRow[]) {
-        if (!lastChange.has(a.row_id)) lastChange.set(a.row_id, { at: a.at, by: one(a.profiles)?.full_name ?? null });
+        if (!lastChange.has(a.row_id)) lastChange.set(a.row_id, { at: a.at, by: one(a.profiles)?.full_name ?? a.actor_name ?? null });
       }
     }
   }

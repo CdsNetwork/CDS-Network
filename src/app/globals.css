@@ -40,13 +40,18 @@ aside.sidebar { background: #fff; border-right: 1px solid var(--line); padding: 
 .mobile-nav { display: none; }
 .main { padding: 26px; max-width: 1500px; width: 100%; margin: auto; min-width: 0; }
 /* Long unbroken text (serial numbers, notes, pasted links) wraps instead of widening the
-   page. Tables keep normal word sizing so columns do not collapse; a cell may still break
-   a single word that is longer than the whole column. */
+   page. Tables keep normal word sizing, so WO numbers, IDs and short values never break. */
 .main { overflow-wrap: anywhere; }
 .main table { overflow-wrap: normal; }
-.main td { overflow-wrap: anywhere; max-width: 320px; }
-/* Amounts, badges and labels never break mid-value. */
-.money, .bigAmount, .amount, .status, .pill, .tag, .badge, td.num, th { overflow-wrap: normal; white-space: nowrap; }
+/* Free-text table cells that can hold one long unbroken value (unit, PO, location, notes,
+   addresses, tracking): that value wraps inside its own cell instead of pushing the other
+   columns out of view. The min-width keeps short values on one line. */
+.main td.cell-wrap { min-width: 7rem; max-width: 18rem; overflow-wrap: anywhere; }
+/* Amounts, badges, labels, WO numbers and dates never break mid-value. */
+.money, .bigAmount, .amount, .status, .pill, .tag, .badge, td.num, .nowrap { overflow-wrap: normal; white-space: nowrap; }
+/* Column headers wrap between words only ("Customer / Subtotal"), so long headers above
+   short amounts do not take the width the data columns need. */
+th { overflow-wrap: normal; }
 .money, .bigAmount, .amount { flex-shrink: 0; }
 .row > *, .summaryrow > *, .bottomTotal > *, .footerAction > *,
 .cards > *, .split > *, .grid2 > *, .grid3 > *, .grid4 > *,

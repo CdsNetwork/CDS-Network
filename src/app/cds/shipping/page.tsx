@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ActionForm, M2Button } from "@/components/cds-admin/ActionForm";
 import { one } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
-import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL, money, woLabel } from "@/lib/format";
+import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL, money, woLabel, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { createShipment, setShipmentStatus, updateShipment } from "./actions";
 import { LABEL_STATUSES, PACKAGE_TYPES, SERVICE_LEVELS, labelStatusLabel } from "./options";
@@ -171,7 +171,7 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
               const cost = internal?.actual_cost ?? internal?.quoted_cost ?? null;
               return (
                 <tr key={s.id}>
-                  <td style={{ whiteSpace: "nowrap" }}>
+                  <td className="nowrap">
                     <Link className="link" href={`/cds/work-orders/${s.work_order_id}`}>
                       {wo ? woLabel(wo.wo_number) : "Open"}
                     </Link>
@@ -184,7 +184,7 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
                     {s.carrier ?? "-"}
                     {s.service_level && <div className="small">{s.service_level}</div>}
                   </td>
-                  <td>
+                  <td className={wrapCell(s.tracking_number, s.eta_text)}>
                     {s.tracking_number ? (
                       <b style={{ color: "var(--blue)" }}>{s.tracking_number}</b>
                     ) : (
@@ -217,7 +217,7 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
                       </ActionForm>
                     </div>
                   </td>
-                  <td style={{ maxWidth: 240 }}>{internal?.notes ?? <span className="small">-</span>}</td>
+                  <td className={wrapCell(internal?.notes)}>{internal?.notes ?? <span className="small">-</span>}</td>
                   <td className="num">
                     <span className="money">{money(cost)}</span>
                     {internal?.actual_cost == null && internal?.quoted_cost != null && <div className="small">quoted</div>}

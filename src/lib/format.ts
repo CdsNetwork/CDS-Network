@@ -166,3 +166,25 @@ export function date(value: string | null | undefined): string {
   const p = pacific(value);
   return p ? `${p.year}-${p.month}-${p.day}` : "-";
 }
+
+/** Longest unbroken run of characters that a table cell keeps on one line. */
+const LONG_WORD = 24;
+
+/**
+ * Class for a free-text table cell (unit, PO, location, notes, addresses). When one of the
+ * values holds a word longer than LONG_WORD characters, the cell gets "cell-wrap" and that
+ * word wraps inside its own cell. Otherwise the cell wraps only between words, so WO
+ * numbers, unit and PO numbers never split.
+ */
+export function wrapCell(...values: (string | null | undefined)[]): string | undefined {
+  const long = values.some((v) => (v ?? "").split(/\s+/).some((word) => word.length > LONG_WORD));
+  return long ? "cell-wrap" : undefined;
+}
+
+/**
+ * Class for a table cell holding an ID typed by people (unit number, PO number): kept on one
+ * line, unless it is one very long word, which then wraps inside its own cell.
+ */
+export function idCell(value: string | null | undefined): string {
+  return wrapCell(value) ?? "nowrap";
+}

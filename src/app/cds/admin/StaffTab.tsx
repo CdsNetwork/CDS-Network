@@ -1,5 +1,5 @@
 import { ActionForm } from "@/components/cds-admin/ActionForm";
-import { date } from "@/lib/format";
+import { date, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { inviteStaff, setProfileActive } from "./actions";
 
@@ -59,8 +59,8 @@ export async function StaffTab({ meId }: { meId: string }) {
                   <b>{p.full_name}</b>
                   {p.id === meId && <span className="small"> (you)</span>}
                 </td>
-                <td>{p.email}</td>
-                <td>{date(p.created_at)}</td>
+                <td className={wrapCell(p.email)}>{p.email}</td>
+                <td className="nowrap">{date(p.created_at)}</td>
                 <td>{p.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}</td>
                 <td>
                   {p.id !== meId && (

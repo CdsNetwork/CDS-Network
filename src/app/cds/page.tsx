@@ -3,7 +3,7 @@ import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
 import { one, SHIPMENT_PROBLEM_STATUSES } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
-import { money, SHIPMENT_STATUS_LABEL, STATUS_LABEL, STATUS_ORDER, woLabel, type WoStatus } from "@/lib/format";
+import { money, SHIPMENT_STATUS_LABEL, STATUS_LABEL, STATUS_ORDER, woLabel, type WoStatus, idCell, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
 const IN_PROGRESS: WoStatus[] = ["awaiting_acceptance", "accepted", "picked_up", "in_process"];
@@ -367,15 +367,15 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   const tbd = f?.supplier_cost_tbd;
                   return (
                     <tr key={r.id}>
-                      <td>
+                      <td className="nowrap">
                         <Link className="link" href={`/cds/work-orders/${r.id}`}>
                           {woLabel(r.wo_number)}
                         </Link>
                       </td>
                       <td>{one(r.customers)?.name ?? "-"}</td>
-                      <td>{r.location_label}</td>
-                      <td>{r.unit_number}</td>
-                      <td>{r.po_number ?? <span className="small">Missing</span>}</td>
+                      <td className={wrapCell(r.location_label)}>{r.location_label}</td>
+                      <td className={idCell(r.unit_number)}>{r.unit_number}</td>
+                      <td className={idCell(r.po_number)}>{r.po_number ?? <span className="small">Missing</span>}</td>
                       <td>{one(r.affiliates)?.display_name ?? <span className="small">Not assigned</span>}</td>
                       <td>
                         <StatusBadge status={r.status} />

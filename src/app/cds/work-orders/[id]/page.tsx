@@ -29,6 +29,7 @@ import {
   STATUS_LABEL,
   woLabel,
   type WoStatus,
+  wrapCell,
 } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -77,6 +78,8 @@ type Internal = {
   routing_notes: string | null;
   internal_notes: string | null;
   approved_at: string | null;
+  approved_by: string | null;
+  approved_by_name: string | null;
   tax_rate: number;
   tax_parts: boolean;
   tax_labor: boolean;
@@ -174,6 +177,19 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/**
+ * Who approved the order. The name is stored with the approval, so it stays when that
+ * login is deleted later (approved_by then becomes null).
+ */
+function approvedLabel(internal: Internal | null, currentName: string | null): string {
+  if (!internal?.approved_at) return "Not approved yet";
+  const when = dateTime(internal.approved_at);
+  const name = currentName ?? internal.approved_by_name;
+  if (!name) return `Approved ${when}`;
+  const removed = internal.approved_by === null ? " (login removed)" : "";
+  return `${name}${removed}, ${when}`;
+}
+
 function Milestone2() {
   return <span className="small"> Milestone 2</span>;
 }
@@ -203,7 +219,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase
         .from("work_order_internal")
         .select(
-          "source, review_reason, routing_notes, internal_notes, approved_at, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, profiles(full_name)",
+          "source, review_reason, routing_notes, internal_notes, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, profiles(full_name)",
         )
         .eq("work_order_id", id)
         .maybeSingle(),
@@ -347,7 +363,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               <Fact label="PO">{wo.po_number ?? <span className="small">Missing</span>}</Fact>
               <Fact label="Affiliate">{shop?.display_name ?? "Not assigned"}</Fact>
               <Fact label="Approved By">
-                {approver ? `${approver.full_name}${internal?.approved_at ? `, ${dateTime(internal.approved_at)}` : ""}` : "Not approved yet"}
+                {approvedLabel(internal, approver?.full_name ?? null)}
               </Fact>
               <Fact label="Affiliate Invoice / Reference #">{wo.affiliate_invoice_ref}</Fact>
               <Fact label="Pickup / ship-to address">{wo.site_address}</Fact>
@@ -706,14 +722,14 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       const url = signed.get(a.storage_path);
                       return (
                         <tr key={a.id}>
-                          <td>
+                          <td className={wrapCell(a.file_name, a.note)}>
                             <b>{a.file_name}</b>
                             {a.note && <div className="small">{a.note}</div>}
                           </td>
                           <td>{ATTACHMENT_CATEGORY_LABEL[a.category] ?? a.category}</td>
                           <td>{a.component_id ? compName.get(a.component_id) ?? "-" : "-"}</td>
                           <td>
-                            {dateTime(a.uploaded_at)}
+                            <span className="nowrap">{dateTime(a.uploaded_at)}</span>
                             <div>{a.shop_visible ? <span className="tag blue">shop sees this</span> : <span className="tag">CDS only</span>}</div>
                           </td>
                           <td>
@@ -743,7 +759,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               <div style={{ display: "grid", gap: 8 }}>
                 {events.map((e) => (
                   <div key={e.id} className="row" style={{ alignItems: "flex-start", gap: 12 }}>
-                    <span className="small" style={{ minWidth: 150 }}>
+                    <span className="small nowrap" style={{ minWidth: 150 }}>
                       {dateTime(e.at)}
                     </span>
                     <span style={{ flex: 1 }}>

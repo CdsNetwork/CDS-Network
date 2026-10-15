@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
 import { one } from "@/components/cds-admin/server-utils";
-import { FULFILLMENT_LABEL } from "@/lib/format";
+import { FULFILLMENT_LABEL, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { saveLocation } from "./actions";
 
@@ -127,12 +127,12 @@ export async function LocationsTab({ edit, q }: { edit?: string; q: string }) {
             {shown.map((l) => (
               <tr key={l.id} style={l.active ? undefined : { opacity: 0.6 }}>
                 <td>{one(l.customers)?.name ?? "-"}</td>
-                <td style={{ whiteSpace: "nowrap" }}>
+                <td className="nowrap">
                   <b>{l.code}</b>
                   {l.location_number && <div className="small">#{l.location_number}</div>}
                 </td>
-                <td>{l.name}</td>
-                <td>
+                <td className={wrapCell(l.name)}>{l.name}</td>
+                <td className={wrapCell(l.address_raw, l.routing_notes)}>
                   {l.address_raw}
                   {l.routing_notes && <div className="small">{l.routing_notes}</div>}
                 </td>
