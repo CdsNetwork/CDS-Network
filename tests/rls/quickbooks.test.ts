@@ -1,6 +1,7 @@
 /**
  * QuickBooks: the connection tokens are reachable by the service role only, the mappings
- * and customer part numbers are CDS only, and cds_mark_invoiced moves a work order from
+ * (customer, item, measurement item) and customer part numbers are CDS only, item and
+ * measurement mappings allow one row for all customers plus one per customer, and cds_mark_invoiced moves a work order from
  * Ready to Invoice to Invoiced exactly once.
  *
  * The real QuickBooks connection row (if any) is never written: the only write attempts
@@ -58,7 +59,15 @@ beforeAll(async () => {
     catalog_item_id: item.id,
     customer_part_number: `FS-${runId}`,
   });
-  f = { shop: shopRow.id, customer: customer.id, item: item.id, mapIds: [cm.id, im.id, alias.id] };
+  // Measurement item for this customer's DPFs (the default rows, customer_id null, belong to
+  // CDS's real setup and are never written here).
+  const mm = await insertOne("qbo_measurement_map", {
+    customer_id: customer.id,
+    component_type: "DPF",
+    qbo_item_id: "8",
+    qbo_item_name: "QBO Measurements",
+  });
+  f = { shop: shopRow.id, customer: customer.id, item: item.id, mapIds: [cm.id, im.id, alias.id, mm.id] };
   cds = await createLogin("cds", null);
   shop = await createLogin("shop", f.shop);
 }, 120_000);
@@ -87,7 +96,7 @@ afterAll(async () => {
     const customers = await must(admin.from("customers").select("id").like("code", suffix));
     const ids = customers.map((r: { id: string }) => r.id);
     if (ids.length) {
-      for (const table of ["qbo_customer_map", "customer_item_aliases"]) {
+      for (const table of ["qbo_customer_map", "customer_item_aliases", "qbo_measurement_map", "qbo_item_map"]) {
         rowIds.push(...(await must(admin.from(table).select("id").in("customer_id", ids))).map((r: { id: string }) => r.id));
       }
     }
@@ -113,6 +122,7 @@ afterAll(async () => {
     ["customers", admin.from("customers").select("id", head).like("code", suffix)],
     ["shops", admin.from("affiliates").select("id", head).like("short_code", suffix)],
     ["customer part numbers", admin.from("customer_item_aliases").select("id", head).like("customer_part_number", `FS-${runId}`)],
+    ["measurement items", admin.from("qbo_measurement_map").select("id", head).like("qbo_item_name", `%${runId}%`)],
     ["change log rows", admin.from("audit_log").select("id", head).in("row_id", rowIds.length ? rowIds : ["none"])],
   ] as const) {
     const { count, error } = await query;
@@ -128,7 +138,7 @@ afterAll(async () => {
   }
 }, 120_000);
 
-const MAP_TABLES = ["qbo_customer_map", "qbo_item_map", "customer_item_aliases"] as const;
+const MAP_TABLES = ["qbo_customer_map", "qbo_item_map", "customer_item_aliases", "qbo_measurement_map"] as const;
 
 describe("QuickBooks mappings and customer part numbers", () => {
   it("a shop reads nothing and cannot write", async () => {
@@ -143,6 +153,17 @@ describe("QuickBooks mappings and customer part numbers", () => {
     await shop.client.from("qbo_item_map").update({ qbo_item_id: "999" }).eq("catalog_item_id", f.item);
     const row = await must(admin.from("qbo_item_map").select("qbo_item_id").eq("catalog_item_id", f.item).single());
     expect(row.qbo_item_id).toBe("7");
+
+    const measurement = await shop.client
+      .from("qbo_measurement_map")
+      .insert({ customer_id: f.customer, component_type: "DOC", qbo_item_id: "9", qbo_item_name: `Shop ${runId}` });
+    expect(measurement.error).not.toBeNull();
+    await shop.client.from("qbo_measurement_map").update({ qbo_item_id: "999" }).eq("customer_id", f.customer);
+    const mrow = await must(admin.from("qbo_measurement_map").select("qbo_item_id").eq("id", f.mapIds[3]).single());
+    expect(mrow.qbo_item_id).toBe("8");
+    await shop.client.from("qbo_measurement_map").delete().eq("customer_id", f.customer);
+    const still = await must(admin.from("qbo_measurement_map").select("id").eq("id", f.mapIds[3]));
+    expect(still).toHaveLength(1);
   });
 
   it("an anonymous caller reads nothing", async () => {
@@ -162,6 +183,77 @@ describe("QuickBooks mappings and customer part numbers", () => {
       admin.from("audit_log").select("action, actor_id").eq("table_name", "qbo_customer_map").eq("row_id", f.mapIds[0]),
     );
     expect(log).toContainEqual({ action: "update", actor_id: cds.id });
+  });
+
+  it("measurement item edits are in the change log", async () => {
+    await must(cds.client.from("qbo_measurement_map").update({ qbo_item_name: `QBO Measurements ${runId}` }).eq("id", f.mapIds[3]));
+    const log = await must(
+      admin.from("audit_log").select("action, actor_id").eq("table_name", "qbo_measurement_map").eq("row_id", f.mapIds[3]),
+    );
+    expect(log).toContainEqual({ action: "update", actor_id: cds.id });
+  });
+
+  it("an item has one mapping for all customers and one per customer; upserts replace them", async () => {
+    // The fixture row is the mapping for all customers (customer_id null).
+    const dupDefault = await cds.client
+      .from("qbo_item_map")
+      .insert({ catalog_item_id: f.item, qbo_item_id: "70", qbo_item_name: "Second default" });
+    expect(dupDefault.error?.code).toBe("23505");
+
+    const own = await must(
+      cds.client
+        .from("qbo_item_map")
+        .insert({ customer_id: f.customer, catalog_item_id: f.item, qbo_item_id: "71", qbo_item_name: "Customer item" })
+        .select("id")
+        .single(),
+    );
+    f.mapIds.push(own.id);
+    const dupOwn = await cds.client
+      .from("qbo_item_map")
+      .insert({ customer_id: f.customer, catalog_item_id: f.item, qbo_item_id: "72", qbo_item_name: "Customer item 2" });
+    expect(dupOwn.error?.code).toBe("23505");
+
+    // The admin form upserts on (customer_id, catalog_item_id), also for the row without a customer.
+    await must(
+      cds.client
+        .from("qbo_item_map")
+        .upsert(
+          { customer_id: null, catalog_item_id: f.item, qbo_item_id: "7", qbo_item_name: "QBO Item" },
+          { onConflict: "customer_id,catalog_item_id" },
+        ),
+    );
+    await must(
+      cds.client
+        .from("qbo_item_map")
+        .upsert(
+          { customer_id: f.customer, catalog_item_id: f.item, qbo_item_id: "73", qbo_item_name: "Customer item 3" },
+          { onConflict: "customer_id,catalog_item_id" },
+        ),
+    );
+    const rows = await must(
+      admin.from("qbo_item_map").select("customer_id, qbo_item_id").eq("catalog_item_id", f.item).order("qbo_item_id"),
+    );
+    expect(rows).toEqual([
+      { customer_id: null, qbo_item_id: "7" },
+      { customer_id: f.customer, qbo_item_id: "73" },
+    ]);
+  });
+
+  it("one measurement item per customer and component type", async () => {
+    const dup = await cds.client
+      .from("qbo_measurement_map")
+      .insert({ customer_id: f.customer, component_type: "DPF", qbo_item_id: "10", qbo_item_name: `Dup ${runId}` });
+    expect(dup.error?.code).toBe("23505");
+    await must(
+      cds.client
+        .from("qbo_measurement_map")
+        .upsert(
+          { customer_id: f.customer, component_type: "DPF", qbo_item_id: "8", qbo_item_name: `QBO Measurements ${runId}` },
+          { onConflict: "customer_id,component_type" },
+        ),
+    );
+    const rows = await must(admin.from("qbo_measurement_map").select("id").eq("customer_id", f.customer));
+    expect(rows).toEqual([{ id: f.mapIds[3] }]);
   });
 
   it("one part number per customer and item", async () => {

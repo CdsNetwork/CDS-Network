@@ -77,30 +77,72 @@ export async function removeCustomerMap(customerId: string): Promise<ActionState
   return done("Customer link removed.");
 }
 
+/** The optional customer of a mapping: "" means all customers. */
+function mappingCustomer(formData: FormData): { ok: true; id: string | null } | { ok: false } {
+  const id = text(formData, "customer_id");
+  if (!id) return { ok: true, id: null };
+  return isUuid(id) ? { ok: true, id } : { ok: false };
+}
+
 export async function saveItemMap(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const me = await requireCds();
   const itemId = text(formData, "catalog_item_id");
+  const customer = mappingCustomer(formData);
   const choice = qboChoice(formData, "qbo_item");
   if (!isUuid(itemId)) return { error: "Choose a catalog item." };
+  if (!customer.ok) return { error: "Choose a customer, or All customers." };
   if (!validChoice(choice)) return { error: "Choose the QuickBooks item (or enter its numeric id and name)." };
   const supabase = await createClient();
+  // One row for all customers and one per customer for each catalog item (nulls not distinct).
   const { error } = await supabase
     .from("qbo_item_map")
     .upsert(
-      { catalog_item_id: itemId, qbo_item_id: choice.id, qbo_item_name: choice.name, updated_by: me.id },
-      { onConflict: "catalog_item_id" },
+      { customer_id: customer.id, catalog_item_id: itemId, qbo_item_id: choice.id, qbo_item_name: choice.name, updated_by: me.id },
+      { onConflict: "customer_id,catalog_item_id" },
     );
   if (error) return { error: dbMessage(error) };
-  return done(`Linked to QuickBooks item ${choice.name}.`);
+  return done(`Linked to QuickBooks item ${choice.name}${customer.id ? " for this customer" : " for all customers"}.`);
 }
 
-export async function removeItemMap(itemId: string): Promise<ActionState> {
+export async function removeItemMap(id: string): Promise<ActionState> {
   await requireCds();
-  if (!isUuid(itemId)) return { error: "Mapping not found." };
+  if (!isUuid(id)) return { error: "Mapping not found." };
   const supabase = await createClient();
-  const { error } = await supabase.from("qbo_item_map").delete().eq("catalog_item_id", itemId);
+  const { error } = await supabase.from("qbo_item_map").delete().eq("id", id);
   if (error) return { error: dbMessage(error) };
   return done("Item link removed.");
+}
+
+// ---------------------------------------------------------------- measurement lines
+
+const COMPONENT_TYPES = ["DPF", "DOC", "SCR", "EGR"] as const;
+
+export async function saveMeasurementMap(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const me = await requireCds();
+  const customer = mappingCustomer(formData);
+  const type = text(formData, "component_type");
+  const choice = qboChoice(formData, "qbo_item");
+  if (!customer.ok) return { error: "Choose a customer, or All customers." };
+  if (!(COMPONENT_TYPES as readonly string[]).includes(type)) return { error: "Choose the component type." };
+  if (!validChoice(choice)) return { error: "Choose the QuickBooks item (or enter its numeric id and name)." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("qbo_measurement_map")
+    .upsert(
+      { customer_id: customer.id, component_type: type, qbo_item_id: choice.id, qbo_item_name: choice.name, updated_by: me.id },
+      { onConflict: "customer_id,component_type" },
+    );
+  if (error) return { error: dbMessage(error) };
+  return done(`${type} measurement lines use QuickBooks item ${choice.name}${customer.id ? " for this customer" : " for all customers"}.`);
+}
+
+export async function removeMeasurementMap(id: string): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(id)) return { error: "Mapping not found." };
+  const supabase = await createClient();
+  const { error } = await supabase.from("qbo_measurement_map").delete().eq("id", id);
+  if (error) return { error: dbMessage(error) };
+  return done("Measurement line mapping removed.");
 }
 
 // ---------------------------------------------------------------- customer part numbers

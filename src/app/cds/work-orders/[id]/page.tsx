@@ -281,6 +281,7 @@ function InvoicePanel({
   }
 
   const problems = invoice && !invoice.result.ok ? invoice.result.problems : [];
+  const warnings = invoice?.result.warnings ?? [];
   return (
     <section className="section panel-invoice">
       <h3>Ready to Invoice</h3>
@@ -305,6 +306,16 @@ function InvoicePanel({
               <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
                 {problems.map((p) => (
                   <li key={p}>{p}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {warnings.length > 0 && (
+            <div className="notice warning" role="status">
+              <b>The invoice can be created, but note:</b>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {warnings.map((w) => (
+                  <li key={w}>{w}</li>
                 ))}
               </ul>
             </div>

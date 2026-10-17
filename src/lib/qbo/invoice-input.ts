@@ -4,11 +4,16 @@ import type { createClient } from "@/lib/supabase/server";
 import {
   buildInvoicePayload,
   type BuildResult,
+  type ComponentResult,
+  type ComponentType,
   type CustomerMapping,
+  type InvoiceComponent,
   type InvoiceLine,
   type InvoiceLocation,
   type InvoiceWorkOrder,
   type ItemMapping,
+  type ItemMappings,
+  type MeasurementMappings,
   type TaxClass,
 } from "./invoice";
 
@@ -58,7 +63,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     }>;
   };
 
-  const [internalRes, billingRes, linesRes, customerMapRes] = await Promise.all([
+  const [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes] = await Promise.all([
     supabase
       .from("work_order_internal")
       .select("tax_parts, tax_labor, tax_shipping, qb_invoice_id, qb_invoice_number, invoiced_at")
@@ -71,8 +76,19 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
       .eq("work_order_id", woId)
       .order("created_at"),
     supabase.from("qbo_customer_map").select("qbo_customer_id, qbo_display_name").eq("customer_id", wo.customer_id).maybeSingle(),
+    supabase
+      .from("work_order_components")
+      .select(
+        "seq, component_type, manufacturer, part_number, serial_number, dp_before, dp_after, weight_before_g, weight_after_g, weight_removed_g, result",
+      )
+      .eq("work_order_id", woId)
+      .order("seq"),
+    supabase
+      .from("qbo_measurement_map")
+      .select("customer_id, component_type, qbo_item_id, qbo_item_name")
+      .or(`customer_id.is.null,customer_id.eq.${wo.customer_id}`),
   ]);
-  for (const r of [internalRes, billingRes, linesRes, customerMapRes]) {
+  for (const r of [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes]) {
     if (r.error) throw new Error(`Could not read the invoice details: ${r.error.message}`);
   }
 
@@ -94,7 +110,9 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
 
   const [itemMapRes, aliasRes] = itemIds.length
     ? await Promise.all([
-        supabase.from("qbo_item_map").select("catalog_item_id, qbo_item_id, qbo_item_name").in("catalog_item_id", itemIds),
+        // Every row for these items: this customer's, the ones for all customers, and (only
+        // to explain a missing link) other customers'.
+        supabase.from("qbo_item_map").select("customer_id, catalog_item_id, qbo_item_id, qbo_item_name").in("catalog_item_id", itemIds),
         supabase
           .from("customer_item_aliases")
           .select("catalog_item_id, customer_part_number")
@@ -105,10 +123,56 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
   if (itemMapRes.error) throw new Error(`Could not read the item mappings: ${itemMapRes.error.message}`);
   if (aliasRes.error) throw new Error(`Could not read the customer part numbers: ${aliasRes.error.message}`);
 
-  const itemMap: Record<string, ItemMapping> = {};
-  for (const m of (itemMapRes.data ?? []) as { catalog_item_id: string; qbo_item_id: string; qbo_item_name: string }[]) {
-    itemMap[m.catalog_item_id] = { qboItemId: m.qbo_item_id, qboItemName: m.qbo_item_name };
+  const itemMap: ItemMappings = { customer: {}, default: {}, otherCustomers: {} };
+  for (const m of (itemMapRes.data ?? []) as {
+    customer_id: string | null;
+    catalog_item_id: string;
+    qbo_item_id: string;
+    qbo_item_name: string;
+  }[]) {
+    const mapping: ItemMapping = { qboItemId: m.qbo_item_id, qboItemName: m.qbo_item_name };
+    if (m.customer_id === null) itemMap.default[m.catalog_item_id] = mapping;
+    else if (m.customer_id === wo.customer_id) itemMap.customer[m.catalog_item_id] = mapping;
+    else itemMap.otherCustomers![m.catalog_item_id] = true;
   }
+  const measurementMap: MeasurementMappings = { customer: {}, default: {} };
+  for (const m of (measurementRes.data ?? []) as {
+    customer_id: string | null;
+    component_type: ComponentType;
+    qbo_item_id: string;
+    qbo_item_name: string;
+  }[]) {
+    const target = m.customer_id === null ? measurementMap.default : m.customer_id === wo.customer_id ? measurementMap.customer : null;
+    if (target) target[m.component_type] = { qboItemId: m.qbo_item_id, qboItemName: m.qbo_item_name };
+  }
+  const num = (v: number | string | null) => (v === null ? null : Number(v));
+  const components: InvoiceComponent[] = (
+    (componentsRes.data ?? []) as {
+      seq: number;
+      component_type: ComponentType;
+      manufacturer: string | null;
+      part_number: string | null;
+      serial_number: string | null;
+      dp_before: number | string | null;
+      dp_after: number | string | null;
+      weight_before_g: number | string | null;
+      weight_after_g: number | string | null;
+      weight_removed_g: number | string | null;
+      result: ComponentResult | null;
+    }[]
+  ).map((c) => ({
+    seq: c.seq,
+    componentType: c.component_type,
+    manufacturer: c.manufacturer,
+    partNumber: c.part_number,
+    serialNumber: c.serial_number,
+    dpBefore: num(c.dp_before),
+    dpAfter: num(c.dp_after),
+    weightBeforeG: num(c.weight_before_g),
+    weightAfterG: num(c.weight_after_g),
+    weightRemovedG: num(c.weight_removed_g),
+    result: c.result,
+  }));
   const aliases: Record<string, string> = {};
   for (const a of (aliasRes.data ?? []) as { catalog_item_id: string; customer_part_number: string }[]) {
     aliases[a.catalog_item_id] = a.customer_part_number;
@@ -158,6 +222,6 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     qbInvoiceId: internal?.qb_invoice_id ?? null,
     qbInvoiceNumber: internal?.qb_invoice_number ?? null,
     invoicedAt: internal?.invoiced_at ?? null,
-    result: buildInvoicePayload(workOrder, lines, customerMap, itemMap, aliases, location),
+    result: buildInvoicePayload(workOrder, lines, customerMap, itemMap, aliases, location, components, measurementMap),
   };
 }

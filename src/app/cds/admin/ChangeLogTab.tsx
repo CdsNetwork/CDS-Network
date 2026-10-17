@@ -32,6 +32,7 @@ const TABLE_LABEL: Record<string, string> = {
   qbo_connection: "QuickBooks connection",
   qbo_customer_map: "QuickBooks customer link",
   qbo_item_map: "QuickBooks item link",
+  qbo_measurement_map: "QuickBooks measurement item",
   customer_item_aliases: "Customer part number",
 };
 

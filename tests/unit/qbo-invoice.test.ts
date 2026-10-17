@@ -5,8 +5,12 @@ import {
   type CustomerMapping,
   type InvoiceLine,
   type InvoiceLocation,
+  type InvoiceComponent,
   type InvoiceWorkOrder,
   type ItemMapping,
+  type ItemMappings,
+  type MeasurementMappings,
+  measurementDescription,
 } from "@/lib/qbo/invoice";
 import { faultMessage, QboError } from "@/lib/qbo/client";
 import { qboConfig } from "@/lib/qbo/config";
@@ -58,17 +62,31 @@ function build(over: Partial<{
   wo: InvoiceWorkOrder;
   lines: InvoiceLine[];
   customer: CustomerMapping | null;
+  /** Default (all customers) item rows. */
   items: Record<string, ItemMapping | undefined>;
+  /** Item rows for this work order's customer. */
+  customerItems: Record<string, ItemMapping | undefined>;
+  /** Items linked for other customers only. */
+  otherCustomers: Record<string, boolean>;
   aliases: Record<string, string>;
   location: InvoiceLocation | null;
+  components: InvoiceComponent[];
+  measurements: MeasurementMappings;
 }> = {}) {
+  const itemMap: ItemMappings = {
+    customer: over.customerItems ?? {},
+    default: over.items ?? items,
+    otherCustomers: over.otherCustomers ?? {},
+  };
   return buildInvoicePayload(
     over.wo ?? wo(),
     over.lines ?? lines,
     over.customer === undefined ? customer : over.customer,
-    over.items ?? items,
+    itemMap,
     over.aliases ?? {},
     over.location === undefined ? location : over.location,
+    over.components ?? [],
+    over.measurements ?? { customer: {}, default: {} },
   );
 }
 
@@ -183,6 +201,160 @@ describe("buildInvoicePayload", () => {
     const r = build({ lines: [{ ...lines[1], qty: 3, customerUnitPrice: 0.335 }] });
     if (!r.ok) throw new Error(r.problems.join("; "));
     expect(r.payload.Line[0].Amount).toBe(1.01);
+  });
+});
+
+describe("customer-specific QuickBooks items", () => {
+  const ryderService: ItemMapping = { qboItemId: "101", qboItemName: "EVACUFLUSH AND BAKE DPF - FIRST STUDENT" };
+
+  it("uses the item mapped for this customer before the item mapped for all customers", () => {
+    const r = build({ customerItems: { [SERVICE]: ryderService } });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line[0].SalesItemLineDetail.ItemRef).toEqual({ value: "101", name: "EVACUFLUSH AND BAKE DPF - FIRST STUDENT" });
+    // Items without a customer row fall back to the default row.
+    expect(r.payload.Line[1].SalesItemLineDetail.ItemRef).toEqual({ value: "2", name: "Gasket" });
+  });
+
+  it("uses a customer row even when there is no default row", () => {
+    const { [SERVICE]: _omit, ...noDefault } = items;
+    void _omit;
+    const r = build({ items: noDefault, customerItems: { [SERVICE]: ryderService } });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line[0].SalesItemLineDetail.ItemRef.value).toBe("101");
+  });
+
+  it("names the customer when the item is linked for other customers only", () => {
+    const { [SERVICE]: _omit, ...noDefault } = items;
+    void _omit;
+    const r = build({ items: noDefault, otherCustomers: { [SERVICE]: true } });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.problems).toEqual([
+      "SVC-DPF DPF cleaning is not linked to a QuickBooks item for First Student (it is linked for other customers only). Link it for First Student or for all customers on Admin > QuickBooks mappings.",
+    ]);
+  });
+});
+
+describe("measurement lines", () => {
+  const dpf: InvoiceComponent = {
+    seq: 1,
+    componentType: "DPF",
+    manufacturer: "Cummins",
+    partNumber: "A029Y916",
+    serialNumber: "SN-1",
+    dpBefore: 12.5,
+    dpAfter: 1.25,
+    weightBeforeG: 15250.0,
+    weightAfterG: 14800.5,
+    weightRemovedG: 449.5,
+    result: "cleaned",
+  };
+  const doc: InvoiceComponent = {
+    ...dpf,
+    seq: 2,
+    componentType: "DOC",
+    manufacturer: "Detroit",
+    partNumber: null,
+    serialNumber: "SN-2",
+    dpBefore: null,
+    dpAfter: null,
+    weightBeforeG: null,
+    weightAfterG: null,
+    weightRemovedG: null,
+  };
+  const egr: InvoiceComponent = {
+    seq: 3,
+    componentType: "EGR",
+    manufacturer: "Volvo",
+    partNumber: "EGR-9",
+    serialNumber: "SN-3",
+    dpBefore: null,
+    dpAfter: null,
+    weightBeforeG: null,
+    weightAfterG: null,
+    weightRemovedG: null,
+    result: "failed",
+  };
+  const measurements: MeasurementMappings = {
+    customer: { DPF: { qboItemId: "201", qboItemName: "DPF MEASUREMENTS & INFO - First Student" } },
+    default: {
+      DPF: { qboItemId: "300", qboItemName: "DPF MEASUREMENTS & INFO" },
+      DOC: { qboItemId: "301", qboItemName: "DOC MEASUREMENTS & INFO" },
+      EGR: { qboItemId: "303", qboItemName: "EGR MEASUREMENTS & INFO" },
+    },
+  };
+
+  it("describes a DPF with every measurement and the result", () => {
+    expect(measurementDescription(dpf)).toBe(
+      "Manufacturer: Cummins / Part Number: A029Y916 / Serial Number: SN-1 / Pressure before: 12.5 / Pressure after: 1.25 / Weight before: 15250 g / Weight after: 14800.5 g / Weight removed: 449.5 g / Result: Cleaned Successfully",
+    );
+  });
+
+  it("leaves out empty fields", () => {
+    expect(measurementDescription({ ...doc, result: null })).toBe("Manufacturer: Detroit / Serial Number: SN-2");
+  });
+
+  it("describes an EGR with manufacturer, part, serial and Pass or Fail only", () => {
+    expect(measurementDescription(egr)).toBe("Manufacturer: Volvo / Part Number: EGR-9 / Serial Number: SN-3 / Result: Fail");
+    expect(measurementDescription({ ...egr, result: "passed", dpBefore: 5 })).toBe(
+      "Manufacturer: Volvo / Part Number: EGR-9 / Serial Number: SN-3 / Result: Pass",
+    );
+  });
+
+  it("keeps the description within the QuickBooks limit of 4000 characters", () => {
+    const long = { ...dpf, manufacturer: "M".repeat(5000) };
+    expect(measurementDescription(long).length).toBeLessThanOrEqual(4000);
+  });
+
+  it("adds one $0 non-taxable line per component after the billable lines, in seq order, customer item first", () => {
+    const r = build({ components: [egr, doc, dpf], measurements });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.warnings).toEqual([]);
+    expect(r.payload.Line).toHaveLength(lines.length + 3);
+    const extra = r.payload.Line.slice(lines.length);
+    expect(extra.map((l) => l.SalesItemLineDetail.ItemRef.value)).toEqual(["201", "301", "303"]);
+    expect(extra[0]).toEqual({
+      DetailType: "SalesItemLineDetail",
+      Amount: 0,
+      Description: measurementDescription(dpf),
+      SalesItemLineDetail: {
+        ItemRef: { value: "201", name: "DPF MEASUREMENTS & INFO - First Student" },
+        Qty: 1,
+        UnitPrice: 0,
+        TaxCodeRef: { value: "NON" },
+      },
+    });
+    for (const l of extra) {
+      expect(l.Amount).toBe(0);
+      expect(l.SalesItemLineDetail.UnitPrice).toBe(0);
+      expect(l.SalesItemLineDetail.Qty).toBe(1);
+      expect(l.SalesItemLineDetail.TaxCodeRef.value).toBe("NON");
+    }
+    expect(extra[2].Description).toBe("Manufacturer: Volvo / Part Number: EGR-9 / Serial Number: SN-3 / Result: Fail");
+  });
+
+  it("skips a component type without a measurement item and warns, without blocking the invoice", () => {
+    const scr: InvoiceComponent = { ...doc, seq: 4, componentType: "SCR" };
+    const r = build({ components: [dpf, scr, { ...scr, seq: 5 }], measurements });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.payload.Line).toHaveLength(lines.length + 1);
+    expect(r.warnings).toEqual([
+      "No QuickBooks measurement item for SCR (First Student or all customers), so SCR #4, SCR #5 measurements are not on the invoice. Map one on Admin > QuickBooks mappings.",
+    ]);
+  });
+
+  it("keeps warnings next to problems when the invoice cannot be built", () => {
+    const r = build({ customer: null, components: [{ ...doc, componentType: "SCR" }], measurements });
+    expect(r.ok).toBe(false);
+    expect(r.warnings).toHaveLength(1);
+  });
+
+  it("adds no measurement lines when the work order has no components", () => {
+    const r = build({ measurements });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line).toHaveLength(lines.length);
+    expect(r.warnings).toEqual([]);
   });
 });
 

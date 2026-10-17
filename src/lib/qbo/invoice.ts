@@ -12,6 +12,11 @@
  *   * Each line says only whether it is taxable: SalesItemLineDetail.TaxCodeRef "TAX" or
  *     "NON". TxnTaxDetail is not sent: overriding the calculated tax is unreliable.
  * DocNumber is not sent, so QuickBooks numbers the invoice itself.
+ *
+ * QuickBooks items can be per customer (CDS has "EVACUFLUSH AND BAKE DPF - RYDER" next to
+ * "... - ENTERPRISE"): a catalog item mapped for the work order's customer wins over the
+ * mapping for all customers. After the billable lines, each component gets a $0
+ * "measurements" line (per customer and component type) with its readings.
  */
 
 export type TaxClass = "parts" | "labor" | "shipping" | "exempt";
@@ -44,6 +49,39 @@ export type InvoiceLine = {
 export type CustomerMapping = { qboCustomerId: string; qboDisplayName: string };
 export type ItemMapping = { qboItemId: string; qboItemName: string };
 
+/** The QuickBooks items for the catalog items on one work order, by catalog item id. */
+export type ItemMappings = {
+  /** Mapped for this work order's customer (qbo_item_map.customer_id = the customer). */
+  customer: Record<string, ItemMapping | undefined>;
+  /** Mapped for all customers (qbo_item_map.customer_id is null). */
+  default: Record<string, ItemMapping | undefined>;
+  /** Catalog items that are mapped for some other customer (used to explain a missing link). */
+  otherCustomers?: Record<string, boolean | undefined>;
+};
+
+export type ComponentType = "DPF" | "DOC" | "SCR" | "EGR";
+export type ComponentResult = "cleaned" | "passed" | "failed" | "condemned";
+
+export type InvoiceComponent = {
+  seq: number;
+  componentType: ComponentType;
+  manufacturer: string | null;
+  partNumber: string | null;
+  serialNumber: string | null;
+  dpBefore: number | null;
+  dpAfter: number | null;
+  weightBeforeG: number | null;
+  weightAfterG: number | null;
+  weightRemovedG: number | null;
+  result: ComponentResult | null;
+};
+
+/** The $0 measurement items by component type (qbo_measurement_map). */
+export type MeasurementMappings = {
+  customer: Partial<Record<ComponentType, ItemMapping>>;
+  default: Partial<Record<ComponentType, ItemMapping>>;
+};
+
 export type InvoiceLocation = {
   label: string;
   addressLine1: string | null;
@@ -70,7 +108,20 @@ export type QboInvoicePayload = {
   CustomerMemo?: { value: string };
 };
 
-export type BuildResult = { ok: true; payload: QboInvoicePayload } | { ok: false; problems: string[] };
+/** Problems block the invoice; warnings do not (they are shown next to the button). */
+export type BuildResult =
+  | { ok: true; payload: QboInvoicePayload; warnings: string[] }
+  | { ok: false; problems: string[]; warnings: string[] };
+
+/** QuickBooks limit for a line description. */
+const DESCRIPTION_MAX = 4000;
+
+const RESULT_TEXT: Record<ComponentResult, string> = {
+  cleaned: "Cleaned Successfully",
+  passed: "Pass",
+  failed: "Fail",
+  condemned: "Condemned",
+};
 
 const ZIP = /^\d{5}(-\d{4})?$/;
 const STATE = /^[A-Z]{2}$/;
@@ -82,6 +133,52 @@ export function cents(n: number): number {
 
 function clip(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
+}
+
+function mapped(m: ItemMapping | undefined): m is ItemMapping {
+  return !!m?.qboItemId?.trim();
+}
+
+/** A reading without trailing zeros (15250.0 -> "15250"); null when there is none. */
+function reading(n: number | null | undefined): string | null {
+  if (n === null || n === undefined) return null;
+  const v = Number(n);
+  return Number.isFinite(v) ? String(Math.round(v * 100) / 100) : null;
+}
+
+/**
+ * The description of a component's measurement line, for example
+ * "Manufacturer: X / Part Number: Y / ... / Result: Cleaned Successfully". Empty fields are
+ * left out; EGR coolers have no measurements, only Pass or Fail.
+ */
+export function measurementDescription(c: InvoiceComponent): string {
+  const egr = c.componentType === "EGR";
+  const removed =
+    c.weightRemovedG ?? (c.weightBeforeG !== null && c.weightAfterG !== null ? Number(c.weightBeforeG) - Number(c.weightAfterG) : null);
+  const grams = (n: number | null) => {
+    const r = reading(n);
+    return r === null ? null : `${r} g`;
+  };
+  const fields: [string, string | null][] = [
+    ["Manufacturer", c.manufacturer?.trim() || null],
+    ["Part Number", c.partNumber?.trim() || null],
+    ["Serial Number", c.serialNumber?.trim() || null],
+    ...(egr
+      ? []
+      : ([
+          ["Pressure before", reading(c.dpBefore)],
+          ["Pressure after", reading(c.dpAfter)],
+          ["Weight before", grams(c.weightBeforeG)],
+          ["Weight after", grams(c.weightAfterG)],
+          ["Weight removed", grams(removed)],
+        ] as [string, string | null][])),
+    ["Result", c.result && (!egr || c.result === "passed" || c.result === "failed") ? RESULT_TEXT[c.result] : null],
+  ];
+  const text = fields
+    .filter((f): f is [string, string] => !!f[1])
+    .map(([label, value]) => `${label}: ${value}`)
+    .join(" / ");
+  return clip(text || `${c.componentType} #${c.seq}`, DESCRIPTION_MAX);
 }
 
 export function isTaxable(taxClass: TaxClass, wo: Pick<InvoiceWorkOrder, "taxParts" | "taxLabor" | "taxShipping" | "customerTaxExempt">): boolean {
@@ -108,11 +205,14 @@ export function buildInvoicePayload(
   workOrder: InvoiceWorkOrder,
   lines: InvoiceLine[],
   customerMap: CustomerMapping | null,
-  itemMap: Record<string, ItemMapping | undefined>,
+  itemMap: ItemMappings,
   aliases: Record<string, string | undefined>,
   location: InvoiceLocation | null,
+  components: InvoiceComponent[] = [],
+  measurementMap: MeasurementMappings = { customer: {}, default: {} },
 ): BuildResult {
   const problems: string[] = [];
+  const warnings: string[] = [];
 
   if (workOrder.market !== "US") {
     problems.push("QuickBooks invoices are set up for US work orders only.");
@@ -151,11 +251,18 @@ export function buildInvoicePayload(
   const unmapped = new Set<string>();
   const qboLines: QboInvoiceLine[] = [];
   for (const l of lines) {
-    const item = itemMap[l.catalogItemId];
-    if (!item?.qboItemId?.trim()) {
+    const forCustomer = itemMap.customer[l.catalogItemId];
+    const forAll = itemMap.default[l.catalogItemId];
+    const item = mapped(forCustomer) ? forCustomer : mapped(forAll) ? forAll : null;
+    if (!item) {
       if (!unmapped.has(l.catalogItemId)) {
         unmapped.add(l.catalogItemId);
-        problems.push(`${l.sku} ${l.name} is not linked to a QuickBooks item. Link it on Admin > QuickBooks mappings.`);
+        const who = workOrder.customerName;
+        problems.push(
+          itemMap.otherCustomers?.[l.catalogItemId]
+            ? `${l.sku} ${l.name} is not linked to a QuickBooks item for ${who} (it is linked for other customers only). Link it for ${who} or for all customers on Admin > QuickBooks mappings.`
+            : `${l.sku} ${l.name} is not linked to a QuickBooks item. Link it on Admin > QuickBooks mappings.`,
+        );
       }
       continue;
     }
@@ -172,7 +279,7 @@ export function buildInvoicePayload(
     qboLines.push({
       DetailType: "SalesItemLineDetail",
       Amount: cents(l.qty * unitPrice),
-      Description: clip(alias ? `Part # ${alias} - ${l.name}` : l.name, 4000),
+      Description: clip(alias ? `Part # ${alias} - ${l.name}` : l.name, DESCRIPTION_MAX),
       SalesItemLineDetail: {
         ItemRef: { value: item.qboItemId, name: item.qboItemName },
         Qty: l.qty,
@@ -182,7 +289,36 @@ export function buildInvoicePayload(
     });
   }
 
-  if (problems.length || !customerMap || !shipAddr) return { ok: false, problems };
+  // $0 measurement lines, one per component in seq order. A component type without a
+  // measurement item is left off with a warning: it must not stop the invoice.
+  const skipped = new Map<ComponentType, string[]>();
+  for (const c of [...components].sort((a, b) => a.seq - b.seq)) {
+    const forCustomer = measurementMap.customer[c.componentType];
+    const forAll = measurementMap.default[c.componentType];
+    const item = mapped(forCustomer) ? forCustomer : mapped(forAll) ? forAll : null;
+    if (!item) {
+      skipped.set(c.componentType, [...(skipped.get(c.componentType) ?? []), `${c.componentType} #${c.seq}`]);
+      continue;
+    }
+    qboLines.push({
+      DetailType: "SalesItemLineDetail",
+      Amount: 0,
+      Description: measurementDescription(c),
+      SalesItemLineDetail: {
+        ItemRef: { value: item.qboItemId, name: item.qboItemName },
+        Qty: 1,
+        UnitPrice: 0,
+        TaxCodeRef: { value: "NON" },
+      },
+    });
+  }
+  for (const [type, labels] of skipped) {
+    warnings.push(
+      `No QuickBooks measurement item for ${type} (${workOrder.customerName} or all customers), so ${labels.join(", ")} measurements are not on the invoice. Map one on Admin > QuickBooks mappings.`,
+    );
+  }
+
+  if (problems.length || !customerMap || !shipAddr) return { ok: false, problems, warnings };
 
   const po = workOrder.poNumber?.trim();
   const unit = workOrder.unitNumber?.trim();
@@ -198,5 +334,6 @@ export function buildInvoicePayload(
       PrivateNote: clip([`Portal WO-${workOrder.woNumber}`, po && `PO ${po}`].filter(Boolean).join(" | "), 4000),
       ...(memo ? { CustomerMemo: { value: clip(memo, 1000) } } : {}),
     },
+    warnings,
   };
 }

@@ -12,15 +12,20 @@ import {
   removeAlias,
   removeCustomerMap,
   removeItemMap,
+  removeMeasurementMap,
   saveAlias,
   saveCustomerMap,
   saveItemMap,
+  saveMeasurementMap,
 } from "./qbo-actions";
 
 type Customer = { id: string; code: string; name: string };
 type Item = { id: string; sku: string; name: string };
 type CustomerMap = { customer_id: string; qbo_customer_id: string; qbo_display_name: string };
-type ItemMap = { catalog_item_id: string; qbo_item_id: string; qbo_item_name: string };
+type ItemMap = { id: string; customer_id: string | null; catalog_item_id: string; qbo_item_id: string; qbo_item_name: string };
+type MeasurementMap = { id: string; customer_id: string | null; component_type: string; qbo_item_id: string; qbo_item_name: string };
+
+const COMPONENT_TYPES = ["DPF", "DOC", "SCR", "EGR"] as const;
 type Alias = {
   id: string;
   customer_part_number: string;
@@ -47,22 +52,33 @@ async function qboLists(connected: boolean): Promise<{ customers: QboCustomer[] 
 export async function QuickBooksTab() {
   const supabase = await createClient();
   const status = await qboStatus(supabase);
-  const [customersRes, itemsRes, customerMapRes, itemMapRes, aliasRes, lists] = await Promise.all([
+  const [customersRes, itemsRes, customerMapRes, itemMapRes, measurementRes, aliasRes, lists] = await Promise.all([
     supabase.from("customers").select("id, code, name").eq("active", true).order("name"),
     supabase.from("catalog_items").select("id, sku, name").eq("active", true).order("sku"),
     supabase.from("qbo_customer_map").select("customer_id, qbo_customer_id, qbo_display_name"),
-    supabase.from("qbo_item_map").select("catalog_item_id, qbo_item_id, qbo_item_name"),
+    supabase.from("qbo_item_map").select("id, customer_id, catalog_item_id, qbo_item_id, qbo_item_name"),
+    supabase.from("qbo_measurement_map").select("id, customer_id, component_type, qbo_item_id, qbo_item_name"),
     supabase
       .from("customer_item_aliases")
       .select("id, customer_part_number, customers(code, name), catalog_items(sku, name)")
       .order("customer_part_number"),
     qboLists(status.connected),
   ]);
-  const loadError = [customersRes, itemsRes, customerMapRes, itemMapRes, aliasRes].some((r) => r.error);
+  const loadError = [customersRes, itemsRes, customerMapRes, itemMapRes, measurementRes, aliasRes].some((r) => r.error);
   const customers = (customersRes.data ?? []) as Customer[];
   const items = (itemsRes.data ?? []) as Item[];
   const customerMap = new Map(((customerMapRes.data ?? []) as CustomerMap[]).map((m) => [m.customer_id, m]));
-  const itemMap = new Map(((itemMapRes.data ?? []) as ItemMap[]).map((m) => [m.catalog_item_id, m]));
+  const itemRows = (itemMapRes.data ?? []) as ItemMap[];
+  // Mappings for all customers, by catalog item.
+  const itemMap = new Map(itemRows.filter((m) => m.customer_id === null).map((m) => [m.catalog_item_id, m]));
+  // Catalog items with at least one customer-specific mapping.
+  const customerItemCount = new Map<string, number>();
+  for (const m of itemRows) {
+    if (m.customer_id) customerItemCount.set(m.catalog_item_id, (customerItemCount.get(m.catalog_item_id) ?? 0) + 1);
+  }
+  const measurementRows = (measurementRes.data ?? []) as MeasurementMap[];
+  const customerById = new Map(customers.map((c) => [c.id, c]));
+  const itemById = new Map(items.map((i) => [i.id, i]));
   const aliases = (aliasRes.data ?? []) as Alias[];
 
   const customerOptions: SearchOption[] = customers.map((c) => ({
@@ -70,11 +86,45 @@ export async function QuickBooksTab() {
     label: `${c.code} - ${c.name}`,
     hint: customerMap.get(c.id) ? `QuickBooks: ${customerMap.get(c.id)!.qbo_display_name}` : "Not linked",
   }));
-  const itemOptions: SearchOption[] = items.map((i) => ({
-    value: i.id,
-    label: `${i.sku} - ${i.name}`,
-    hint: itemMap.get(i.id) ? `QuickBooks: ${itemMap.get(i.id)!.qbo_item_name}` : "Not linked",
-  }));
+  const itemOptions: SearchOption[] = items.map((i) => {
+    const forAll = itemMap.get(i.id);
+    const perCustomer = customerItemCount.get(i.id) ?? 0;
+    return {
+      value: i.id,
+      label: `${i.sku} - ${i.name}`,
+      hint: [
+        forAll ? `QuickBooks: ${forAll.qbo_item_name}` : perCustomer ? null : "Not linked",
+        perCustomer ? `${perCustomer} customer-specific` : null,
+      ]
+        .filter(Boolean)
+        .join(" - "),
+    };
+  });
+  // "All customers" first: the mapping every customer without its own row uses.
+  const mappingCustomerOptions: SearchOption[] = [
+    { value: "", label: "All customers", hint: "Used unless the customer has its own mapping" },
+    ...customers.map((c) => ({ value: c.id, label: `${c.code} - ${c.name}` })),
+  ];
+  const customerLabel = (id: string) => {
+    const c = customerById.get(id);
+    return c ? `${c.code} ${c.name}` : "Inactive customer";
+  };
+  // Customer-specific item rows, grouped by customer (sorted by customer name, then SKU).
+  const customerItemGroups = groupByCustomer(
+    itemRows.filter((m): m is ItemMap & { customer_id: string } => m.customer_id !== null),
+    customerLabel,
+    (m) => itemById.get(m.catalog_item_id)?.sku ?? "",
+  );
+  const measurementGroups = [
+    ...(measurementRows.some((m) => m.customer_id === null)
+      ? [{ key: "all", label: "All customers", rows: sortByType(measurementRows.filter((m) => m.customer_id === null)) }]
+      : []),
+    ...groupByCustomer(
+      measurementRows.filter((m): m is MeasurementMap & { customer_id: string } => m.customer_id !== null),
+      customerLabel,
+      (m) => String(COMPONENT_TYPES.indexOf(m.component_type as (typeof COMPONENT_TYPES)[number])),
+    ),
+  ];
   const qboCustomerOptions: SearchOption[] | null =
     lists.customers?.map((c) => ({
       value: `${c.Id}::${c.DisplayName}`,
@@ -88,7 +138,7 @@ export async function QuickBooksTab() {
       hint: [`QuickBooks id ${i.Id}`, i.Type, i.Sku && `SKU ${i.Sku}`].filter(Boolean).join(" - "),
     })) ?? null;
 
-  const unmappedItems = items.filter((i) => !itemMap.has(i.id));
+  const unmappedItems = items.filter((i) => !itemMap.has(i.id) && !customerItemCount.has(i.id));
   const unmappedCustomers = customers.filter((c) => !customerMap.has(c.id));
 
   return (
@@ -124,7 +174,7 @@ export async function QuickBooksTab() {
               </label>
               <FormSearchSelect id="qmap-customer" name="customer_id" options={customerOptions} required placeholder="Type a customer name or code" />
             </div>
-            <QboPicker kind="customer" options={qboCustomerOptions} />
+            <QboPicker kind="customer" idPrefix="qmap-customer" options={qboCustomerOptions} />
           </div>
         </ActionForm>
         <div className="tablewrap" style={{ marginTop: 14 }}>
@@ -184,18 +234,28 @@ export async function QuickBooksTab() {
       {/* ---------------------------------------------------------- items */}
       <div className="section">
         <h3>Items</h3>
+        <p className="small">
+          Services are often separate QuickBooks items per customer (for example &quot;EVACUFLUSH AND BAKE DPF - RYDER&quot;).
+          Link a catalog item for one customer to use that customer&apos;s QuickBooks item; customers without their own link use
+          the link for all customers.
+        </p>
         <ActionForm action={saveItemMap} submitLabel="Link item" resetOnSuccess>
-          <div className="grid2">
+          <div className="grid3">
             <div className="field">
               <label htmlFor="qmap-item">
                 Catalog item <span className="req">*</span>
               </label>
               <FormSearchSelect id="qmap-item" name="catalog_item_id" options={itemOptions} required placeholder="Type SKU or name" limit={150} />
             </div>
-            <QboPicker kind="item" options={qboItemOptions} />
+            <div className="field">
+              <label htmlFor="qmap-item-customer">Customer</label>
+              <FormSearchSelect id="qmap-item-customer" name="customer_id" options={mappingCustomerOptions} placeholder="All customers" />
+            </div>
+            <QboPicker kind="item" idPrefix="qmap-item" options={qboItemOptions} />
           </div>
         </ActionForm>
-        <div className="tablewrap" style={{ marginTop: 14 }}>
+        <h4 style={{ marginTop: 16 }}>All customers</h4>
+        <div className="tablewrap" style={{ marginTop: 8 }}>
           <table>
             <thead>
               <tr>
@@ -208,7 +268,7 @@ export async function QuickBooksTab() {
               {itemMap.size === 0 && (
                 <tr>
                   <td colSpan={3} className="small">
-                    No items linked yet.
+                    No items linked for all customers yet.
                   </td>
                 </tr>
               )}
@@ -217,7 +277,7 @@ export async function QuickBooksTab() {
                 .map((i) => {
                   const m = itemMap.get(i.id)!;
                   return (
-                    <tr key={i.id}>
+                    <tr key={m.id}>
                       <td className={wrapCell(i.name)}>
                         <b>{i.sku}</b> {i.name}
                       </td>
@@ -226,7 +286,7 @@ export async function QuickBooksTab() {
                       </td>
                       <td>
                         <ActionForm
-                          action={removeItemMap.bind(null, i.id)}
+                          action={removeItemMap.bind(null, m.id)}
                           submitLabel="Remove"
                           pendingLabel="..."
                           submitClassName="btn btn-secondary btn-small"
@@ -238,6 +298,51 @@ export async function QuickBooksTab() {
             </tbody>
           </table>
         </div>
+        {customerItemGroups.map((g) => (
+          <div key={g.key}>
+            <h4 style={{ marginTop: 16 }}>{g.label}</h4>
+            <div className="tablewrap" style={{ marginTop: 8 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Catalog item</th>
+                    <th>QuickBooks item</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.rows.map((m) => {
+                    const i = itemById.get(m.catalog_item_id);
+                    return (
+                      <tr key={m.id}>
+                        <td className={wrapCell(i?.name)}>
+                          {i ? (
+                            <>
+                              <b>{i.sku}</b> {i.name}
+                            </>
+                          ) : (
+                            <span className="small">Inactive catalog item</span>
+                          )}
+                        </td>
+                        <td>
+                          {m.qbo_item_name} <span className="small">(id {m.qbo_item_id})</span>
+                        </td>
+                        <td>
+                          <ActionForm
+                            action={removeItemMap.bind(null, m.id)}
+                            submitLabel="Remove"
+                            pendingLabel="..."
+                            submitClassName="btn btn-secondary btn-small"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
         {unmappedItems.length > 0 ? (
           <details style={{ marginTop: 10 }}>
             <summary className="small link">{unmappedItems.length} active items are not linked yet</summary>
@@ -248,6 +353,81 @@ export async function QuickBooksTab() {
         ) : (
           <p className="small">Every active catalog item is linked.</p>
         )}
+      </div>
+
+      {/* ---------------------------------------------------------- measurement lines */}
+      <div className="section">
+        <h3>Measurement lines</h3>
+        <p className="small">
+          Each component on the work order is added to the invoice as a $0 line with its readings (manufacturer, part and
+          serial number, pressures, weights, result), using the QuickBooks measurement item for the customer and component type
+          (for example &quot;DPF MEASUREMENTS &amp; INFO-RYDER&quot;), else the one for all customers. Without one, the line is
+          left off and the invoice can still be created.
+        </p>
+        <ActionForm action={saveMeasurementMap} submitLabel="Save measurement item" resetOnSuccess>
+          <div className="grid3">
+            <div className="field">
+              <label htmlFor="qmeas-customer">Customer</label>
+              <FormSearchSelect id="qmeas-customer" name="customer_id" options={mappingCustomerOptions} placeholder="All customers" />
+            </div>
+            <div className="field">
+              <label htmlFor="qmeas-type">
+                Component type <span className="req">*</span>
+              </label>
+              <select id="qmeas-type" name="component_type" className="input" required defaultValue="">
+                <option value="" disabled>
+                  Choose
+                </option>
+                {COMPONENT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <QboPicker kind="item" idPrefix="qmeas" options={qboItemOptions} />
+          </div>
+        </ActionForm>
+        <div className="tablewrap" style={{ marginTop: 14 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Component type</th>
+                <th>QuickBooks item</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {measurementGroups.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="small">
+                    No measurement items yet: invoices have no measurement lines.
+                  </td>
+                </tr>
+              )}
+              {measurementGroups.flatMap((g) =>
+                g.rows.map((m, n) => (
+                  <tr key={m.id}>
+                    <td>{n === 0 ? <b>{g.label}</b> : null}</td>
+                    <td>{m.component_type}</td>
+                    <td>
+                      {m.qbo_item_name} <span className="small">(id {m.qbo_item_id})</span>
+                    </td>
+                    <td>
+                      <ActionForm
+                        action={removeMeasurementMap.bind(null, m.id)}
+                        submitLabel="Remove"
+                        pendingLabel="..."
+                        submitClassName="btn btn-secondary btn-small"
+                      />
+                    </td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* ---------------------------------------------------------- customer part numbers */}
@@ -328,18 +508,39 @@ export async function QuickBooksTab() {
   );
 }
 
-/** The QuickBooks record: a list from QuickBooks when connected, else id and name typed in. */
-function QboPicker({ kind, options }: { kind: "customer" | "item"; options: SearchOption[] | null }) {
+/** Rows of customer-specific mappings grouped by customer, groups sorted by customer label. */
+function groupByCustomer<T extends { customer_id: string }>(
+  rows: T[],
+  label: (customerId: string) => string,
+  sortKey: (row: T) => string,
+): { key: string; label: string; rows: T[] }[] {
+  const groups = new Map<string, T[]>();
+  for (const r of rows) groups.set(r.customer_id, [...(groups.get(r.customer_id) ?? []), r]);
+  return [...groups.entries()]
+    .map(([key, list]) => ({ key, label: label(key), rows: list.sort((a, b) => sortKey(a).localeCompare(sortKey(b))) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function sortByType<T extends { component_type: string }>(rows: T[]): T[] {
+  const order = (t: string) => COMPONENT_TYPES.indexOf(t as (typeof COMPONENT_TYPES)[number]);
+  return [...rows].sort((a, b) => order(a.component_type) - order(b.component_type));
+}
+
+/**
+ * The QuickBooks record: a list from QuickBooks when connected, else id and name typed in.
+ * idPrefix keeps element ids unique when two forms on the tab pick a QuickBooks item.
+ */
+function QboPicker({ kind, idPrefix, options }: { kind: "customer" | "item"; idPrefix: string; options: SearchOption[] | null }) {
   const field = kind === "customer" ? "qbo_customer" : "qbo_item";
   const label = kind === "customer" ? "QuickBooks customer" : "QuickBooks item";
   if (options) {
     return (
       <div className="field">
-        <label htmlFor={`${field}-pick`}>
+        <label htmlFor={`${idPrefix}-${field}-pick`}>
           {label} <span className="req">*</span>
         </label>
         <FormSearchSelect
-          id={`${field}-pick`}
+          id={`${idPrefix}-${field}-pick`}
           name={field}
           options={options}
           required
@@ -352,16 +553,16 @@ function QboPicker({ kind, options }: { kind: "customer" | "item"; options: Sear
   return (
     <div className="grid2" style={{ gap: 10 }}>
       <div className="field">
-        <label htmlFor={`${field}-id`}>
+        <label htmlFor={`${idPrefix}-${field}-id`}>
           {label} id <span className="req">*</span>
         </label>
-        <input id={`${field}-id`} name={`${field}_id`} className="input" required inputMode="numeric" pattern="[0-9]+" maxLength={50} />
+        <input id={`${idPrefix}-${field}-id`} name={`${field}_id`} className="input" required inputMode="numeric" pattern="[0-9]+" maxLength={50} />
       </div>
       <div className="field">
-        <label htmlFor={`${field}-name`}>
+        <label htmlFor={`${idPrefix}-${field}-name`}>
           {kind === "customer" ? "Display name" : "Item name"} <span className="req">*</span>
         </label>
-        <input id={`${field}-name`} name={`${field}_name`} className="input" required maxLength={500} />
+        <input id={`${idPrefix}-${field}-name`} name={`${field}_name`} className="input" required maxLength={500} />
       </div>
     </div>
   );

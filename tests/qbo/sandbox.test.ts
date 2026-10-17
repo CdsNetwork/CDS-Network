@@ -45,7 +45,7 @@ describe.skipIf(!realm || !token)("QuickBooks sandbox", () => {
       },
       [{ catalogItemId: "x", sku: "TEST", name: "Sandbox test line", qty: 1, customerUnitPrice: 1, taxClass: "parts" }],
       { qboCustomerId: customerId!, qboDisplayName: "Sandbox customer" },
-      { x: { qboItemId: itemId!, qboItemName: "Sandbox item" } },
+      { customer: {}, default: { x: { qboItemId: itemId!, qboItemName: "Sandbox item" } } },
       {},
       { label: "Sandbox", addressLine1: "2600 Marine Way", city: "Mountain View", region: "CA", postalCode: "94043", country: "US" },
     );
