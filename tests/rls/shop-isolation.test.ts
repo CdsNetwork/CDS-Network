@@ -46,6 +46,7 @@ const CDS_ONLY_TABLES = [
   "app_settings",
   "audit_log",
   "inbound_emails",
+  "customer_email_domains",
   "integration_sync",
   "shipment_tracking_events",
   "shipment_label_costs",

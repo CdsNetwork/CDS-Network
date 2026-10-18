@@ -1,0 +1,8 @@
+{
+  "messageId": "<iproc-PO4500124410@portal.firststudent.example>",
+  "from": "Purchasing Portal <no-reply@portal.firststudent.example>",
+  "to": ["dispatch@cds.direct"],
+  "subject": "Purchase Order 4500124410 issued",
+  "receivedAt": "2026-10-19T19:20:00Z",
+  "html": "<html><body><h2>Purchase Order 4500124410</h2><table><tr><td>Ship To</td><td>Dept 30418M, 77 Orchard Lane, Maple Grove, MN 55369</td></tr><tr><td>Vehicle</td><td>Bus 7720</td></tr></table><table><tr><th>Item</th><th>Description</th><th>Qty</th></tr><tr><td>FS-DOC-0044</td><td>DOC cleaning service</td><td>1</td></tr><tr><td>FS-CLP-0310</td><td>V-band clamp 4in</td><td>2</td></tr></table><p>Vendor: please confirm receipt. Pickup requested.</p></body></html>"
+}
