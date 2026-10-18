@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { SearchSelect } from "@/components/SearchSelect";
-import { ActionForm, M2Button } from "@/components/cds-admin/ActionForm";
+import { ActionForm } from "@/components/cds-admin/ActionForm";
+import { LabelPanel } from "@/components/shipping/LabelPanel";
+import { ShippingSettings } from "@/components/shipping/ShippingSettings";
+import { activeLabels, shipStationConfigured } from "@/lib/shipstation/views";
 import { one } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL, money, woLabel, wrapCell } from "@/lib/format";
@@ -37,7 +40,7 @@ const STATUS_TAG: Record<string, string> = { delivered: "tag green", in_transit:
 
 export default async function ShippingPage({ searchParams }: PageProps<"/cds/shipping">) {
   await requireCds();
-  const { edit, new: showNew } = await searchParams;
+  const { edit, new: showNew, settings } = await searchParams;
   const supabase = await createClient();
 
   const [{ data: shipData, error }, { data: woData }] = await Promise.all([
@@ -58,6 +61,8 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
   const shipments = (shipData ?? []) as ShipmentRow[];
   const openWos = (woData ?? []) as OpenWo[];
   const editing = typeof edit === "string" ? shipments.find((s) => s.id === edit) : undefined;
+  const labels = await activeLabels(supabase, { shipmentIds: shipments.map((s) => s.id) }, true);
+  const canShip = shipStationConfigured();
 
   const exceptions = shipments.filter((s) => s.label_status === "needed" || s.label_status === "error").length;
   const inTransit = shipments.filter((s) => IN_TRANSIT.includes(s.status)).length;
@@ -69,9 +74,14 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
           <h1>Shipping - US</h1>
           <p>Create and track customer → affiliate, affiliate → customer, and CDS → customer shipments.</p>
         </div>
-        <Link className="btn btn-primary" href="/cds/shipping?new=1#create">
-          + Create Shipment
-        </Link>
+        <div className="row" style={{ gap: 8 }}>
+          <Link className="btn btn-secondary" href="/cds/shipping?settings=1#settings">
+            Shipping settings
+          </Link>
+          <Link className="btn btn-primary" href="/cds/shipping?new=1#create">
+            + Create Shipment
+          </Link>
+        </div>
       </div>
 
       <div className="cards" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
@@ -90,6 +100,8 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
       </div>
 
       {error && <div className="notice danger">Could not load shipments. Refresh the page to try again.</div>}
+
+      {settings && !editing && !showNew && <ShippingSettings />}
 
       {editing && (
         <div className="section" id="edit">
@@ -114,10 +126,10 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
             </Link>
           </div>
           <p className="small" style={{ marginTop: -6 }}>
-            Record a shipment by hand. Buying labels and live carrier rates come in Milestone 2; add the tracking number
-            from the carrier yourself.
+            Save the leg first, then use Get rates and Create label on its row. A leg shipped outside the portal can keep a
+            tracking number typed by hand.
           </p>
-          <ActionForm action={createShipment} submitLabel="Save Without Label" resetOnSuccess>
+          <ActionForm action={createShipment} submitLabel="Save Shipment" resetOnSuccess>
             <div className="field">
               <label htmlFor="work_order_id">
                 Work Order <span className="req">*</span>
@@ -137,10 +149,6 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
               />
             </div>
             <ShipmentFields />
-            <div className="row" style={{ margin: "4px 0 10px" }}>
-              <M2Button label="Compare Rates" />
-              <M2Button label="Create Label" />
-            </div>
           </ActionForm>
         </div>
       )}
@@ -155,6 +163,7 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
               <th>Carrier</th>
               <th>Tracking</th>
               <th>Label</th>
+              <th>ShipStation label</th>
               <th>Status</th>
               <th>Notes</th>
               <th className="num">Cost</th>
@@ -164,7 +173,7 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
           <tbody>
             {shipments.length === 0 && (
               <tr>
-                <td colSpan={10} className="small">
+                <td colSpan={11} className="small">
                   No shipments yet.
                 </td>
               </tr>
@@ -200,6 +209,9 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
                     <span className={`tag${s.label_status === "error" || s.label_status === "needed" ? "" : " blue"}`}>
                       {labelStatusLabel(s.label_status)}
                     </span>
+                  </td>
+                  <td style={{ minWidth: 260 }}>
+                    <LabelPanel shipmentId={s.id} woId={s.work_order_id} label={labels.get(s.id) ?? null} configured={canShip} />
                   </td>
                   <td style={{ minWidth: 200 }}>
                     <span className={STATUS_TAG[s.status] ?? "tag"}>{SHIPMENT_STATUS_LABEL[s.status] ?? s.status}</span>
@@ -238,8 +250,7 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
         </table>
       </div>
       <div className="row small" style={{ marginTop: 8 }}>
-        Print, email and void label actions, and automatic carrier status updates, arrive in Milestone 2. Set the status by
-        hand for now.
+        Statuses of legs with a ShipStation label follow the carrier (tracking webhook). Legs without one are set by hand.
       </div>
 
       <div className="section">
@@ -295,6 +306,7 @@ function ShipmentFields({ s }: { s?: ShipmentRow }) {
             <option value="">Not set</option>
             <option value="UPS">UPS</option>
             <option value="FedEx">FedEx</option>
+            <option value="USPS">USPS</option>
             <option value="Other">Other</option>
           </select>
         </div>

@@ -1,7 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/forgot-password", "/auth/confirm"];
+// The ShipStation webhook has no session: it checks the ShipStation signature itself.
+const PUBLIC_PATHS = ["/login", "/forgot-password", "/auth/confirm", "/api/shipstation/webhook"];
 
 /** Refreshes the Supabase session cookie and sends signed-out visitors to /login. */
 export async function proxy(request: NextRequest) {

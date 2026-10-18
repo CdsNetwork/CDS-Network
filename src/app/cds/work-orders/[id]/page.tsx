@@ -39,6 +39,8 @@ import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { LabelPanel } from "@/components/shipping/LabelPanel";
+import { activeLabels, shipStationConfigured } from "@/lib/shipstation/views";
 import {
   addLine,
   addShipment,
@@ -422,6 +424,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const requests = (authRes.data ?? []) as unknown as AuthRequest[];
   const attachments = (attRes.data ?? []) as Attachment[];
   const shipments = (shipRes.data ?? []) as unknown as Shipment[];
+  const labels = shipments.length ? await activeLabels(supabase, { workOrderId: id }, true) : new Map();
+  const canShip = shipStationConfigured();
   const events = (eventRes.data ?? []) as WoEvent[];
   const shops = (shopsRes.data ?? []) as ShopRow[];
   const catalog = (catalogRes.data ?? []) as { id: string; sku: string; name: string; category: string; oe_cross: string | null }[];
@@ -619,6 +623,9 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       Quoted {money(si?.quoted_cost)} • Actual {money(si?.actual_cost)}
                       {si?.notes ? ` • ${si.notes}` : ""}
                     </div>
+                    <div style={{ marginTop: 8 }}>
+                      <LabelPanel shipmentId={s.id} woId={wo.id} label={labels.get(s.id) ?? null} configured={canShip} />
+                    </div>
                   </div>
                 );
               })}
@@ -642,6 +649,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                     <select id="ship-carrier" name="carrier" defaultValue="UPS">
                       <option value="UPS">UPS</option>
                       <option value="FedEx">FedEx</option>
+                      <option value="USPS">USPS</option>
                       <option value="Other">Other</option>
                     </select>
                   </div>
@@ -678,15 +686,10 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 </div>
               </ActionForm>
             </details>
-            <div className="row" style={{ marginTop: 12 }}>
-              <button className="btn btn-secondary btn-small" type="button" disabled>
-                Create Label
-              </button>
-              <button className="btn btn-secondary btn-small" type="button" disabled>
-                Compare Rates
-              </button>
-              <Milestone2 />
-            </div>
+            <p className="small" style={{ marginTop: 12 }}>
+              Add a leg, then get rates and create its label above. Addresses come from the customer location and the shop
+              (Shipping settings hold CDS&apos;s phone and address).
+            </p>
           </section>
 
           {wo.request_type !== "parts_only" && (

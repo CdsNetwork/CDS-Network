@@ -33,6 +33,7 @@ import { AttachmentForm } from "./AttachmentForm";
 import { AuthRequestForm } from "./AuthRequestForm";
 import { ComponentCard } from "./ComponentCard";
 import { DeclineJob } from "./DeclineJob";
+import { TestBadge } from "@/components/shipping/TestBadge";
 import styles from "./shop.module.css";
 import { EDITABLE_STATUSES, componentLabel, type ComponentRow, type LineRow } from "./types";
 
@@ -110,10 +111,17 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
                 <div className="small" style={{ marginTop: 4 }}>
                   {s.carrier ?? "Carrier not set"}
                 </div>
-                <div className={styles.tracking}>{s.tracking_number || "Tracking number not added yet"}</div>
+                <div className={styles.tracking}>{s.tracking_number || s.label?.tracking_number || "Tracking number not added yet"}</div>
+                {s.label && (
+                  <div className="row" style={{ gap: 8, marginTop: 6, alignItems: "center" }}>
+                    {s.label.is_test && <TestBadge />}
+                    <a className="btn btn-secondary btn-small" href={`/api/shipstation/label/${s.label.id}`} target="_blank" rel="noreferrer">
+                      Print label{s.label.service_name ? ` (${s.label.service_name})` : ""}
+                    </a>
+                  </div>
+                )}
               </div>
             ))}
-            <p className="small" style={{ marginBottom: 0 }}>Labels: Milestone 2</p>
           </div>
         )}
         {isPickup && (

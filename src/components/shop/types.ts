@@ -103,6 +103,8 @@ export type ShipmentRow = {
   carrier: string | null;
   tracking_number: string | null;
   status: string;
+  /** The CDS label for this leg (never its cost). */
+  label: { id: string; service_name: string | null; tracking_number: string | null; is_test: boolean } | null;
 };
 
 /** An option for a select: id plus the text shown. */

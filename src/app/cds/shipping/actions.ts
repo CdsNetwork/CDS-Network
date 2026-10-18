@@ -16,7 +16,7 @@ function parse(formData: FormData): Parsed {
   const status = text(formData, "status");
   const packageType = optionalText(formData, "package_type");
   if (!DIRECTIONS.includes(direction)) return { error: "Choose a shipment direction." };
-  if (carrier && !["UPS", "FedEx", "Other"].includes(carrier)) return { error: "Choose UPS, FedEx or Other." };
+  if (carrier && !["UPS", "FedEx", "USPS", "Other"].includes(carrier)) return { error: "Choose UPS, FedEx, USPS or Other." };
   if (!LABEL_STATUSES.some((s) => s.value === labelStatus)) return { error: "Choose a label status." };
   if (!SHIPMENT_STATUSES.includes(status)) return { error: "Choose a shipment status." };
   if (packageType && !PACKAGE_TYPES.some((p) => p.value === packageType)) return { error: "Choose a package type." };

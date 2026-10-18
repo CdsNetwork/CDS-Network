@@ -229,13 +229,27 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     url: urls.get(f.storage_path) ?? null,
   }));
 
-  const shipments: ShipmentRow[] = (ships.data ?? []).map((s) => ({
-    id: s.id,
-    direction: s.direction,
-    carrier: s.carrier,
-    tracking_number: s.tracking_number,
-    status: s.status,
-  }));
+  // Labels CDS created for this job: shops print them (the return leg) and see the ship-to.
+  const { data: labelRows } = (ships.data ?? []).length
+    ? await supabase
+        .from("shipment_labels")
+        .select("id, shipment_id, service_name, tracking_number, is_test")
+        .eq("work_order_id", id)
+        .eq("status", "active")
+    : { data: [] };
+  const labelByShipment = new Map((labelRows ?? []).map((l) => [l.shipment_id as string, l]));
+
+  const shipments: ShipmentRow[] = (ships.data ?? []).map((s) => {
+    const l = labelByShipment.get(s.id);
+    return {
+      id: s.id,
+      direction: s.direction,
+      carrier: s.carrier,
+      tracking_number: s.tracking_number,
+      status: s.status,
+      label: l ? { id: l.id, service_name: l.service_name, tracking_number: l.tracking_number, is_test: l.is_test } : null,
+    };
+  });
 
   let partOptions: CatalogOption[] = [];
   let authOptions: JobDetailData["authOptions"] = [];

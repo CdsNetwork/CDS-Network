@@ -48,6 +48,11 @@ const CDS_ONLY_TABLES = [
   "inbound_emails",
   "integration_sync",
   "shipment_tracking_events",
+  "shipment_label_costs",
+  "shipping_carriers",
+  "shipping_services",
+  "shipping_settings",
+  "shipstation_webhook_events",
 ] as const;
 
 async function insertOne<T extends { id: string }>(table: string, row: Record<string, unknown>): Promise<T> {

@@ -13,7 +13,7 @@ import { createClient } from "@/lib/supabase/server";
 const REQUEST_TYPES = ["service", "parts_only"];
 const FULFILLMENT = ["pickup", "shipping", "supplier_direct", "unspecified"];
 const DIRECTIONS = ["customer_to_affiliate", "affiliate_to_customer", "cds_to_customer", "customer_to_cds", "supplier_to_customer"];
-const CARRIERS = ["UPS", "FedEx", "Other"];
+const CARRIERS = ["UPS", "FedEx", "USPS", "Other"];
 const SHIPMENT_STATUSES = [
   "label_created",
   "awaiting_pickup",
