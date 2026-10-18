@@ -36,6 +36,7 @@ const COMPONENT_TYPES = ["DPF", "DOC", "SCR", "EGR"] as const;
 type Alias = {
   id: string;
   customer_part_number: string;
+  customer_description: string | null;
   customers: { code: string; name: string } | { code: string; name: string }[] | null;
   catalog_items: { sku: string; name: string } | { sku: string; name: string }[] | null;
 };
@@ -67,7 +68,7 @@ export async function QuickBooksTab() {
     supabase.from("qbo_measurement_map").select("id, customer_id, component_type, qbo_item_id, qbo_item_name"),
     supabase
       .from("customer_item_aliases")
-      .select("id, customer_part_number, customers(code, name), catalog_items(sku, name)")
+      .select("id, customer_part_number, customer_description, customers(code, name), catalog_items(sku, name)")
       .order("customer_part_number"),
     qboLists(status.connected),
   ]);
@@ -448,7 +449,7 @@ export async function QuickBooksTab() {
         <h3>Customer part numbers</h3>
         <p className="small">
           Some customers (for example First Student) need their own part number on the invoice. It is added to the line
-          description in QuickBooks.
+          description in QuickBooks, with the customer&apos;s own description when one is entered (else our item name).
         </p>
         <ActionForm action={saveAlias} submitLabel="Save part number" resetOnSuccess>
           <div className="grid3">
@@ -471,6 +472,10 @@ export async function QuickBooksTab() {
               <input id="alias-part" name="customer_part_number" className="input" required maxLength={100} />
             </div>
           </div>
+          <div className="field">
+            <label htmlFor="alias-description">Customer description (optional)</label>
+            <input id="alias-description" name="customer_description" className="input" maxLength={500} />
+          </div>
         </ActionForm>
         <div className="tablewrap" style={{ marginTop: 14 }}>
           <table className={styles.cardTable}>
@@ -479,13 +484,14 @@ export async function QuickBooksTab() {
                 <th>Customer</th>
                 <th>Catalog item</th>
                 <th>Customer part number</th>
+                <th>Customer description</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {aliases.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="small">
+                  <td colSpan={5} className="small">
                     No customer part numbers yet.
                   </td>
                 </tr>
@@ -503,6 +509,9 @@ export async function QuickBooksTab() {
                     </td>
                     <td className={wrapCell(a.customer_part_number)} data-label="Customer part number">
                       {a.customer_part_number}
+                    </td>
+                    <td className={wrapCell(a.customer_description ?? "")} data-label="Customer description">
+                      {a.customer_description ?? "-"}
                     </td>
                     <td>
                       <ActionForm

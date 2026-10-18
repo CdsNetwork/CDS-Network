@@ -233,6 +233,7 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
             <div style={{ minWidth: 0 }}>
               <strong>{l.sku}</strong>
               <div>{l.name}</div>
+              {l.description && <div className="small">{l.description}</div>}
               <div className="small">{ORIGIN_LABEL[l.origin]}</div>
             </div>
             <div className={styles.lineMoney}>

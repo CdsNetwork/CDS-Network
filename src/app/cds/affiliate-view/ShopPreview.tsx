@@ -65,7 +65,14 @@ type Job = {
   customers: { name: string } | { name: string }[] | null;
 };
 
-type PreviewLine = { id: string; qty: number; shop_unit_rate: number | null; origin: string; catalog_items: Item };
+type PreviewLine = {
+  id: string;
+  qty: number;
+  shop_unit_rate: number | null;
+  origin: string;
+  description: string | null;
+  catalog_items: Item;
+};
 type PreviewComponent = {
   id: string;
   seq: number;
@@ -123,7 +130,7 @@ export async function loadPreview(supabase: Supabase, shopId: string, woId: stri
   const [lines, components, requests, files, shipments, events] = await Promise.all([
     supabase
       .from("work_order_lines")
-      .select("id, qty, shop_unit_rate, origin, catalog_items(sku, name)")
+      .select("id, qty, shop_unit_rate, origin, description, catalog_items(sku, name)")
       .eq("work_order_id", woId)
       .order("created_at"),
     supabase
@@ -293,6 +300,7 @@ export function ShopPreview({ data }: { data: PreviewData }) {
               <div style={{ minWidth: 0 }}>
                 <strong>{item?.sku}</strong>
                 <div>{item?.name}</div>
+                {l.description && <div className="small">{l.description}</div>}
                 <div className="small">{ORIGIN_LABEL[l.origin] ?? l.origin}</div>
               </div>
               <div className={styles.lineMoney}>

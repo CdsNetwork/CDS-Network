@@ -43,11 +43,13 @@ import { LabelPanel } from "@/components/shipping/LabelPanel";
 import { activeLabels, shipStationConfigured } from "@/lib/shipstation/views";
 import {
   addLine,
+  addPassThroughLine,
   addShipment,
   createQuickBooksInvoice,
   decideAuthorization,
   dispatchWorkOrder,
   removeLine,
+  removePassThroughLine,
   setStatus,
   updateTax,
   updateWorkOrderFields,
@@ -114,7 +116,8 @@ type Line = {
   qty: number;
   shop_unit_rate: number | null;
   origin: string;
-  catalog_items: MaybeOne<{ sku: string; name: string }>;
+  description: string | null;
+  catalog_items: MaybeOne<{ sku: string; name: string; price_per_line: boolean }>;
   work_order_line_pricing: MaybeOne<{ customer_unit_price: number; price_source: string; tax_class: string }>;
 };
 
@@ -376,7 +379,9 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         .maybeSingle(),
       supabase
         .from("work_order_lines")
-        .select("id, qty, shop_unit_rate, origin, catalog_items(sku, name), work_order_line_pricing(customer_unit_price, price_source, tax_class)")
+        .select(
+          "id, qty, shop_unit_rate, origin, description, catalog_items(sku, name, price_per_line), work_order_line_pricing(customer_unit_price, price_source, tax_class)",
+        )
         .eq("work_order_id", id)
         .order("created_at"),
       supabase.from("work_order_components").select("*").eq("work_order_id", id).order("seq"),
@@ -401,7 +406,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         .select("id, display_name, kind, city, region, can_egr, can_oil_soaked")
         .eq("active", true)
         .order("display_name"),
-      supabase.from("catalog_items").select("id, sku, name, category, oe_cross").eq("active", true).order("sku"),
+      supabase.from("catalog_items").select("id, sku, name, category, oe_cross, price_per_line").eq("active", true).order("sku"),
       loadLocationCounts(supabase),
     ]);
 
@@ -428,7 +433,14 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const canShip = shipStationConfigured();
   const events = (eventRes.data ?? []) as WoEvent[];
   const shops = (shopsRes.data ?? []) as ShopRow[];
-  const catalog = (catalogRes.data ?? []) as { id: string; sku: string; name: string; category: string; oe_cross: string | null }[];
+  const catalog = (catalogRes.data ?? []) as {
+    id: string;
+    sku: string;
+    name: string;
+    category: string;
+    oe_cross: string | null;
+    price_per_line: boolean;
+  }[];
 
   // Signed links for files (bucket is private; checked as CDS above).
   const signed = new Map<string, string>();
@@ -451,6 +463,12 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const inReview = REVIEW_STATUSES.includes(wo.status);
   const declined = wo.status === "rejected_by_affiliate";
   const linesLocked = LINES_LOCKED_STATUSES.includes(wo.status);
+  // Items priced per line (Misc. hardware) come from the shop's invoice, so CDS can add and
+  // remove them after the work is completed, until the order is invoiced.
+  const perLineOpen = !["invoiced", "cancelled"].includes(wo.status);
+  const perLineItems = catalog.filter((c) => c.price_per_line);
+  const isPerLine = (l: Line) => one(l.catalog_items)?.price_per_line === true;
+  const removeColumn = !linesLocked || (perLineOpen && lines.some(isPerLine));
   const tbd = fin?.supplier_cost_tbd ?? false;
   const approver = one(internal?.profiles ?? null);
 
@@ -499,7 +517,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         keywords: s.kind === "parts_supplier" ? "supplier parts" : undefined,
       };
     });
-  const catalogOptions: SearchOption[] = catalog.map((c) => ({
+  const catalogOptions: SearchOption[] = catalog.filter((c) => !c.price_per_line).map((c) => ({
     value: c.id,
     label: `${c.sku} - ${c.name}`,
     hint: CATEGORY_LABEL[c.category] ?? c.category,
@@ -753,13 +771,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                     <th>Price Source</th>
                     <th>Tax Class</th>
                     <th className="num">Line Margin</th>
-                    {!linesLocked && <th />}
+                    {removeColumn && <th />}
                   </tr>
                 </thead>
                 <tbody>
                   {lines.length === 0 && (
                     <tr>
-                      <td colSpan={linesLocked ? 7 : 8} className="small" style={{ textAlign: "center" }}>
+                      <td colSpan={removeColumn ? 8 : 7} className="small" style={{ textAlign: "center" }}>
                         No services or parts yet. Add at least one before dispatch.
                       </td>
                     </tr>
@@ -775,6 +793,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                         <td>
                           <b>{item?.sku}</b>
                           <div className="small">{item?.name}</div>
+                          {l.description && <div className="small">{l.description}</div>}
+                          {isPerLine(l) && <span className="tag">Shop invoice amount, no upcharge</span>}
                           {negative && (
                             <div>
                               <span className={styles.negTag} title="The customer price is lower than the shop rate">
@@ -801,15 +821,27 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                           <div className="small">{p && taxed[p.tax_class] ? "Taxable" : "Non-taxable"}</div>
                         </td>
                         <td className="num money">{l.shop_unit_rate === null ? "TBD" : money(round2(custAmt - shopAmt))}</td>
-                        {!linesLocked && (
+                        {removeColumn && (
                           <td>
-                            <ActionForm
-                              action={removeLine.bind(null, wo.id, l.id)}
-                              submitLabel="Remove"
-                              pendingLabel="..."
-                              buttonClass="remove"
-                              confirmText="Remove this line from the work order?"
-                            />
+                            {isPerLine(l) && perLineOpen ? (
+                              <ActionForm
+                                action={removePassThroughLine.bind(null, wo.id, l.id)}
+                                submitLabel="Remove"
+                                pendingLabel="..."
+                                buttonClass="remove"
+                                confirmText="Remove this line from the work order?"
+                              />
+                            ) : (
+                              !linesLocked && (
+                                <ActionForm
+                                  action={removeLine.bind(null, wo.id, l.id)}
+                                  submitLabel="Remove"
+                                  pendingLabel="..."
+                                  buttonClass="remove"
+                                  confirmText="Remove this line from the work order?"
+                                />
+                              )
+                            )}
                           </td>
                         )}
                       </tr>
@@ -824,7 +856,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       <td className="num money">{money(subtotal)}</td>
                       <td colSpan={2} />
                       <td className="num money">{tbd ? "TBD" : money(round2(subtotal - shopTotal))}</td>
-                      {!linesLocked && <td />}
+                      {removeColumn && <td />}
                     </tr>
                   )}
                 </tbody>
@@ -855,6 +887,45 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
             ) : (
               <p className="small">Lines are fixed once the work is completed.</p>
             )}
+            {perLineOpen &&
+              perLineItems.map((item) => (
+                <ActionForm
+                  key={item.id}
+                  action={addPassThroughLine.bind(null, wo.id, item.id)}
+                  submitLabel={`+ Add ${item.name}`}
+                  inline
+                  resetOnSuccess
+                  buttonClass="btn btn-secondary"
+                  className="summarybox"
+                >
+                  <div style={{ flex: "1 1 260px" }}>
+                    <label className="small" htmlFor={`pass-desc-${item.id}`}>
+                      {item.name} (only when the shop&apos;s invoice includes it)
+                    </label>
+                    <input
+                      id={`pass-desc-${item.id}`}
+                      name="description"
+                      className="input"
+                      required
+                      maxLength={500}
+                      placeholder="What the shop's invoice lists, e.g. bolts and nuts for the kit"
+                    />
+                  </div>
+                  <div style={{ width: 130 }}>
+                    <label className="small" htmlFor={`pass-amount-${item.id}`}>
+                      Amount on invoice
+                    </label>
+                    <input
+                      id={`pass-amount-${item.id}`}
+                      name="amount"
+                      className="input"
+                      inputMode="decimal"
+                      required
+                      placeholder="0.00"
+                    />
+                  </div>
+                </ActionForm>
+              ))}
           </section>
 
           <section className="section">

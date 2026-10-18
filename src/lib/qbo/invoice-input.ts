@@ -6,6 +6,7 @@ import {
   type BuildResult,
   type ComponentResult,
   type ComponentType,
+  type CustomerAlias,
   type CustomerMapping,
   type InvoiceComponent,
   type InvoiceLine,
@@ -72,7 +73,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     supabase.from("customer_billing").select("tax_exempt").eq("customer_id", wo.customer_id).maybeSingle(),
     supabase
       .from("work_order_lines")
-      .select("catalog_item_id, qty, catalog_items(sku, name), work_order_line_pricing(customer_unit_price, tax_class)")
+      .select("catalog_item_id, qty, description, catalog_items(sku, name), work_order_line_pricing(customer_unit_price, tax_class)")
       .eq("work_order_id", woId)
       .order("created_at"),
     supabase.from("qbo_customer_map").select("qbo_customer_id, qbo_display_name").eq("customer_id", wo.customer_id).maybeSingle(),
@@ -103,6 +104,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
   const rawLines = (linesRes.data ?? []) as unknown as {
     catalog_item_id: string;
     qty: number | string;
+    description: string | null;
     catalog_items: MaybeOne<{ sku: string; name: string }>;
     work_order_line_pricing: MaybeOne<{ customer_unit_price: number | string; tax_class: TaxClass }>;
   }[];
@@ -115,7 +117,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
         supabase.from("qbo_item_map").select("customer_id, catalog_item_id, qbo_item_id, qbo_item_name").in("catalog_item_id", itemIds),
         supabase
           .from("customer_item_aliases")
-          .select("catalog_item_id, customer_part_number")
+          .select("catalog_item_id, customer_part_number, customer_description")
           .eq("customer_id", wo.customer_id)
           .in("catalog_item_id", itemIds),
       ])
@@ -173,9 +175,13 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     weightRemovedG: num(c.weight_removed_g),
     result: c.result,
   }));
-  const aliases: Record<string, string> = {};
-  for (const a of (aliasRes.data ?? []) as { catalog_item_id: string; customer_part_number: string }[]) {
-    aliases[a.catalog_item_id] = a.customer_part_number;
+  const aliases: Record<string, CustomerAlias> = {};
+  for (const a of (aliasRes.data ?? []) as {
+    catalog_item_id: string;
+    customer_part_number: string;
+    customer_description: string | null;
+  }[]) {
+    aliases[a.catalog_item_id] = { partNumber: a.customer_part_number, description: a.customer_description };
   }
   const cm = customerMapRes.data as { qbo_customer_id: string; qbo_display_name: string } | null;
   const customerMap: CustomerMapping | null = cm ? { qboCustomerId: cm.qbo_customer_id, qboDisplayName: cm.qbo_display_name } : null;
@@ -211,6 +217,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
       catalogItemId: l.catalog_item_id,
       sku: item?.sku ?? "Item",
       name: item?.name ?? "",
+      description: l.description,
       qty: Number(l.qty),
       customerUnitPrice: p ? Number(p.customer_unit_price) : null,
       taxClass: p?.tax_class ?? "exempt",

@@ -142,7 +142,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
   const [lines, components, auths, files, ships] = await Promise.all([
     supabase
       .from("work_order_lines")
-      .select("id, qty, shop_unit_rate, origin, created_at, catalog_items(sku, name)")
+      .select("id, qty, shop_unit_rate, origin, description, created_at, catalog_items(sku, name)")
       .eq("work_order_id", id)
       .order("created_at"),
     supabase
@@ -177,6 +177,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
       qty: Number(r.qty),
       shop_unit_rate: num(r.shop_unit_rate),
       origin: r.origin,
+      description: r.description ?? null,
       sku: item?.sku ?? "",
       name: item?.name ?? "",
     };
