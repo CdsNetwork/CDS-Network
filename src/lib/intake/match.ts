@@ -13,6 +13,7 @@ import type {
   LocationMatch,
   LocationRef,
 } from "./types";
+import { matchableCatalog } from "./types";
 
 const norm = (v: string | null | undefined) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -171,7 +172,8 @@ function nameScore(description: string, item: CatalogRef): { recall: number; sco
 }
 
 /** One requested service or part matched to a catalog item, or left unmatched for CDS. */
-export function matchItem(input: ItemInput, customerId: string | null, catalog: CatalogRef[], aliases: AliasRef[]): ItemMatch {
+export function matchItem(input: ItemInput, customerId: string | null, fullCatalog: CatalogRef[], aliases: AliasRef[]): ItemMatch {
+  const catalog = matchableCatalog(fullCatalog);
   const qty = input.qty && input.qty > 0 && input.qty < 1000 ? input.qty : 1;
   const base = { description: input.description, part_number: input.partNumber, qty, source: input.source };
   const byId = new Map(catalog.map((c) => [c.id, c]));

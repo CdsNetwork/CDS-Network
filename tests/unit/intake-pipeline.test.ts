@@ -17,6 +17,7 @@ import {
   loc0611,
   locFs12723,
   locFs30418,
+  MISC_HARDWARE,
   reference,
   RYDER,
   VBAND_CLAMP,
@@ -85,6 +86,32 @@ describe("parseEmail without the AI stage", () => {
       [DOC_CLEAN.id, 1],
       [VBAND_CLAMP.id, 2],
     ]);
+  });
+
+  it("BUG-M2-5: keeps a requested cleaning next to part numbers and never proposes Misc. hardware", async () => {
+    const p = await parseEmail(fixture("ryder-dpf-with-parts"), reference(), { llm: null });
+    expect(p.customer?.id).toBe(RYDER);
+    expect(p.items.map((i) => [i.catalog_item_id, i.qty])).toEqual([
+      [DPF_GASKET.id, 2],
+      [DPF_CLEAN.id, 1],
+    ]);
+    expect(p.items.some((i) => i.catalog_item_id === MISC_HARDWARE.id || i.sku === MISC_HARDWARE.sku)).toBe(false);
+    expect(p.request_type).toBe("service");
+  });
+
+  it("does not add a cleaning for a component that is only named in a part description", async () => {
+    const email = {
+      ...fixture("ryder-dpf-with-parts"),
+      text: "Location: 0424\nUnit #: 284190\nPO#: 7741255\n\nPlease send 2 x CDS-G-1051 DPF inlet gaskets.\n",
+    };
+    const p = await parseEmail(email, reference(), { llm: null });
+    expect(p.items.map((i) => i.catalog_item_id)).toEqual([DPF_GASKET.id]);
+    expect(p.request_type).toBe("parts_only");
+  });
+
+  it("does not add the same cleaning twice when a part number already maps to it", async () => {
+    const p = await parseEmail(fixture("first-student-parts"), reference(), { llm: null });
+    expect(p.items.filter((i) => i.catalog_item_id === DPF_CLEAN.id)).toHaveLength(1);
   });
 
   it("parses every fixture without throwing", async () => {
@@ -223,6 +250,10 @@ describe("buildDraftParams", () => {
       }),
     });
     const d = buildDraftParams(EMAIL_ID, email, p);
-    expect(d.ok && d.params.p_lines).toEqual([{ catalog_item_id: DPF_CLEAN.id, qty: 2 }]);
+    // The AI left out the DOC clean the email asks for; it is still added from the text.
+    expect(d.ok && d.params.p_lines).toEqual([
+      { catalog_item_id: DPF_CLEAN.id, qty: 2 },
+      { catalog_item_id: DOC_CLEAN.id, qty: 1 },
+    ]);
   });
 });

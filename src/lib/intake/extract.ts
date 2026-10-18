@@ -93,6 +93,26 @@ const COMPONENTS: [RegExp, Component][] = [
   [/\bEGR\b/i, "EGR"],
 ];
 
+const COMPONENT_WORDS: [string, Component][] = [
+  [String.raw`DPF|diesel particulate(?: filters?)?`, "DPF"],
+  [String.raw`DOC|diesel oxidation(?: catalysts?)?`, "DOC"],
+  [String.raw`SCR`, "SCR"],
+  [String.raw`EGR(?: cooler)?`, "EGR"],
+];
+// "Clean Diesel" is CDS's own name, not a request.
+const CLEAN_WORDS = String.raw`clean(?:ing|ed)?(?!\W+diesel\b)|bake|baked|flush(?:ed)?|service`;
+
+/**
+ * Components the text asks to have cleaned: a component and a cleaning word at most two
+ * words apart ("DPF clean", "clean the DPF", "DPF and DOC cleaning"). A component named only
+ * in a part description ("DPF inlet gasket") is not a cleaning request.
+ */
+export function requestedCleanings(text: string): Component[] {
+  return COMPONENT_WORDS.filter(([c]) =>
+    new RegExp(String.raw`\b(?:${c})\b\W+(?:\w+\W+){0,2}?(?:${CLEAN_WORDS})\b|\b(?:${CLEAN_WORDS})\W+(?:\w+\W+){0,2}?(?:${c})\b`, "i").test(text),
+  ).map(([, c]) => c);
+}
+
 export function extractDeterministic(subject: string, text: string): Deterministic {
   const all = `${subject}\n${text}`;
   const poNumber = firstValue(PO_RE, all, (_v, after) => /^\s*box\b/i.test(after));

@@ -4,10 +4,10 @@
  * Pure apart from the reference data and the AI call, both passed in.
  */
 import { bodyText, emailAddress, quotedSenders } from "./email";
-import { extractDeterministic, findKnownPartNumbers } from "./extract";
+import { extractDeterministic, findKnownPartNumbers, requestedCleanings } from "./extract";
 import type { LlmExtraction, LlmExtractor } from "./llm";
 import { matchCustomer, matchItem, matchLocation, partKey, type ItemInput } from "./match";
-import type { Field, Fulfillment, IntakeReference, ItemMatch, LocationRef, NormalizedEmail, ParsedEmail } from "./types";
+import { matchableCatalog, type Component, type Field, type Fulfillment, type IntakeReference, type ItemMatch, type LocationRef, type NormalizedEmail, type ParsedEmail } from "./types";
 
 /** Without the AI stage a draft is never better than low confidence. */
 export const DETERMINISTIC_ONLY_CAP = 0.45;
@@ -121,9 +121,12 @@ export async function parseEmail(email: NormalizedEmail, ref: IntakeReference, o
 
   // ---- requested services and parts
   const customerId = customer.match?.id ?? null;
+  // Items priced per line (Misc. hardware) need an amount from the shop's invoice: never proposed.
+  const catalog = matchableCatalog(ref.catalog);
+  const catalogIds = new Set(catalog.map((c) => c.id));
   const known = [
-    ...ref.aliases.filter((a) => a.customer_id === customerId).map((a) => a.customer_part_number),
-    ...ref.catalog.map((c) => c.sku),
+    ...ref.aliases.filter((a) => a.customer_id === customerId && catalogIds.has(a.catalog_item_id)).map((a) => a.customer_part_number),
+    ...catalog.map((c) => c.sku),
   ];
   const inputs: ItemInput[] = findKnownPartNumbers(text, known).map((p) => ({
     description: p.partNumber,
@@ -141,14 +144,26 @@ export async function parseEmail(email: NormalizedEmail, ref: IntakeReference, o
     }
     inputs.push({ description: it.description, partNumber: it.part_number, qty: it.quantity, component: it.component, source: "llm" });
   }
+  const cleaning = (c: Component): ItemInput => ({ description: `${c} cleaning`, partNumber: null, qty: 1, component: c, source: "regex" });
+  const categoryOf = new Map(catalog.map((c) => [c.id, c.category]));
+  let items: ItemMatch[];
   if (!inputs.length) {
-    for (const c of d.components) inputs.push({ description: `${c} cleaning`, partNumber: null, qty: 1, component: c, source: "regex" });
+    items = d.components.map((c) => matchItem(cleaning(c), customerId, catalog, ref.aliases));
+  } else {
+    items = inputs.map((i) => matchItem(i, customerId, catalog, ref.aliases));
+    // A cleaning asked for in the text ("Work needed: DPF clean") is kept next to part numbers,
+    // unless a matched service already covers that component.
+    for (const c of requestedCleanings(all)) {
+      const word = new RegExp(String.raw`\b${c}\b`, "i");
+      const covered = items.some((i) => i.catalog_item_id && categoryOf.get(i.catalog_item_id) === "service" && word.test(`${i.name} ${i.sku}`));
+      if (covered) continue;
+      const m = matchItem(cleaning(c), customerId, catalog, ref.aliases);
+      if (!m.catalog_item_id || !items.some((i) => i.catalog_item_id === m.catalog_item_id)) items.push(m);
+    }
   }
-  const items: ItemMatch[] = inputs.map((i) => matchItem(i, customerId, ref.catalog, ref.aliases));
   const unmatched = items.filter((i) => !i.catalog_item_id);
   if (unmatched.length) warnings.push(`${unmatched.length} requested item(s) not matched to the catalog.`);
 
-  const categoryOf = new Map(ref.catalog.map((c) => [c.id, c.category]));
   const matched = items.filter((i) => i.catalog_item_id);
   const requestType = matched.length > 0 && matched.every((i) => categoryOf.get(i.catalog_item_id!) !== "service") ? "parts_only" : "service";
 

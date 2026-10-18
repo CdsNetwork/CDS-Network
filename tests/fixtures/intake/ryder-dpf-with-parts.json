@@ -1,0 +1,8 @@
+{
+  "messageId": "<CAF-ryder-0424-0002@mail.ryder.example>",
+  "from": "Marcus Delgado <mdelgado@ryder.example>",
+  "to": ["dispatch@cds.direct"],
+  "subject": "Location 0424 - Unit 284190",
+  "receivedAt": "2026-10-19T15:10:00Z",
+  "text": "Hi CDS team,\n\nLocation: 0424\nUnit #: 284190\nPO#: 7741255\n\nWork needed: DPF clean.\nPlease also send CDS-G-1051 qty 2 with it, and the CDS-MISC-HARDWARE bolts and nuts for the kit.\nPickup any time after 8am.\n\nThanks,\nMarcus Delgado\n"
+}

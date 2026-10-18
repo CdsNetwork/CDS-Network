@@ -16,6 +16,7 @@ import {
   loc0424,
   locations,
   locFs12723,
+  MISC_HARDWARE,
   RYDER,
   VBAND_CLAMP,
 } from "../fixtures/intake/reference";
@@ -131,6 +132,13 @@ describe("matchItem", () => {
 
   it("does not send a DPF request to a service for another component", () => {
     expect(m("bake and clean", null, "DPF").catalog_item_id).not.toBe(BOX_BAKE.id);
+  });
+
+  it("BUG-M2-5: never matches an item priced per line, by SKU, alias or name", () => {
+    expect(m("bolts and nuts", "CDS-MISC-HARDWARE")).toMatchObject({ catalog_item_id: null, via: "none" });
+    expect(m("Misc. hardware").catalog_item_id).toBeNull();
+    const alias = [{ customer_id: RYDER, catalog_item_id: MISC_HARDWARE.id, customer_part_number: "RY-HW-1" }];
+    expect(matchItem({ description: "hardware", partNumber: "RY-HW-1", qty: 1, component: null, source: "regex" }, RYDER, catalog, alias).catalog_item_id).toBeNull();
   });
 
   it("leaves unclear items unmatched for CDS", () => {

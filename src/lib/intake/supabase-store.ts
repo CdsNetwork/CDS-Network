@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { INTAKE_MAILBOX } from "./config";
 import { emailAddress } from "./email";
 import type { IntakeStatus, IntakeStore, StoredEmail } from "./process";
-import type { AliasRef, CatalogRef, CustomerRef, DomainRef, IntakeReference, LocationRef, NormalizedEmail } from "./types";
+import { matchableCatalog, type AliasRef, type CatalogRef, type CustomerRef, type DomainRef, type IntakeReference, type LocationRef, type NormalizedEmail } from "./types";
 
 const PAGE = 1000;
 
@@ -104,9 +104,17 @@ export function supabaseIntakeStore(client: SupabaseClient, actorId: string | nu
       const [customers, domains, catalog, aliases] = await Promise.all([
         fetchAll<CustomerRef>((a, b) => client.from("customers").select("id, code, name").eq("active", true).order("id").range(a, b)),
         fetchAll<DomainRef>((a, b) => client.from("customer_email_domains").select("customer_id, domain").order("id").range(a, b)),
+        // Items priced per line (Misc. hardware) need an amount from the shop's invoice, so
+        // intake never proposes them.
         fetchAll<CatalogRef>((a, b) =>
-          client.from("catalog_items").select("id, sku, name, category, oe_cross").eq("active", true).order("id").range(a, b),
-        ),
+          client
+            .from("catalog_items")
+            .select("id, sku, name, category, oe_cross, price_per_line")
+            .eq("active", true)
+            .eq("price_per_line", false)
+            .order("id")
+            .range(a, b),
+        ).then(matchableCatalog),
         fetchAll<AliasRef>((a, b) =>
           client.from("customer_item_aliases").select("customer_id, catalog_item_id, customer_part_number").order("id").range(a, b),
         ),

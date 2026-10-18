@@ -9,7 +9,7 @@ import {
   quotedSenders,
   validateNormalizedEmail,
 } from "@/lib/intake/email";
-import { extractDeterministic, findKnownPartNumbers, quantityOnLine, vinCheckDigitOk } from "@/lib/intake/extract";
+import { extractDeterministic, findKnownPartNumbers, quantityOnLine, requestedCleanings, vinCheckDigitOk } from "@/lib/intake/extract";
 import { fixture } from "../fixtures/intake/reference";
 
 const det = (name: string) => {
@@ -175,5 +175,16 @@ describe("part numbers and quantities", () => {
     ["FS-1 gasket", 1],
   ])("reads the quantity in %j", (line, qty) => {
     expect(quantityOnLine(line, "FS-1")).toBe(qty);
+  });
+});
+
+describe("requestedCleanings", () => {
+  it("finds components asked to be cleaned, not components named in a part description", () => {
+    expect(requestedCleanings("Work needed: DPF clean.")).toEqual(["DPF"]);
+    expect(requestedCleanings("DPF and DOC cleaning please")).toEqual(["DPF", "DOC"]);
+    expect(requestedCleanings("Please clean and bake the DPF")).toEqual(["DPF"]);
+    expect(requestedCleanings("EGR cooler cleaning")).toEqual(["EGR"]);
+    expect(requestedCleanings("Send 2 DPF inlet gaskets")).toEqual([]);
+    expect(requestedCleanings("Hi Clean Diesel team, DPF gasket needed")).toEqual([]);
   });
 });

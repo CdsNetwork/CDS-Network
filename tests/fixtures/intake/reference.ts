@@ -62,8 +62,10 @@ export const DPF_OIL = item("0005", "SVC-DPF-OIL", "Oil/Fuel Soaked DPF", "servi
 export const BOX_BAKE = item("0006", "SVC-1BOX-BAKE", "One Box Bake & Clean", "service");
 export const DPF_GASKET = item("0007", "CDS-G-1051", "DPF Inlet Gasket", "gasket", "A0001234 / 2871999");
 export const VBAND_CLAMP = item("0008", "CDS-C-4000", "V-Band Clamp 4in", "clamp");
+/** Priced per line (the amount comes from the shop's invoice): intake must never propose it. */
+export const MISC_HARDWARE: CatalogRef = { ...item("0009", "CDS-MISC-HARDWARE", "Misc. hardware", "hardware"), price_per_line: true };
 
-export const catalog: CatalogRef[] = [DPF_CLEAN, DOC_CLEAN, SCR_CLEAN, EGR, DPF_OIL, BOX_BAKE, DPF_GASKET, VBAND_CLAMP];
+export const catalog: CatalogRef[] = [DPF_CLEAN, DOC_CLEAN, SCR_CLEAN, EGR, DPF_OIL, BOX_BAKE, DPF_GASKET, VBAND_CLAMP, MISC_HARDWARE];
 
 export const aliases: AliasRef[] = [
   { customer_id: FIRST_STUDENT, catalog_item_id: DPF_CLEAN.id, customer_part_number: "FS-DPF-0097" },
@@ -103,4 +105,5 @@ export const FIXTURES = [
   "not-work-request",
   "duplicate-message-id",
   "first-student-html-portal",
+  "ryder-dpf-with-parts",
 ] as const;

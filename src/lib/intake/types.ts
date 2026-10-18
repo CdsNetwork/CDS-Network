@@ -42,7 +42,20 @@ export type LocationRef = {
   postal_code: string | null;
   fulfillment: string;
 };
-export type CatalogRef = { id: string; sku: string; name: string; category: string; oe_cross: string | null };
+export type CatalogRef = {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  oe_cross: string | null;
+  /** Priced per line from the shop's invoice (Misc. hardware): never proposed by intake. */
+  price_per_line?: boolean;
+};
+
+/** The catalog items intake may propose: everything except items priced per line. */
+export function matchableCatalog(catalog: CatalogRef[]): CatalogRef[] {
+  return catalog.filter((c) => !c.price_per_line);
+}
 export type AliasRef = { customer_id: string; catalog_item_id: string; customer_part_number: string };
 
 /** Reference data the matcher reads. Locations are loaded per customer (there are many). */
