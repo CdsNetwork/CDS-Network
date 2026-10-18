@@ -1,0 +1,9 @@
+{
+  "messageId": "<CAF-ryder-0424-0001@mail.ryder.example>",
+  "from": "Marcus Delgado <mdelgado@ryder.example>",
+  "to": ["dispatch@cds.direct"],
+  "subject": "DPF and DOC cleaning request - Location 0424 - Unit 284113",
+  "receivedAt": "2026-10-19T14:05:00Z",
+  "text": "Hi CDS team,\n\nPlease schedule a pickup for the following:\n\nLocation: 0424\nUnit #: 284113\nVIN: 3AKJHHDR0KSKA7731\nPO#: 7741200\n\nWork needed: DPF clean and DOC clean. The DPF and DOC are off the truck and on a pallet by bay 3.\nParts ready for pick up any time after 8am, dock closes at 4pm.\n\nThanks,\nMarcus Delgado\nFleet Maintenance Manager\n",
+  "attachments": [{ "filename": "unit-284113-dpf-tag.jpg", "contentType": "image/jpeg", "size": 184220 }]
+}

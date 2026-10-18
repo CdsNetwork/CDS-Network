@@ -1,0 +1,8 @@
+{
+  "messageId": "<CAF-ryder-0424-0001@mail.ryder.example>",
+  "from": "Marcus Delgado <mdelgado@ryder.example>",
+  "to": ["dispatch@cds.direct"],
+  "subject": "DPF and DOC cleaning request - Location 0424 - Unit 284113",
+  "receivedAt": "2026-10-19T14:06:30Z",
+  "text": "Resent by the mail server. Same request as before.\n\nLocation: 0424\nUnit #: 284113\nPO#: 7741200\nWork needed: DPF clean and DOC clean.\n"
+}

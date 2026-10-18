@@ -1,0 +1,8 @@
+{
+  "messageId": "<20261019.8812.fs-12723@firststudent.example>",
+  "from": "Priya Okafor <pokafor@firststudent.example>",
+  "to": ["dispatch@cds.direct"],
+  "subject": "Service request Dept 12723M Bus 3318",
+  "receivedAt": "2026-10-19T15:40:00Z",
+  "text": "Good morning,\n\nDepartment: 12723M\nBus #3318\nPurchase Order: 4500123987\n\nPlease clean the DPF and send it back with new gaskets. We will ship the filter to you, please send a shipping label.\n\nFS Part No.   Description              Qty\nFS-DPF-0097   DPF cleaning service      1\nFS-GSK-1201   Gasket, DPF inlet         2\n\nPriya Okafor\nTransportation Maintenance\n"
+}

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const NAV = [
   { href: "/cds", icon: "▦", label: "Dashboard", exact: true },
   { href: "/cds/work-orders/new", icon: "＋", label: "Create Work Order" },
+  { href: "/cds/intake", icon: "✉", label: "Email Intake" },
   { href: "/cds/affiliate-view", icon: "⇄", label: "Affiliate View" },
   { href: "/cds/pickup", icon: "🚚", label: "Pickup / Delivery" },
   { href: "/cds/shipping", icon: "📦", label: "Shipping" },

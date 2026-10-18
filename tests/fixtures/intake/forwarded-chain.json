@@ -1,0 +1,8 @@
+{
+  "messageId": "<fwd-77812@cds.example>",
+  "from": "Dispatch Desk <dispatch@cds.direct>",
+  "to": ["dispatch@cds.direct"],
+  "subject": "Fwd: FW: Branch 611 needs DPF cleaned",
+  "receivedAt": "2026-10-19T16:12:00Z",
+  "text": "Forwarding from the old inbox.\n\n---------- Forwarded message ---------\nFrom: Dana Whitfield <dwhitfield@ryder.example>\nDate: Sun, Oct 18, 2026 at 9:14 AM\nSubject: FW: Branch 611 needs DPF cleaned\nTo: <maintenance-desk@ryder.example>\n\nTeam, see below.\n\n-----Original Message-----\nFrom: Shop Lead <shoplead611@ryder.example>\nSent: Saturday, October 17, 2026 4:02 PM\n\nBranch 611 has a DPF that needs a clean and bake. Truck 51207. P.O. 7741388.\nWe can ship it, we have a box.\n"
+}

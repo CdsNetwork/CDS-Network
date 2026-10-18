@@ -1,0 +1,8 @@
+{
+  "messageId": "<noloc-5521@ryder.example>",
+  "from": "Lena Brooks <lbrooks@ryder.example>",
+  "to": ["dispatch@cds.direct"],
+  "subject": "Need a DPF picked up",
+  "receivedAt": "2026-10-19T17:30:00Z",
+  "html": "<html><body><p>Hello,</p><p>We need a DPF cleaning for unit <b>T-55021</b>.</p><p>Our shop is at 1180 Industrial Pkwy, Fairview, OH 44126. The part can be picked up at the back door.</p><p>No PO yet, I will send it when I have it.</p><p>Lena</p></body></html>"
+}

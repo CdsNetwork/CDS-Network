@@ -1,0 +1,8 @@
+{
+  "messageId": "<remit-88213@ryder.example>",
+  "from": "Accounts Payable <ap-noreply@ryder.example>",
+  "to": ["dispatch@cds.direct"],
+  "subject": "Remittance advice - payment 88213",
+  "receivedAt": "2026-10-19T18:00:00Z",
+  "text": "This is an automated remittance advice.\n\nPayment number 88213 has been issued to Clean Diesel Specialists for invoices 35120, 35121 and 35188.\nTotal: 1,845.00 USD\n\nPlease do not reply to this message.\n"
+}
