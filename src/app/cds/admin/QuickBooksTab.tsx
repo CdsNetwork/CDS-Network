@@ -1,6 +1,13 @@
 import Link from "next/link";
 import type { SearchOption } from "@/components/SearchSelect";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
+import {
+  removeCustomerLinkConfirm,
+  removeItemLinkConfirm,
+  removeMeasurementItemConfirm,
+  removePartNumberConfirm,
+} from "@/components/cds-admin/confirm";
+import styles from "@/components/cds-admin/cds-admin.module.css";
 import { one } from "@/components/cds-admin/server-utils";
 import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
 import { listCustomers, listItems, type QboCustomer, type QboItem } from "@/lib/qbo/api";
@@ -178,7 +185,7 @@ export async function QuickBooksTab() {
           </div>
         </ActionForm>
         <div className="tablewrap" style={{ marginTop: 14 }}>
-          <table>
+          <table className={styles.cardTable}>
             <thead>
               <tr>
                 <th>Customer</th>
@@ -198,10 +205,10 @@ export async function QuickBooksTab() {
                 const m = customerMap.get(c.id);
                 return (
                   <tr key={c.id}>
-                    <td className={wrapCell(c.name)}>
+                    <td className={wrapCell(c.name)} data-label="Customer">
                       <b>{c.code}</b> {c.name}
                     </td>
-                    <td>
+                    <td data-label="QuickBooks customer">
                       {m ? (
                         <>
                           {m.qbo_display_name} <span className="small">(id {m.qbo_customer_id})</span>
@@ -215,6 +222,7 @@ export async function QuickBooksTab() {
                         <ActionForm
                           action={removeCustomerMap.bind(null, c.id)}
                           submitLabel="Remove"
+                          confirmText={removeCustomerLinkConfirm(`${c.code} ${c.name}`, m.qbo_display_name)}
                           pendingLabel="..."
                           submitClassName="btn btn-secondary btn-small"
                         />
@@ -256,7 +264,7 @@ export async function QuickBooksTab() {
         </ActionForm>
         <h4 style={{ marginTop: 16 }}>All customers</h4>
         <div className="tablewrap" style={{ marginTop: 8 }}>
-          <table>
+          <table className={styles.cardTable}>
             <thead>
               <tr>
                 <th>Catalog item</th>
@@ -278,16 +286,17 @@ export async function QuickBooksTab() {
                   const m = itemMap.get(i.id)!;
                   return (
                     <tr key={m.id}>
-                      <td className={wrapCell(i.name)}>
+                      <td className={wrapCell(i.name)} data-label="Catalog item">
                         <b>{i.sku}</b> {i.name}
                       </td>
-                      <td>
+                      <td data-label="QuickBooks item">
                         {m.qbo_item_name} <span className="small">(id {m.qbo_item_id})</span>
                       </td>
                       <td>
                         <ActionForm
                           action={removeItemMap.bind(null, m.id)}
                           submitLabel="Remove"
+                          confirmText={removeItemLinkConfirm(`${i.sku} ${i.name}`, "All customers", m.qbo_item_name)}
                           pendingLabel="..."
                           submitClassName="btn btn-secondary btn-small"
                         />
@@ -302,7 +311,7 @@ export async function QuickBooksTab() {
           <div key={g.key}>
             <h4 style={{ marginTop: 16 }}>{g.label}</h4>
             <div className="tablewrap" style={{ marginTop: 8 }}>
-              <table>
+              <table className={styles.cardTable}>
                 <thead>
                   <tr>
                     <th>Catalog item</th>
@@ -315,7 +324,7 @@ export async function QuickBooksTab() {
                     const i = itemById.get(m.catalog_item_id);
                     return (
                       <tr key={m.id}>
-                        <td className={wrapCell(i?.name)}>
+                        <td className={wrapCell(i?.name)} data-label="Catalog item">
                           {i ? (
                             <>
                               <b>{i.sku}</b> {i.name}
@@ -324,13 +333,14 @@ export async function QuickBooksTab() {
                             <span className="small">Inactive catalog item</span>
                           )}
                         </td>
-                        <td>
+                        <td data-label="QuickBooks item">
                           {m.qbo_item_name} <span className="small">(id {m.qbo_item_id})</span>
                         </td>
                         <td>
                           <ActionForm
                             action={removeItemMap.bind(null, m.id)}
                             submitLabel="Remove"
+                            confirmText={removeItemLinkConfirm(i ? `${i.sku} ${i.name}` : "(inactive)", g.label, m.qbo_item_name)}
                             pendingLabel="..."
                             submitClassName="btn btn-secondary btn-small"
                           />
@@ -389,7 +399,7 @@ export async function QuickBooksTab() {
           </div>
         </ActionForm>
         <div className="tablewrap" style={{ marginTop: 14 }}>
-          <table>
+          <table className={styles.cardTable}>
             <thead>
               <tr>
                 <th>Customer</th>
@@ -409,15 +419,18 @@ export async function QuickBooksTab() {
               {measurementGroups.flatMap((g) =>
                 g.rows.map((m, n) => (
                   <tr key={m.id}>
-                    <td>{n === 0 ? <b>{g.label}</b> : null}</td>
-                    <td>{m.component_type}</td>
-                    <td>
+                    <td data-label="Customer">
+                      <b className={n === 0 ? undefined : styles.phoneOnly}>{g.label}</b>
+                    </td>
+                    <td data-label="Component type">{m.component_type}</td>
+                    <td className={wrapCell(m.qbo_item_name)} data-label="QuickBooks item">
                       {m.qbo_item_name} <span className="small">(id {m.qbo_item_id})</span>
                     </td>
                     <td>
                       <ActionForm
                         action={removeMeasurementMap.bind(null, m.id)}
                         submitLabel="Remove"
+                        confirmText={removeMeasurementItemConfirm(g.label, m.component_type)}
                         pendingLabel="..."
                         submitClassName="btn btn-secondary btn-small"
                       />
@@ -460,7 +473,7 @@ export async function QuickBooksTab() {
           </div>
         </ActionForm>
         <div className="tablewrap" style={{ marginTop: 14 }}>
-          <table>
+          <table className={styles.cardTable}>
             <thead>
               <tr>
                 <th>Customer</th>
@@ -482,17 +495,24 @@ export async function QuickBooksTab() {
                 const i = one(a.catalog_items);
                 return (
                   <tr key={a.id}>
-                    <td>
+                    <td data-label="Customer">
                       <b>{c?.code}</b> {c?.name}
                     </td>
-                    <td className={wrapCell(i?.name)}>
+                    <td className={wrapCell(i?.name)} data-label="Catalog item">
                       <b>{i?.sku}</b> {i?.name}
                     </td>
-                    <td>{a.customer_part_number}</td>
+                    <td className={wrapCell(a.customer_part_number)} data-label="Customer part number">
+                      {a.customer_part_number}
+                    </td>
                     <td>
                       <ActionForm
                         action={removeAlias.bind(null, a.id)}
                         submitLabel="Remove"
+                        confirmText={removePartNumberConfirm(
+                          `${c?.code ?? ""} ${c?.name ?? ""}`.trim(),
+                          `${i?.sku ?? ""} ${i?.name ?? ""}`.trim(),
+                          a.customer_part_number,
+                        )}
                         pendingLabel="..."
                         submitClassName="btn btn-secondary btn-small"
                       />

@@ -76,7 +76,8 @@
   color: var(--muted);
 }
 
-/* Locations on a phone: each row becomes a card, so the page is not wider than the screen. */
+/* Locations and QuickBooks mappings on a phone: each row becomes a card, so the page is not
+   wider than the screen and row buttons are never cut off. */
 @media (max-width: 640px) {
   .cardTable {
     min-width: 0 !important;
@@ -93,11 +94,22 @@
     display: block;
     border: 0 !important;
     padding: 2px 0 !important;
+    overflow-wrap: anywhere;
   }
   .cardTable td[data-label]::before {
     content: attr(data-label) ": ";
     font-size: 12px;
     font-weight: 700;
     color: var(--muted);
+  }
+}
+
+/* Shown only in the phone card layout (for example the customer on every grouped row). */
+.phoneOnly {
+  display: none;
+}
+@media (max-width: 640px) {
+  .phoneOnly {
+    display: inline;
   }
 }

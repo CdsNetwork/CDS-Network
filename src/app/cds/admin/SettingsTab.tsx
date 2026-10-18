@@ -1,4 +1,5 @@
 import { ActionForm } from "@/components/cds-admin/ActionForm";
+import { DISCONNECT_QUICKBOOKS_CONFIRM } from "@/components/cds-admin/confirm";
 import { dateTime } from "@/lib/format";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createClient } from "@/lib/supabase/server";
@@ -84,7 +85,13 @@ function QuickBooksSection({ status, result }: { status: QboStatus; result?: { o
               Turn on sales tax in QuickBooks (Taxes), then connect again.
             </div>
           )}
-          <ActionForm action={disconnectQuickBooks} submitLabel="Disconnect QuickBooks" submitClassName="btn btn-secondary" pendingLabel="Disconnecting..." />
+          <ActionForm
+            action={disconnectQuickBooks}
+            submitLabel="Disconnect QuickBooks"
+            submitClassName="btn btn-secondary"
+            pendingLabel="Disconnecting..."
+            confirmText={DISCONNECT_QUICKBOOKS_CONFIRM}
+          />
         </>
       ) : (
         <>

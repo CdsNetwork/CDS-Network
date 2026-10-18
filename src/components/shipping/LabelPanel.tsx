@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { createShipmentLabel, getShipmentRates, voidShipmentLabel } from "@/app/cds/shipping/label-actions";
 import type { RatesResult } from "@/lib/shipstation/labels";
+import { voidLabelConfirm } from "./confirm";
 import { TestBadge } from "./TestBadge";
 
 export type LabelView = {
@@ -57,7 +58,7 @@ export function LabelPanel({ shipmentId, woId, label, configured }: { shipmentId
           type="button"
           disabled={pending}
           onClick={() => {
-            if (!window.confirm(label.is_test ? "Void this test label?" : "Void this label in ShipStation? The carrier refunds it later.")) return;
+            if (!window.confirm(voidLabelConfirm(label))) return;
             setError(null);
             start(async () => {
               const r = await voidShipmentLabel(label.id, woId);

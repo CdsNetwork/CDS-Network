@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useTransition, type ReactNode } from "react";
+import { confirmed } from "./confirm";
 
 export type ActionState = { error?: string; message?: string; ok?: boolean };
 export type FormAction = (prev: ActionState, formData: FormData) => Promise<ActionState>;
@@ -8,7 +9,8 @@ export type FormAction = (prev: ActionState, formData: FormData) => Promise<Acti
 /**
  * A form bound to a server action with inline error and success messages. Fields keep
  * their values when the action returns an error. Pass `submitLabel` for a single submit
- * button, or put your own submit buttons (with name/value) in `children`.
+ * button, or put your own submit buttons (with name/value) in `children`. Pass `confirmText`
+ * for a destructive action: the form then submits only after the user agrees.
  */
 export function ActionForm({
   action,
@@ -19,6 +21,7 @@ export function ActionForm({
   className,
   resetOnSuccess = false,
   inline = false,
+  confirmText,
 }: {
   action: FormAction;
   children?: ReactNode;
@@ -28,6 +31,7 @@ export function ActionForm({
   className?: string;
   resetOnSuccess?: boolean;
   inline?: boolean;
+  confirmText?: string;
 }) {
   const [state, dispatch, pending] = useActionState<ActionState, FormData>(action, {});
   const [, startTransition] = useTransition();
@@ -43,6 +47,7 @@ export function ActionForm({
       className={className}
       onSubmit={(e) => {
         e.preventDefault();
+        if (!confirmed(confirmText)) return;
         const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLElement | null;
         const data = new FormData(e.currentTarget, submitter);
         startTransition(() => dispatch(data));
