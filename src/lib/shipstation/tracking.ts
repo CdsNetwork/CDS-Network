@@ -9,6 +9,7 @@
  */
 
 export type ShipmentStatus =
+  | "label_needed"
   | "label_created"
   | "awaiting_pickup"
   | "picked_up"

@@ -138,6 +138,14 @@ afterAll(async () => {
 }, 120_000);
 
 describe("labels written by CDS", () => {
+  it("a new leg waits for a label until one is made", async () => {
+    const legs = await must(admin.from("shipments").select("status, label_status").in("id", [f.testShipment, f.realShipment]));
+    expect(legs).toEqual([
+      { status: "label_needed", label_status: "needed" },
+      { status: "label_needed", label_status: "needed" },
+    ]);
+  });
+
   it("a test label is recorded without touching tracking or costs, and only one label per leg", async () => {
     const id = await must(cds.client.rpc("cds_record_shipment_label", { p_shipment: f.testShipment, p_label: labelPayload({}) }));
     expect(typeof id).toBe("string");
@@ -295,11 +303,23 @@ describe("tracking webhook (service role)", () => {
 });
 
 describe("voiding", () => {
+  it("voiding a test label puts the leg back to needing a label, for CDS and the shop", async () => {
+    const label = await must(admin.from("shipment_labels").select("id").eq("shipment_id", f.testShipment).eq("status", "active").single());
+    await must(cds.client.rpc("cds_void_shipment_label", { p_label: label.id, p_message: null }));
+    const sh = await must(admin.from("shipments").select("status, label_status, label_file_path").eq("id", f.testShipment).single());
+    expect(sh).toEqual({ status: "label_needed", label_status: "voided", label_file_path: null });
+    const seen = await must(shopA.client.from("shipments").select("status").eq("id", f.testShipment).single());
+    expect(seen.status).toBe("label_needed");
+    const active = await must(shopA.client.from("shipment_labels").select("id").eq("shipment_id", f.testShipment).eq("status", "active"));
+    expect(active).toEqual([]);
+  });
+
   it("CDS voids a real label: tracking and the actual cost are cleared, a new label is allowed", async () => {
     const label = await must(admin.from("shipment_labels").select("id").eq("shipment_id", f.realShipment).eq("status", "active").single());
     await must(cds.client.rpc("cds_void_shipment_label", { p_label: label.id, p_message: "Wrong service" }));
-    const sh = await must(admin.from("shipments").select("tracking_number, label_status").eq("id", f.realShipment).single());
-    expect(sh).toEqual({ tracking_number: null, label_status: "voided" });
+    const sh = await must(admin.from("shipments").select("tracking_number, label_status, status").eq("id", f.realShipment).single());
+    // The carrier already reported this leg delivered, so its tracking status is kept.
+    expect(sh).toEqual({ tracking_number: null, label_status: "voided", status: "delivered" });
     const internal = await must(admin.from("shipment_internal").select("actual_cost").eq("shipment_id", f.realShipment).single());
     expect(internal.actual_cost).toBeNull();
     const twice = await cds.client.rpc("cds_void_shipment_label", { p_label: label.id, p_message: null });

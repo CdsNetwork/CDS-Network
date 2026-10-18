@@ -107,6 +107,7 @@ export const DIRECTION_LABEL: Record<string, string> = {
 };
 
 export const SHIPMENT_STATUS_LABEL: Record<string, string> = {
+  label_needed: "Needs Label",
   label_created: "Label Created",
   awaiting_pickup: "Awaiting Carrier Pickup",
   picked_up: "Picked Up",
