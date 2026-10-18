@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildInvoicePayload,
   cents,
+  type CustomerAlias,
   type CustomerMapping,
   type InvoiceLine,
   type InvoiceLocation,
@@ -13,6 +14,7 @@ import {
   measurementDescription,
 } from "@/lib/qbo/invoice";
 import { faultMessage, QboError } from "@/lib/qbo/client";
+import { passThroughInput } from "@/lib/pass-through";
 import { qboConfig } from "@/lib/qbo/config";
 import { createState, decryptToken, encryptToken, verifyState } from "@/lib/qbo/secure";
 
@@ -68,7 +70,7 @@ function build(over: Partial<{
   customerItems: Record<string, ItemMapping | undefined>;
   /** Items linked for other customers only. */
   otherCustomers: Record<string, boolean>;
-  aliases: Record<string, string>;
+  aliases: Record<string, CustomerAlias>;
   location: InvoiceLocation | null;
   components: InvoiceComponent[];
   measurements: MeasurementMappings;
@@ -133,10 +135,32 @@ describe("buildInvoicePayload", () => {
   });
 
   it("shows the customer's own part number in the description when there is one", () => {
-    const r = build({ aliases: { [PART]: "FS-99812" } });
+    const r = build({ aliases: { [PART]: { partNumber: "FS-99812" } } });
     if (!r.ok) throw new Error(r.problems.join("; "));
     expect(r.payload.Line[1].Description).toBe("Part # FS-99812 - Gasket");
     expect(r.payload.Line[0].Description).toBe("DPF cleaning");
+  });
+
+  it("uses the customer's own description with its part number when there is one", () => {
+    const r = build({
+      aliases: {
+        [PART]: { partNumber: " 2871451 ", description: " GASKET, FILTER, PARTICULATE " },
+        [SERVICE]: { partNumber: "CDS-DPF-CLEAN", description: null },
+      },
+    });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line[1].Description).toBe("Part # 2871451 - GASKET, FILTER, PARTICULATE");
+    expect(r.payload.Line[0].Description).toBe("Part # CDS-DPF-CLEAN - DPF cleaning");
+    // Lines without an alias keep our name; the QuickBooks item and price do not change.
+    expect(r.payload.Line[2].Description).toBe("Freight");
+    expect(r.payload.Line[1].SalesItemLineDetail.ItemRef).toEqual({ value: "2", name: "Gasket" });
+    expect(r.payload.Line[1].Amount).toBe(25);
+  });
+
+  it("ignores a blank customer part number", () => {
+    const r = build({ aliases: { [PART]: { partNumber: "  ", description: "SHOULD NOT SHOW" } } });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line[1].Description).toBe("Gasket");
   });
 
   it("lists every unmapped item once and the missing customer link instead of a payload", () => {
@@ -406,5 +430,79 @@ describe("QuickBooks helpers", () => {
     expect(stored).not.toContain("access-token-value");
     expect(decryptToken("secret", stored)).toBe("access-token-value");
     expect(() => decryptToken("other", stored)).toThrow();
+  });
+});
+
+describe("Misc. hardware (price entered per line)", () => {
+  const MISC = "55555555-5555-4555-8555-555555555555";
+  const miscItem: ItemMapping = { qboItemId: "386", qboItemName: "MISC PART" };
+  const misc = (over: Partial<InvoiceLine> = {}): InvoiceLine => ({
+    catalogItemId: MISC,
+    sku: "CDS-MISC-HARDWARE",
+    name: "Misc. hardware",
+    description: "Bolts and nuts for DPF kit",
+    qty: 1,
+    customerUnitPrice: 7.43,
+    taxClass: "parts",
+    ...over,
+  });
+
+  it("bills the amount from the shop invoice as is, on the MISC PART item, with the line description", () => {
+    const r = build({ lines: [lines[0], misc()], items: { ...items, [MISC]: miscItem } });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line[1]).toEqual({
+      DetailType: "SalesItemLineDetail",
+      Amount: 7.43,
+      Description: "Misc. hardware - Bolts and nuts for DPF kit",
+      SalesItemLineDetail: { ItemRef: { value: "386", name: "MISC PART" }, Qty: 1, UnitPrice: 7.43, TaxCodeRef: { value: "TAX" } },
+    });
+  });
+
+  it("is taxed as parts", () => {
+    const r = build({ wo: wo({ taxParts: false, taxLabor: true }), lines: [misc()], items: { [MISC]: miscItem } });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line[0].SalesItemLineDetail.TaxCodeRef.value).toBe("NON");
+  });
+
+  it("keeps each Misc. hardware line separate with its own description and amount", () => {
+    const r = build({
+      lines: [misc(), misc({ description: "Clamp bolts", customerUnitPrice: 3.1 })],
+      items: { [MISC]: miscItem },
+    });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line.map((l) => [l.Description, l.Amount])).toEqual([
+      ["Misc. hardware - Bolts and nuts for DPF kit", 7.43],
+      ["Misc. hardware - Clamp bolts", 3.1],
+    ]);
+  });
+
+  it("needs a QuickBooks item like any other line", () => {
+    const r = build({ lines: [misc(), misc({ description: "Second" })], items: {} });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.problems.filter((p) => p.includes("CDS-MISC-HARDWARE"))).toEqual([
+      "CDS-MISC-HARDWARE Misc. hardware is not linked to a QuickBooks item. Link it on Admin > QuickBooks mappings.",
+    ]);
+  });
+
+  it("puts a customer part number in front when the customer has one", () => {
+    const r = build({ lines: [misc()], items: { [MISC]: miscItem }, aliases: { [MISC]: { partNumber: "FS-HW" } } });
+    if (!r.ok) throw new Error(r.problems.join("; "));
+    expect(r.payload.Line[0].Description).toBe("Part # FS-HW - Misc. hardware - Bolts and nuts for DPF kit");
+  });
+});
+
+describe("passThroughInput", () => {
+  it("accepts a description and an amount in dollars and cents", () => {
+    expect(passThroughInput(" Bolts for kit ", "7.43")).toEqual({ ok: true, description: "Bolts for kit", amount: 7.43 });
+    expect(passThroughInput("Nuts", "$1,204.5")).toEqual({ ok: true, description: "Nuts", amount: 1204.5 });
+  });
+
+  it("refuses a missing or long description and a missing, zero, negative or fractional-cent amount", () => {
+    expect(passThroughInput("", "5").ok).toBe(false);
+    expect(passThroughInput("x".repeat(501), "5").ok).toBe(false);
+    for (const amount of ["", "0", "-1", "abc", "1.234", "100000"]) {
+      expect(passThroughInput("Bolts", amount).ok, amount).toBe(false);
+    }
   });
 });

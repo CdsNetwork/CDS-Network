@@ -152,15 +152,23 @@ export async function saveAlias(_prev: ActionState, formData: FormData): Promise
   const customerId = text(formData, "customer_id");
   const itemId = text(formData, "catalog_item_id");
   const partNumber = text(formData, "customer_part_number");
+  const description = text(formData, "customer_description");
   if (!isUuid(customerId)) return { error: "Choose a customer." };
   if (!isUuid(itemId)) return { error: "Choose a catalog item." };
   if (!partNumber) return { error: "Enter the customer's part number." };
   if (partNumber.length > 100) return { error: "Text is too long (max 100 characters)" };
+  if (description.length > 500) return { error: "Description is too long (max 500 characters)" };
   const supabase = await createClient();
   const { error } = await supabase
     .from("customer_item_aliases")
     .upsert(
-      { customer_id: customerId, catalog_item_id: itemId, customer_part_number: partNumber, updated_by: me.id },
+      {
+        customer_id: customerId,
+        catalog_item_id: itemId,
+        customer_part_number: partNumber,
+        customer_description: description || null,
+        updated_by: me.id,
+      },
       { onConflict: "customer_id,catalog_item_id" },
     );
   if (error) return { error: dbMessage(error) };

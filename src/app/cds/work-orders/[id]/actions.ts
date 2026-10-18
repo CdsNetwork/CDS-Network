@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
 import { isUuid, LINES_LOCKED_STATUSES, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
+import { passThroughInput } from "@/lib/pass-through";
 import { createInvoice, type CreatedInvoice } from "@/lib/qbo/api";
 import { QboError } from "@/lib/qbo/client";
 import { loadInvoice } from "@/lib/qbo/invoice-input";
@@ -213,6 +214,32 @@ export async function removeLine(woId: string, lineId: string): Promise<ActionSt
     message: "CDS removed a line",
     shop_visible: !REVIEW_STATUSES.includes(status),
   });
+  return done(woId, "Line removed.");
+}
+
+/** Misc. hardware and other items priced per line: the amount from the shop's invoice, billed as is. */
+export async function addPassThroughLine(woId: string, itemId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId) || !isUuid(itemId)) return { error: "Work order not found." };
+  const input = passThroughInput(text(formData.get("description")), text(formData.get("amount")));
+  if (!input.ok) return { error: input.error };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("cds_add_pass_through_line", {
+    p_work_order: woId,
+    p_catalog_item: itemId,
+    p_description: input.description,
+    p_amount: input.amount,
+  });
+  if (error) return { error: error.message };
+  return done(woId, "Line added at the amount on the shop's invoice.");
+}
+
+export async function removePassThroughLine(woId: string, lineId: string): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId) || !isUuid(lineId)) return { error: "Line not found." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("cds_remove_pass_through_line", { p_line: lineId });
+  if (error) return { error: error.message };
   return done(woId, "Line removed.");
 }
 

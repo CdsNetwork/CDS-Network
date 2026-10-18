@@ -53,6 +53,8 @@ export type LineRow = {
   qty: number;
   shop_unit_rate: number | null;
   origin: "cds_order" | "shop_added" | "auth_request";
+  /** Text CDS entered on the line (Misc. hardware). */
+  description: string | null;
   sku: string;
   name: string;
 };

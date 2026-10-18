@@ -17,6 +17,12 @@
  * "... - ENTERPRISE"): a catalog item mapped for the work order's customer wins over the
  * mapping for all customers. After the billable lines, each component gets a $0
  * "measurements" line (per customer and component type) with its readings.
+ *
+ * A customer's own part number (customer_item_aliases, required by First Student's
+ * Basware portal) goes in front of the line description, with the customer's own
+ * description when there is one. Items priced per line (Misc. hardware: the amount from
+ * the shop's invoice, billed as is) are ordinary lines whose description adds the text CDS
+ * entered on the line.
  */
 
 export type TaxClass = "parts" | "labor" | "shipping" | "exempt";
@@ -40,11 +46,16 @@ export type InvoiceLine = {
   catalogItemId: string;
   sku: string;
   name: string;
+  /** work_order_lines.description: text CDS entered on the line (Misc. hardware). */
+  description?: string | null;
   qty: number;
   /** work_order_line_pricing.customer_unit_price; null when the snapshot is missing. */
   customerUnitPrice: number | null;
   taxClass: TaxClass;
 };
+
+/** customer_item_aliases: the customer's own part number and description for one of our items. */
+export type CustomerAlias = { partNumber: string; description?: string | null };
 
 export type CustomerMapping = { qboCustomerId: string; qboDisplayName: string };
 export type ItemMapping = { qboItemId: string; qboItemName: string };
@@ -196,17 +207,28 @@ export function isTaxable(taxClass: TaxClass, wo: Pick<InvoiceWorkOrder, "taxPar
 }
 
 /**
+ * The invoice line description: our item name (or the customer's own description), the
+ * text entered on the line, and the customer's part number in front when there is one.
+ */
+export function lineDescription(line: Pick<InvoiceLine, "name" | "description">, alias?: CustomerAlias): string {
+  const partNumber = alias?.partNumber?.trim();
+  const name = (partNumber && alias?.description?.trim()) || line.name;
+  const text = [name, line.description?.trim()].filter(Boolean).join(" - ");
+  return clip(partNumber ? `Part # ${partNumber} - ${text}` : text, DESCRIPTION_MAX);
+}
+
+/**
  * The QuickBooks invoice for a work order, or the list of things CDS must fix first
  * (written for the person looking at the work order).
  *
- * @param aliases the customer's own part numbers by catalog item id
+ * @param aliases the customer's own part numbers (and descriptions) by catalog item id
  */
 export function buildInvoicePayload(
   workOrder: InvoiceWorkOrder,
   lines: InvoiceLine[],
   customerMap: CustomerMapping | null,
   itemMap: ItemMappings,
-  aliases: Record<string, string | undefined>,
+  aliases: Record<string, CustomerAlias | undefined>,
   location: InvoiceLocation | null,
   components: InvoiceComponent[] = [],
   measurementMap: MeasurementMappings = { customer: {}, default: {} },
@@ -275,11 +297,10 @@ export function buildInvoicePayload(
       continue;
     }
     const unitPrice = Number(l.customerUnitPrice);
-    const alias = aliases[l.catalogItemId]?.trim();
     qboLines.push({
       DetailType: "SalesItemLineDetail",
       Amount: cents(l.qty * unitPrice),
-      Description: clip(alias ? `Part # ${alias} - ${l.name}` : l.name, DESCRIPTION_MAX),
+      Description: lineDescription(l, aliases[l.catalogItemId]),
       SalesItemLineDetail: {
         ItemRef: { value: item.qboItemId, name: item.qboItemName },
         Qty: l.qty,
