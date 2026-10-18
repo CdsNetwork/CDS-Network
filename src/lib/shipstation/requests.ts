@@ -191,6 +191,7 @@ type RawRate = {
   carrier_friendly_name?: string;
   service_code?: string;
   service_type?: string;
+  package_type?: string | null;
   shipping_amount?: Money;
   other_amount?: Money;
   insurance_amount?: Money;
@@ -207,6 +208,8 @@ export type Rate = {
   carrierCode: string;
   serviceCode: string;
   serviceName: string;
+  /** ShipStation package type of this rate, null for a plain package. */
+  packageType: string | null;
   /** shipping + other + insurance + confirmation, what CDS pays. */
   total: number;
   shipping: number;
@@ -224,8 +227,34 @@ function amount(m: Money): number {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+const isPlainPackage = (t: string | null) => t === null || t === "package";
+
 /**
- * Rates from a POST /v2/rates answer, cheapest first. `allowed` maps a carrier id to the
+ * One rate per carrier service. ShipStation answers USPS with one rate per package type (plain
+ * package, flat rate boxes, large package), often with identical text. The label is bought for
+ * the carrier and service with CDS's own package, so a plain package rate wins when there is
+ * one; otherwise the cheapest rate is kept and its package type is named.
+ */
+function onePerService(rates: Rate[]): Rate[] {
+  const best = new Map<string, Rate>();
+  for (const r of rates) {
+    const key = `${r.carrierId}|${r.serviceCode}`;
+    const cur = best.get(key);
+    if (!cur) {
+      best.set(key, r);
+      continue;
+    }
+    const rPlain = isPlainPackage(r.packageType);
+    const curPlain = isPlainPackage(cur.packageType);
+    if ((rPlain && !curPlain) || (rPlain === curPlain && r.total < cur.total)) best.set(key, r);
+  }
+  return [...best.values()].map((r) =>
+    isPlainPackage(r.packageType) ? r : { ...r, serviceName: `${r.serviceName} (${r.packageType!.replace(/_/g, " ")})` },
+  );
+}
+
+/**
+ * Rates from a POST /v2/rates answer, one per carrier service, cheapest first. `allowed` maps a carrier id to the
  * service codes CDS allows (an empty list or a missing carrier allows all of its services).
  */
 export function mapRates(body: unknown, allowed: Record<string, string[]> = {}): { rates: Rate[]; problems: string[] } {
@@ -254,6 +283,7 @@ export function mapRates(body: unknown, allowed: Record<string, string[]> = {}):
       carrierCode: r.carrier_code ?? "",
       serviceCode: r.service_code,
       serviceName: r.service_type ?? r.service_code,
+      packageType: r.package_type?.trim() || null,
       total: round2(shipping + other + amount(r.insurance_amount) + amount(r.confirmation_amount)),
       shipping: round2(shipping),
       other: round2(other),
@@ -263,8 +293,9 @@ export function mapRates(body: unknown, allowed: Record<string, string[]> = {}):
       warnings: (r.warning_messages ?? []).filter((w) => typeof w === "string" && w.trim()),
     });
   }
-  rates.sort((a, b) => a.total - b.total || (a.deliveryDays ?? 99) - (b.deliveryDays ?? 99));
-  return { rates, problems };
+  const unique = onePerService(rates);
+  unique.sort((a, b) => a.total - b.total || (a.deliveryDays ?? 99) - (b.deliveryDays ?? 99));
+  return { rates: unique, problems };
 }
 
 // ---------------------------------------------------------------- labels

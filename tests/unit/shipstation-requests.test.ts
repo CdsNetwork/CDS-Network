@@ -300,6 +300,45 @@ describe("mapRates", () => {
     expect(rates).toEqual([]);
   });
 
+  it("lists each carrier service once (USPS answers one rate per package type)", () => {
+    const usps = (id: string, service: string, name: string, amt: number, pkg: string | null) => ({
+      rate_id: id,
+      rate_type: "shipment",
+      carrier_id: "se-usps",
+      carrier_code: "usps",
+      service_code: service,
+      service_type: name,
+      package_type: pkg,
+      shipping_amount: { currency: "usd", amount: amt },
+      other_amount: { currency: "usd", amount: 0 },
+      delivery_days: 3,
+    });
+    const { rates } = mapRates({
+      rate_response: {
+        rates: [
+          usps("se-a1", "usps_ground_advantage", "USPS Ground Advantage", 107.73, "package"),
+          usps("se-a2", "usps_ground_advantage", "USPS Ground Advantage", 107.73, null),
+          usps("se-b1", "usps_priority_mail", "USPS Priority Mail", 133.95, "package"),
+          usps("se-b2", "usps_priority_mail", "USPS Priority Mail", 22.45, "medium_flat_rate_box"),
+          usps("se-b3", "usps_priority_mail", "USPS Priority Mail", 140.1, "large_package"),
+          usps("se-c1", "usps_priority_mail_express", "USPS Priority Mail Express", 31.4, "flat_rate_envelope"),
+        ],
+      },
+    });
+    expect(rates.map((r) => r.serviceCode)).toEqual([
+      "usps_priority_mail_express",
+      "usps_ground_advantage",
+      "usps_priority_mail",
+    ]);
+    // The label is bought for CDS's own box, so a flat rate price would be misleading when a
+    // plain package rate exists; it is kept only when nothing else is offered for the service.
+    expect(rates.find((r) => r.serviceCode === "usps_priority_mail")).toMatchObject({ rateId: "se-b1", total: 133.95 });
+    expect(rates.find((r) => r.serviceCode === "usps_ground_advantage")?.total).toBe(107.73);
+    expect(rates.find((r) => r.serviceCode === "usps_priority_mail_express")?.serviceName).toBe(
+      "USPS Priority Mail Express (flat rate envelope)",
+    );
+  });
+
   it("survives a body without rate_response", () => {
     expect(mapRates(null)).toEqual({ rates: [], problems: ["ShipStation returned no rates"] });
   });
