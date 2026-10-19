@@ -173,6 +173,7 @@ type Shipment = {
   label_status: string;
   status: string;
   eta_text: string | null;
+  delivered_at: string | null;
   created_at: string;
   shipment_internal: MaybeOne<{ notes: string | null; quoted_cost: number | null; actual_cost: number | null }>;
 };
@@ -397,7 +398,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase
         .from("shipments")
         .select(
-          "id, direction, carrier, service_level, tracking_number, label_status, status, eta_text, created_at, shipment_internal(notes, quoted_cost, actual_cost)",
+          "id, direction, carrier, service_level, tracking_number, label_status, status, eta_text, delivered_at, created_at, shipment_internal(notes, quoted_cost, actual_cost)",
         )
         .eq("work_order_id", id)
         .order("created_at"),
@@ -603,8 +604,12 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               <Fact label="Created">
                 {dateTime(wo.created_at)} ({internal?.source === "manual" ? "manual" : internal?.source})
               </Fact>
-              <Fact label="Dispatched / completed">
-                {[wo.dispatched_at && `Dispatched ${dateTime(wo.dispatched_at)}`, wo.completed_at && `Completed ${dateTime(wo.completed_at)}`]
+              <Fact label="Dispatched / completed / delivered">
+                {[
+                  wo.dispatched_at && `Dispatched ${dateTime(wo.dispatched_at)}`,
+                  wo.completed_at && `Completed ${dateTime(wo.completed_at)}`,
+                  wo.delivered_at && `Delivered ${dateTime(wo.delivered_at)}`,
+                ]
                   .filter(Boolean)
                   .join("\n")}
               </Fact>
@@ -633,7 +638,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                     <div className="small">
                       {s.carrier ?? "Carrier not set"}
                       {s.service_level ? ` • ${s.service_level}` : ""} • Label: {LABEL_STATUS_LABEL[s.label_status] ?? s.label_status}
-                      {s.eta_text ? ` • ETA ${s.eta_text}` : ""}
+                      {s.eta_text && s.status !== "delivered" ? ` • ETA ${s.eta_text}` : ""}
+                      {s.delivered_at ? ` • Delivered ${dateTime(s.delivered_at)}` : ""}
                     </div>
                     <div style={{ fontSize: 18, fontWeight: 850, color: "var(--blue)", margin: "6px 0" }}>
                       Tracking # {s.tracking_number ?? "Pending"}

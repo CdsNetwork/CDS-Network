@@ -6,7 +6,7 @@ import { ShippingSettings } from "@/components/shipping/ShippingSettings";
 import { activeLabels, shipStationConfigured } from "@/lib/shipstation/views";
 import { one } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
-import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL, money, woLabel, wrapCell } from "@/lib/format";
+import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL, dateTime, money, woLabel, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { createShipment, setShipmentStatus, updateShipment } from "./actions";
 import { LABEL_STATUSES, NEW_SHIPMENT_STATUS, PACKAGE_TYPES, SERVICE_LEVELS, labelStatusLabel } from "./options";
@@ -29,6 +29,7 @@ type ShipmentRow = {
   ship_from: string | null;
   ship_to: string | null;
   eta_text: string | null;
+  delivered_at: string | null;
   work_orders: WoRef | WoRef[] | null;
   shipment_internal: Internal | Internal[] | null;
 };
@@ -47,7 +48,7 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
     supabase
       .from("shipments")
       .select(
-        "id, work_order_id, direction, carrier, service_level, tracking_number, label_status, status, package_type, weight_lb, length_in, width_in, height_in, ship_from, ship_to, eta_text, work_orders(wo_number, location_label, customers(name)), shipment_internal(notes, quoted_cost, actual_cost)",
+        "id, work_order_id, direction, carrier, service_level, tracking_number, label_status, status, package_type, weight_lb, length_in, width_in, height_in, ship_from, ship_to, eta_text, delivered_at, work_orders(wo_number, location_label, customers(name)), shipment_internal(notes, quoted_cost, actual_cost)",
       )
       .order("created_at", { ascending: false })
       .limit(300),
@@ -215,6 +216,7 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
                   </td>
                   <td style={{ minWidth: 200 }}>
                     <span className={STATUS_TAG[s.status] ?? "tag"}>{SHIPMENT_STATUS_LABEL[s.status] ?? s.status}</span>
+                    {s.delivered_at && <div className="small">Delivered {dateTime(s.delivered_at)}</div>}
                     <div style={{ marginTop: 6 }}>
                       <ActionForm
                         key={`${s.id}-${s.status}`}
