@@ -3,6 +3,9 @@ import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL } from "@/lib/format";
 export const DIRECTIONS = Object.keys(DIRECTION_LABEL);
 export const SHIPMENT_STATUSES = Object.keys(SHIPMENT_STATUS_LABEL);
 
+/** A new shipment leg has no label yet. */
+export const NEW_SHIPMENT_STATUS = "label_needed";
+
 export const LABEL_STATUSES: { value: string; label: string }[] = [
   { value: "needed", label: "Needed" },
   { value: "ready", label: "Ready" },

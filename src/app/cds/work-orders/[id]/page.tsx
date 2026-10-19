@@ -41,6 +41,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { LabelPanel } from "@/components/shipping/LabelPanel";
 import { activeLabels, shipStationConfigured } from "@/lib/shipstation/views";
+import { NEW_SHIPMENT_STATUS } from "@/app/cds/shipping/options";
 import {
   addLine,
   addPassThroughLine,
@@ -681,7 +682,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   </div>
                   <div className="field">
                     <label htmlFor="ship-status">Status</label>
-                    <select id="ship-status" name="status" defaultValue="label_created">
+                    <select id="ship-status" name="status" defaultValue={NEW_SHIPMENT_STATUS}>
                       {Object.entries(SHIPMENT_STATUS_LABEL).map(([v, l]) => (
                         <option key={v} value={v}>
                           {l}

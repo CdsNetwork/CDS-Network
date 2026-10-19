@@ -9,7 +9,7 @@ import { requireCds } from "@/lib/auth";
 import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL, money, woLabel, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { createShipment, setShipmentStatus, updateShipment } from "./actions";
-import { LABEL_STATUSES, PACKAGE_TYPES, SERVICE_LEVELS, labelStatusLabel } from "./options";
+import { LABEL_STATUSES, NEW_SHIPMENT_STATUS, PACKAGE_TYPES, SERVICE_LEVELS, labelStatusLabel } from "./options";
 
 type Internal = { notes: string | null; quoted_cost: string | null; actual_cost: string | null };
 type ShipmentRow = {
@@ -335,7 +335,7 @@ function ShipmentFields({ s }: { s?: ShipmentRow }) {
         </div>
         <div className="field">
           <label htmlFor="status">Shipment Status</label>
-          <select id="status" name="status" defaultValue={s?.status ?? "awaiting_pickup"}>
+          <select id="status" name="status" defaultValue={s?.status ?? NEW_SHIPMENT_STATUS}>
             {Object.entries(SHIPMENT_STATUS_LABEL).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
