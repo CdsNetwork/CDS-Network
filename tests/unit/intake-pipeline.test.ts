@@ -54,8 +54,10 @@ describe("parseEmail without the AI stage", () => {
     ]);
   });
 
-  it("matches a forwarded request by its original author, not the dispatcher who forwarded it", async () => {
-    const p = await parseEmail(fixture("forwarded-chain"), reference(), { llm: null });
+  it("ignores a forward on an existing thread, and matches it by its original author when CDS processes it anyway", async () => {
+    const ignoredForward = await parseEmail(fixture("forwarded-chain"), reference(), { llm: null });
+    expect(ignoredForward).toMatchObject({ is_work_request: false, ignore_kind: "cds_sent" });
+    const p = await parseEmail(fixture("forwarded-chain"), reference(), { llm: null, forceWorkRequest: true });
     expect(p.original_sender).toBe("shoplead611@ryder.example");
     expect(p.customer).toMatchObject({ id: RYDER, via: "sender_domain" });
     expect(p.location?.id).toBe(loc0611.id);

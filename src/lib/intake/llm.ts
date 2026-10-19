@@ -103,6 +103,8 @@ function userContent(email: NormalizedEmail, text: string, d: Deterministic): st
     d.unitNumber && `unit ${d.unitNumber}`,
     d.locationNumbers.length && `location ${d.locationNumbers.join(", ")}`,
     d.vin && `VIN ${d.vin}`,
+    d.mileage !== null && `mileage ${d.mileage}`,
+    ...d.qtyLines.map((q) => `${q.qty} x ${q.partNumber} ${q.component}${d.forCleaning ? " for cleaning" : ""}`),
   ].filter(Boolean);
   return [
     "Already found by pattern matching (check against the email, do not trust blindly):",

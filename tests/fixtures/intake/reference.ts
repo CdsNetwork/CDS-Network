@@ -11,11 +11,16 @@ import { splitCatalog } from "@/lib/intake/types";
 export const RYDER = "00000000-0000-4000-8000-00000000a001";
 export const FIRST_STUDENT = "00000000-0000-4000-8000-00000000a002";
 export const AMAZON = "00000000-0000-4000-8000-00000000a003";
+export const PEPSI = "00000000-0000-4000-8000-00000000a004";
+/** Only in the test reference: XPO is not a portal customer yet. */
+export const XPO = "00000000-0000-4000-8000-00000000a005";
 
 export const customers: CustomerRef[] = [
   { id: RYDER, code: "RYDER", name: "Ryder" },
   { id: FIRST_STUDENT, code: "FIRST_STUDENT", name: "First Student" },
   { id: AMAZON, code: "AMAZON", name: "Amazon" },
+  { id: PEPSI, code: "PEPSI", name: "Pepsi" },
+  { id: XPO, code: "XPO", name: "XPO Logistics" },
 ];
 
 export const domains: DomainRef[] = [
@@ -45,6 +50,8 @@ export const locations: LocationRef[] = [
   loc("0078", RYDER, "78-FAIRVIEW EAST", "78", "FAIRVIEW EAST", "2200 Commerce Dr, Fairview, OH 44126", { postal_code: "44126", region: "OH" }),
   loc("2723", FIRST_STUDENT, "12723M", "12723", "Brookside Transportation", "9 Placeholder Way, Brookside, IL 60000"),
   loc("0418", FIRST_STUDENT, "30418M", "30418", "Maple Grove Depot", "77 Orchard Lane, Maple Grove, MN 55369", { postal_code: "55369" }),
+  loc("3381", PEPSI, "PEP-3381", "3381", "Springfield", "500 Example Blvd, Springfield, IL 62700", { postal_code: "62700" }),
+  loc("0670", XPO, "XPO-SFS", null, "Santa Fe Springs", "1200 Fictional Ave, Santa Fe Springs, CA 90670", { postal_code: "90670" }),
 ];
 
 const item = (n: string, sku: string, name: string, category: string, oe_cross: string | null = null): CatalogRef => ({
@@ -66,14 +73,27 @@ export const VBAND_CLAMP = item("0008", "CDS-C-4000", "V-Band Clamp 4in", "clamp
 /** Priced per line (the amount comes from the shop's invoice): intake must never propose it. */
 export const MISC_HARDWARE: CatalogRef = { ...item("0009", "CDS-MISC-HARDWARE", "Misc. hardware", "hardware"), price_per_line: true };
 
-export const catalog: CatalogRef[] = [DPF_CLEAN, DOC_CLEAN, SCR_CLEAN, EGR, DPF_OIL, BOX_BAKE, DPF_GASKET, VBAND_CLAMP, MISC_HARDWARE];
+export const KIT_ISB = item("0010", "CDS-KIT-ISB-1", "Cummins ISB DPF Kit (kit)", "part", "A6801234");
+export const NOX_SENSOR = item("0011", "ENV-NOX-1619", "Cummins NOx Sensor - Outlet", "part");
+
+export const catalog: CatalogRef[] = [
+  DPF_CLEAN, DOC_CLEAN, SCR_CLEAN, EGR, DPF_OIL, BOX_BAKE, DPF_GASKET, VBAND_CLAMP, MISC_HARDWARE, KIT_ISB, NOX_SENSOR,
+];
 
 export const aliases: AliasRef[] = [
   { customer_id: FIRST_STUDENT, catalog_item_id: DPF_CLEAN.id, customer_part_number: "FS-DPF-0097" },
   { customer_id: FIRST_STUDENT, catalog_item_id: DOC_CLEAN.id, customer_part_number: "FS-DOC-0044" },
   { customer_id: FIRST_STUDENT, catalog_item_id: DPF_GASKET.id, customer_part_number: "FS-GSK-1201" },
   { customer_id: FIRST_STUDENT, catalog_item_id: VBAND_CLAMP.id, customer_part_number: "FS-CLP-0310" },
+  { customer_id: FIRST_STUDENT, catalog_item_id: DPF_CLEAN.id, customer_part_number: "CDS-DPF-CLEAN" },
 ];
+
+/** Portal prices in effect for a customer (override, else fleet price). */
+export const portalPrices: Record<string, number> = {
+  [`${FIRST_STUDENT}:${NOX_SENSOR.id}`]: 395,
+  [`${FIRST_STUDENT}:${DPF_GASKET.id}`]: 20,
+  [`${FIRST_STUDENT}:${DPF_CLEAN.id}`]: 325,
+};
 
 export function reference(): IntakeReference {
   return {
@@ -82,6 +102,7 @@ export function reference(): IntakeReference {
     ...splitCatalog(catalog),
     aliases,
     locationsFor: async (customerId) => locations.filter((l) => l.customer_id === customerId),
+    priceFor: async (customerId, catalogItemId) => portalPrices[`${customerId}:${catalogItemId}`] ?? null,
   };
 }
 
@@ -90,6 +111,8 @@ export const loc0611 = locations[2];
 export const loc0077 = locations[3];
 export const locFs12723 = locations[5];
 export const locFs30418 = locations[6];
+export const locPepsi3381 = locations[7];
+export const locXpoSfs = locations[8];
 
 export function fixture(name: string): NormalizedEmail {
   const raw: unknown = JSON.parse(readFileSync(join(__dirname, `${name}.json`), "utf8"));

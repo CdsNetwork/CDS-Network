@@ -18,9 +18,14 @@ export type NormalizedEmail = {
   text: string | null;
   html: string | null;
   attachments: EmailAttachment[];
+  /** The In-Reply-To header: set on replies within an existing thread. */
+  inReplyTo?: string | null;
+  /** The CDS inbox the feed delivered the email to (dispatch@, xpo@), when the feed knows it. */
+  deliveredTo?: string | null;
 };
 
-export type FieldSource = "regex" | "llm" | "location_default" | "none";
+/** "template": read from a fixed request template (Ryder form, iProcure PO, website form). */
+export type FieldSource = "template" | "regex" | "llm" | "location_default" | "none";
 
 export type Field<T> = { value: T | null; source: FieldSource; confidence: number };
 
@@ -77,9 +82,16 @@ export type IntakeReference = {
   perLineItems: CatalogRef[];
   aliases: AliasRef[];
   locationsFor: (customerId: string) => Promise<LocationRef[]>;
+  /** The customer's portal price for an item today (override, else fleet price), or null. */
+  priceFor?: (customerId: string, catalogItemId: string) => Promise<number | null>;
 };
 
-export type CustomerMatch = { id: string; name: string; via: "sender_domain" | "content" | "llm_name"; confidence: number };
+export type CustomerMatch = {
+  id: string;
+  name: string;
+  via: "template" | "sender_domain" | "inbox" | "content" | "llm_name";
+  confidence: number;
+};
 export type LocationMatch = {
   id: string;
   code: string;
@@ -95,8 +107,45 @@ export type ItemMatch = {
   sku: string | null;
   name: string | null;
   via: "customer_alias" | "sku" | "oe_cross" | "name" | "none";
-  source: "regex" | "llm";
+  source: "template" | "regex" | "llm";
   confidence: number;
+  /** Price written on the customer's PO (iProcure). */
+  price?: number | null;
+  /** The portal price for this customer on the day, to compare with the PO price. */
+  portal_price?: number | null;
+  required_date?: string | null;
+  taxable?: boolean | null;
+  cost_center?: string | null;
+  /** EGR cooler to be returned to the customer's location (Ryder form). */
+  return_to_location?: boolean;
+};
+
+export type TemplateName = "ryder" | "first_student_iprocure" | "website_form";
+
+/** Why an email is not a request: replies, invoices, carrier notices, CDS's own mail and so on. */
+export type IgnoreKind = "reply" | "invoice" | "carrier" | "security" | "cds_sent" | "ryder_po";
+
+/** Fields read from the templates (and XPO free text) beyond the original set. */
+export type DetailFields = {
+  requested_date?: Field<string>;
+  order_type?: Field<string>;
+  region?: Field<string>;
+  mileage?: Field<number>;
+  serial_number?: Field<string>;
+  manufacturer?: Field<string>;
+  part_number?: Field<string>;
+  comments?: Field<string>;
+  contact_name?: Field<string>;
+  contact_email?: Field<string>;
+  contact_phone?: Field<string>;
+  store_room?: Field<string>;
+  pickup_option?: Field<string>;
+  filter_options?: Field<string>;
+  parts_or_service?: Field<string>;
+  cost_center?: Field<string>;
+  order_description?: Field<string>;
+  location_suffix?: Field<string>;
+  return_to_location?: Field<boolean>;
 };
 
 /** What the pipeline stores in inbound_emails.parsed. Ids are always matched in code. */
@@ -104,6 +153,13 @@ export type ParsedEmail = {
   version: 1;
   is_work_request: boolean;
   ignore_reason: string | null;
+  ignore_kind?: IgnoreKind | null;
+  /** The request template the email matched; the AI stage runs only when none did. */
+  template?: TemplateName | null;
+  /** The CDS inbox the email arrived at. */
+  mailbox?: string | null;
+  /** A Ryder PO issued email noted on the open order with that PO number. */
+  po_reference?: { po_number: string; work_order_id: string | null; wo_number: number | null } | null;
   original_sender: string | null;
   llm: { used: boolean; model: string | null; error: string | null };
   fields: {
@@ -116,7 +172,7 @@ export type ParsedEmail = {
     fulfillment: Field<Fulfillment>;
     requested_work: Field<string>;
     notes: Field<string>;
-  };
+  } & DetailFields;
   customer: CustomerMatch | null;
   customer_candidates: { id: string; name: string }[];
   location: LocationMatch | null;

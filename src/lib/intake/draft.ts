@@ -18,6 +18,17 @@ export type DraftParams = {
   p_internal_notes: string;
   p_review_reason: string;
   p_lines: { catalog_item_id: string; qty: number }[];
+  // Read from the request templates (and XPO's meter): shop-facing on the order.
+  p_vin: string | null;
+  p_mileage: number | null;
+  p_requested_date: string | null;
+  p_return_to_location: boolean;
+  // CDS-only (work_order_internal): the customer's own order type, region and contact.
+  p_order_type: string | null;
+  p_customer_region: string | null;
+  p_contact_name: string | null;
+  p_contact_email: string | null;
+  p_contact_phone: string | null;
 };
 
 export type DraftDecision = { ok: true; params: DraftParams } | { ok: false; reason: string };
@@ -52,14 +63,32 @@ export function buildDraftParams(emailId: string, email: NormalizedEmail, parsed
   const notes = [
     `Created from an email to dispatch. From: ${email.from}. Subject: ${email.subject || "(none)"}. Received: ${email.receivedAt}.`,
     `Confidence ${Math.round(parsed.confidence * 100)}% (${parsed.confidence_label})${parsed.llm.used ? "" : ", pattern matching only"}.`,
+    parsed.template ? `Read from the ${parsed.template.replace(/_/g, " ")} template.` : null,
     f.vin.value ? `VIN: ${f.vin.value}.` : null,
+    f.serial_number?.value ? `Serial #: ${f.serial_number.value}.` : null,
+    f.manufacturer?.value ? `Manufacturer: ${f.manufacturer.value}.` : null,
+    f.part_number?.value ? `Part #: ${f.part_number.value}.` : null,
+    f.order_description?.value ? `Order description: ${f.order_description.value}.` : null,
+    f.cost_center?.value ? `Cost center: ${f.cost_center.value}.` : null,
+    f.location_suffix?.value ? `Location suffix: ${f.location_suffix.value}.` : null,
+    f.store_room?.value ? `Store room #: ${f.store_room.value}.` : null,
+    f.pickup_option?.value ? `Pickup option: ${f.pickup_option.value}.` : null,
+    f.filter_options?.value || f.parts_or_service?.value
+      ? `Form: ${[f.filter_options?.value, f.parts_or_service?.value].filter(Boolean).join(", ")}.`
+      : null,
+    parsed.items.some((i) => i.price !== undefined && i.price !== null)
+      ? `PO prices: ${parsed.items
+          .filter((i) => i.price !== undefined && i.price !== null)
+          .map((i) => `${i.sku ?? i.part_number ?? i.description} ${i.price!.toFixed(2)}`)
+          .join(", ")}.`
+      : null,
     !parsed.location && (f.location_number.value || f.location_address.value || f.location_name.value)
       ? `Location in email: ${[f.location_number.value, f.location_name.value, f.location_address.value].filter(Boolean).join(", ")}.`
       : null,
     unmatched.length
       ? `Not matched to the catalog: ${unmatched.map((i) => `${i.qty} x ${i.part_number ? `${i.part_number} ` : ""}${i.description}`).join("; ")}.`
       : null,
-    f.notes.value ? `Notes: ${f.notes.value}` : null,
+    f.notes.value ? `${parsed.template ? "Customer comments" : "Notes"}: ${f.notes.value}` : null,
     parsed.warnings.length ? `Check: ${parsed.warnings.join(" ")}` : null,
   ]
     .filter(Boolean)
@@ -85,6 +114,15 @@ export function buildDraftParams(emailId: string, email: NormalizedEmail, parsed
       p_internal_notes: cut(notes, 2000),
       p_review_reason: cut(reason, 500),
       p_lines: [...lines].map(([catalog_item_id, qty]) => ({ catalog_item_id, qty })),
+      p_vin: f.vin.value ? cut(f.vin.value, 30) : null,
+      p_mileage: f.mileage?.value ?? null,
+      p_requested_date: f.requested_date?.value ?? null,
+      p_return_to_location: f.return_to_location?.value === true || parsed.items.some((i) => i.return_to_location),
+      p_order_type: f.order_type?.value ? cut(f.order_type.value, 100) : null,
+      p_customer_region: f.region?.value ? cut(f.region.value, 100) : null,
+      p_contact_name: f.contact_name?.value ? cut(f.contact_name.value, 200) : null,
+      p_contact_email: f.contact_email?.value ? cut(f.contact_email.value, 320) : null,
+      p_contact_phone: f.contact_phone?.value ? cut(f.contact_phone.value, 50) : null,
     },
   };
 }

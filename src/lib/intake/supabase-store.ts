@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { INTAKE_MAILBOX } from "./config";
-import { emailAddress } from "./email";
+import { emailAddress, intakeMailbox } from "./email";
+import { pacificToday } from "@/lib/dates";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import type { IntakeStatus, IntakeStore, StoredEmail } from "./process";
 import { splitCatalog, type AliasRef, type CatalogRef, type CustomerRef, type DomainRef, type IntakeReference, type LocationRef, type NormalizedEmail } from "./types";
@@ -20,6 +20,8 @@ type EmailRow = {
   body_text: string | null;
   body_html: string | null;
   attachments: NormalizedEmail["attachments"] | null;
+  mailbox: string | null;
+  in_reply_to: string | null;
 };
 
 /**
@@ -30,7 +32,8 @@ export function supabaseIntakeStore(client: SupabaseClient, actorId: string | nu
   return {
     async insertEmail(email, source) {
       const row = {
-        mailbox: INTAKE_MAILBOX,
+        mailbox: intakeMailbox(email),
+        in_reply_to: email.inReplyTo ?? null,
         provider_message_id: email.messageId,
         received_at: email.receivedAt,
         from_header: email.from,
@@ -63,7 +66,7 @@ export function supabaseIntakeStore(client: SupabaseClient, actorId: string | nu
       const { data, error } = await client
         .from("inbound_emails")
         .select(
-          "id, status, work_order_id, attempts, provider_message_id, from_header, from_address, to_addresses, subject, received_at, body_text, body_html, attachments",
+          "id, status, work_order_id, attempts, provider_message_id, from_header, from_address, to_addresses, subject, received_at, body_text, body_html, attachments, mailbox, in_reply_to",
         )
         .eq("id", id)
         .maybeSingle();
@@ -84,6 +87,8 @@ export function supabaseIntakeStore(client: SupabaseClient, actorId: string | nu
           text: r.body_text,
           html: r.body_html,
           attachments: r.attachments ?? [],
+          inReplyTo: r.in_reply_to,
+          deliveredTo: r.mailbox,
         },
       };
     },
@@ -107,11 +112,39 @@ export function supabaseIntakeStore(client: SupabaseClient, actorId: string | nu
         ),
       ]);
       const cache = new Map<string, Promise<LocationRef[]>>();
+      const today = pacificToday();
+      const current = `effective_to.is.null,effective_to.gt.${today}`;
       return {
         customers,
         domains,
         ...catalog,
         aliases,
+        // The price in effect today, Pacific date: the customer's own, else the fleet price.
+        async priceFor(customerId, catalogItemId) {
+          const own = await client
+            .from("customer_price_overrides")
+            .select("amount")
+            .eq("customer_id", customerId)
+            .eq("catalog_item_id", catalogItemId)
+            .eq("market", "US")
+            .lte("effective_from", today)
+            .or(current)
+            .order("effective_from", { ascending: false })
+            .limit(1);
+          if (own.error) throw new Error(own.error.message);
+          if (own.data?.length) return Number((own.data[0] as { amount: number }).amount);
+          const fleet = await client
+            .from("sell_prices")
+            .select("amount")
+            .eq("catalog_item_id", catalogItemId)
+            .eq("market", "US")
+            .lte("effective_from", today)
+            .or(current)
+            .order("effective_from", { ascending: false })
+            .limit(1);
+          if (fleet.error) throw new Error(fleet.error.message);
+          return fleet.data?.length ? Number((fleet.data[0] as { amount: number }).amount) : null;
+        },
         locationsFor(customerId) {
           if (!cache.has(customerId)) {
             cache.set(
@@ -148,6 +181,13 @@ export function supabaseIntakeStore(client: SupabaseClient, actorId: string | nu
         .eq("id", id)
         .is("work_order_id", null);
       if (error) throw new Error(error.message);
+    },
+
+    async notePoReference(id, poNumber) {
+      const { data, error } = await client.rpc("intake_note_po_reference", { p_email: id, p_po: poNumber });
+      if (error) throw new Error(error.message);
+      const row = (data as { work_order_id: string; wo_number: number }[] | null)?.[0];
+      return row ? { workOrderId: row.work_order_id, woNumber: Number(row.wo_number) } : null;
     },
 
     async createDraft(params) {

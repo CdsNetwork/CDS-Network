@@ -11,6 +11,7 @@ import type { NormalizedEmail, ParsedEmail } from "@/lib/intake/types";
 import { handleIntakeWebhook } from "@/lib/intake/webhook";
 import { fakeLlm } from "../fixtures/intake/llm-fakes";
 import { fixture, reference } from "../fixtures/intake/reference";
+import { ryderEgrReturn, ryderPoIssued } from "../fixtures/intake/templates";
 
 type Row = StoredEmail & { parsed: ParsedEmail | null; error: string | null };
 
@@ -117,6 +118,36 @@ describe("ingestEmail", () => {
     expect(out.status).toBe("ignored");
     const forced = await processEmail(store, out.id, { llm: null, forceWorkRequest: true });
     expect(forced.status).toBe("converted");
+  });
+});
+
+describe("request templates and Ryder PO paperwork", () => {
+  it("creates a high confidence draft from a Ryder form without the AI stage", async () => {
+    const { store, drafts } = memoryStore();
+    const llm = vi.fn(fakeLlm());
+    const out = await ingestEmail(store, ryderEgrReturn, { source: "webhook", llm });
+    expect(out.status).toBe("converted");
+    expect(llm).not.toHaveBeenCalled();
+    expect(drafts[0]).toMatchObject({ p_return_to_location: true, p_mileage: 287004, p_requested_date: "2026-10-22" });
+    expect(drafts[0].p_review_reason).toMatch(/high confidence/);
+  });
+
+  it("notes Ryder PO paperwork on the open order with that PO and makes no order", async () => {
+    const { store, drafts, rows } = memoryStore();
+    const notePoReference = vi.fn(async () => ({ workOrderId: "wo-1", woNumber: 100245 }));
+    store.notePoReference = notePoReference;
+    const out = await ingestEmail(store, ryderPoIssued, { source: "webhook", llm: null });
+    expect(out).toMatchObject({ status: "ignored", workOrderId: null, message: "Ryder PO paperwork: noted on work order 100245." });
+    expect(notePoReference).toHaveBeenCalledWith(out.id, "0424118833");
+    expect(rows.get(out.id)?.parsed?.po_reference).toEqual({ po_number: "0424118833", work_order_id: "wo-1", wo_number: 100245 });
+    expect(drafts).toHaveLength(0);
+  });
+
+  it("ignores Ryder PO paperwork with no open order", async () => {
+    const { store } = memoryStore();
+    store.notePoReference = async () => null;
+    const out = await ingestEmail(store, { ...ryderPoIssued, messageId: "<po-2@x>" }, { source: "webhook", llm: null });
+    expect(out).toMatchObject({ status: "ignored", message: "Ryder PO paperwork: no open work order has PO 0424118833." });
   });
 });
 

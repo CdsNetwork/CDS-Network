@@ -15,9 +15,19 @@ export type Deterministic = {
   fulfillmentConflict: boolean;
   components: Component[];
   zip: string | null;
+  /** Odometer reading: "METER 512,880", "Mileage: 312000", "Miles 287004". */
+  mileage: number | null;
+  /** "QTY. 1 A6809999 DPF MODULE" (XPO): quantity, part number and component. */
+  qtyLines: { qty: number; partNumber: string; component: Component }[];
+  /** "PICK UP FOR CLEANING": the parts on the QTY lines are to be cleaned. */
+  forCleaning: boolean;
   workSignals: number;
   nonWorkReason: string | null;
 };
+
+const MILEAGE_RE = /\b(?:meter|mileage|miles|odometer|odo)\b\.?\s*[:#]?\s*(\d[\d,]{2,9})\b/i;
+const QTY_LINE_RE = /\bQTY\.?\s*[:#]?\s*(\d{1,3})\s+(?!(?:DPF|DOC|SCR|EGR)\b)((?=[A-Z0-9\-\/.]*\d)[A-Z0-9][A-Z0-9\-\/.]{2,30})\s+(DPF|DOC|SCR|EGR)\b/gi;
+const FOR_CLEANING_RE = /\bfor\s+clean(?:ing)?\b/i;
 
 // The value must hold a digit; the lookahead lets the scan move on past "Vehicle Bus 7720".
 const VALUE = String.raw`((?=[A-Z0-9\-\/]*\d)[A-Z0-9][A-Z0-9\-\/]{0,24}[A-Z0-9]|[0-9])`;
@@ -186,10 +196,24 @@ export function extractDeterministic(subject: string, text: string): Determinist
     fulfillmentConflict: pickups > 0 && ships > 0,
     components,
     zip: all.match(ZIP_RE)?.[1] ?? null,
+    mileage: mileageOf(all),
+    qtyLines: [...all.matchAll(QTY_LINE_RE)].map((m) => ({
+      qty: Number(m[1]) > 0 ? Number(m[1]) : 1,
+      partNumber: m[2].toUpperCase().replace(/[.]+$/, ""),
+      component: m[3].toUpperCase() as Component,
+    })),
+    forCleaning: FOR_CLEANING_RE.test(all),
     workSignals,
     // A payment notice that happens to say "unit" once is still not a work request.
     nonWorkReason: nonWork && workSignals < 3 ? nonWork[1] : workSignals === 0 ? "No work request found" : null,
   };
+}
+
+function mileageOf(text: string): number | null {
+  const digits = text.match(MILEAGE_RE)?.[1]?.replace(/,/g, "");
+  if (!digits) return null;
+  const n = Number(digits);
+  return Number.isSafeInteger(n) && n < 10_000_000 ? n : null;
 }
 
 /** Part numbers written in the email that equal a known part number (customer's or ours). */

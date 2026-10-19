@@ -31,6 +31,11 @@ export type IntakeStore = {
     id: string,
     result: { status: Exclude<IntakeStatus, "converted" | "new">; parsed: ParsedEmail | null; error: string | null; attempts: number },
   ): Promise<void>;
+  /**
+   * Notes Ryder PO paperwork on the one open order with that PO number. Returns the order, or
+   * null when there is none (or more than one).
+   */
+  notePoReference?(id: string, poNumber: string): Promise<{ workOrderId: string; woNumber: number } | null>;
   /** Creates the draft order and marks the email converted (one transaction, in the database). */
   createDraft(params: DraftParams): Promise<string>;
 };
@@ -85,6 +90,17 @@ export async function processEmail(
       forceWorkRequest: options.forceWorkRequest,
     });
     if (!parsed.is_work_request) {
+      const po = parsed.fields.po_number.value;
+      if (parsed.ignore_kind === "ryder_po" && po && store.notePoReference) {
+        const order = await store.notePoReference(id, po);
+        parsed = {
+          ...parsed,
+          po_reference: { po_number: po, work_order_id: order?.workOrderId ?? null, wo_number: order?.woNumber ?? null },
+          ignore_reason: order
+            ? `Ryder PO paperwork: noted on work order ${order.woNumber}.`
+            : `Ryder PO paperwork: no open work order has PO ${po}.`,
+        };
+      }
       await store.saveResult(id, { status: "ignored", parsed, error: null, attempts });
       return outcome("ignored", null, parsed.ignore_reason);
     }

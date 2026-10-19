@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { CDS_INBOXES, INTAKE_MAILBOX } from "./config";
 import type { EmailAttachment, NormalizedEmail } from "./types";
 
 /** Limits for one stored email. Longer bodies are cut, never rejected. */
@@ -54,10 +55,37 @@ export function validateNormalizedEmail(input: unknown): Result<NormalizedEmail>
     }
   }
 
+  const inReplyTo = str(input.inReplyTo ?? input.in_reply_to, 998);
+  const deliveredTo = emailAddress(str(input.deliveredTo ?? input.delivered_to, MAX_ADDRESS));
+
   return {
     ok: true,
-    value: { messageId, from, to, subject: str(input.subject, MAX_SUBJECT) ?? "", receivedAt, text, html, attachments },
+    value: {
+      messageId,
+      from,
+      to,
+      subject: str(input.subject, MAX_SUBJECT) ?? "",
+      receivedAt,
+      text,
+      html,
+      attachments,
+      ...(inReplyTo ? { inReplyTo } : {}),
+      ...(deliveredTo ? { deliveredTo } : {}),
+    },
   };
+}
+
+/**
+ * The CDS inbox an email arrived at: the inbox the feed delivered it to, else the first CDS
+ * inbox it was addressed to (a request to xpo@ or the ryder@ group), else dispatch@.
+ */
+export function intakeMailbox(email: Pick<NormalizedEmail, "to" | "deliveredTo">): string {
+  const delivered = emailAddress(email.deliveredTo);
+  if (delivered?.endsWith("@cds.direct")) return delivered;
+  const to = email.to.map((t) => emailAddress(t)).filter((t): t is string => !!t);
+  return (
+    to.find((t) => (CDS_INBOXES as readonly string[]).includes(t)) ?? to.find((t) => t.endsWith("@cds.direct")) ?? INTAKE_MAILBOX
+  );
 }
 
 /** The bare address in a header value: `Jane <jane@x.example>` gives `jane@x.example`. */

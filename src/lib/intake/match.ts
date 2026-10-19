@@ -31,17 +31,51 @@ function domainMatches(domain: string, registered: string): boolean {
   return d === r || d.endsWith(`.${r}`);
 }
 
+/** A customer named by a request template or by the inbox, as codes and names. */
+export type CustomerHint = { codes: string[]; names: string[]; via: "template" | "inbox" };
+
 export type CustomerInput = {
   /** Sender addresses, most trusted first (the original author of a forwarded request first). */
   senders: string[];
   text: string;
   llmCustomerName: string | null;
+  /** Template hints are tried before the senders, inbox hints right after them. */
+  hints?: CustomerHint[];
 };
+
+const nameKey = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * Customers a hint names: the same code, or the same name ignoring case and punctuation, or a
+ * name that starts with the other as a whole word ("XPO" names "XPO Logistics", the fleet
+ * "Amerit Fleet" names the customer "Amerit").
+ */
+export function customersForHint(hint: Pick<CustomerHint, "codes" | "names">, customers: CustomerRef[]): CustomerRef[] {
+  const codes = new Set(hint.codes.map((c) => c.toUpperCase()));
+  const names = hint.names.map(nameKey).filter((n) => n.length >= 3);
+  const byCode = customers.filter((c) => codes.has(c.code.toUpperCase()));
+  if (byCode.length) return byCode;
+  return customers.filter((c) => {
+    const name = nameKey(c.name);
+    return name.length >= 3 && names.some((n) => n === name || n.startsWith(`${name} `) || name.startsWith(`${n} `));
+  });
+}
 
 export type CustomerResult = { match: CustomerMatch | null; candidates: CustomerRef[] };
 
 export function matchCustomer(input: CustomerInput, customers: CustomerRef[], domains: DomainRef[]): CustomerResult {
   const byId = new Map(customers.map((c) => [c.id, c]));
+  const fromHints = (via: CustomerHint["via"], confidence: number): CustomerResult | null => {
+    for (const hint of (input.hints ?? []).filter((h) => h.via === via)) {
+      const hits = customersForHint(hint, customers);
+      if (hits.length === 1) return { match: { id: hits[0].id, name: hits[0].name, via, confidence }, candidates: [] };
+      if (hits.length > 1) return { match: null, candidates: hits };
+    }
+    return null;
+  };
+
+  const template = fromHints("template", 0.98);
+  if (template) return template;
 
   for (const sender of input.senders) {
     const domain = sender.slice(sender.lastIndexOf("@") + 1);
@@ -53,6 +87,9 @@ export function matchCustomer(input: CustomerInput, customers: CustomerRef[], do
     }
     if (hits.length > 1) return { match: null, candidates: hits };
   }
+
+  const inbox = fromHints("inbox", 0.9);
+  if (inbox) return inbox;
 
   // Customer named in the text ("Ryder", "First Student"). Only a single, unambiguous name counts.
   const named = customers.filter((c) => {
@@ -140,7 +177,7 @@ export type ItemInput = {
   partNumber: string | null;
   qty: number | null;
   component: Component | null;
-  source: "regex" | "llm";
+  source: "template" | "regex" | "llm";
 };
 
 const SERVICE_WORDS = /\b(clean(?:ing|ed)?|bake|flush|blast|service|test)\b/i;

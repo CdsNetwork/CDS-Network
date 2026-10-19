@@ -6,8 +6,11 @@
  *
  * Fixtures are created with the service role under a per-run id and removed afterwards.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { supabaseIntakeStore } from "@/lib/intake/supabase-store";
 import { admin, anon, createLogin, deleteLogins, must, runId, type Login } from "./helpers";
+
+vi.mock("server-only", () => ({}));
 
 type Fixture = { shop: string; customer: string; location: string; priced: string; unpriced: string; domain: string };
 
@@ -213,6 +216,92 @@ describe("intake_create_draft_work_order", () => {
     expect(upd.error?.code).toBe("23514");
     const seen = await shop.client.from("work_orders").select("id").eq("id", wo);
     expect(seen.data ?? []).toEqual([]);
+  });
+});
+
+describe("template fields and Ryder PO paperwork", () => {
+  it("stores the template fields: shop-facing on the order, contact and order type CDS-only", async () => {
+    const email = await insertEmail(10);
+    const r = await admin.rpc(
+      "intake_create_draft_work_order",
+      draftArgs(email, {
+        p_vin: "1fujgldr5clzz1234",
+        p_mileage: 287004,
+        p_requested_date: "2026-10-22",
+        p_return_to_location: true,
+        p_order_type: "G14 Classified",
+        p_customer_region: "Northeast",
+        p_contact_name: "Robin Sample",
+        p_contact_email: "Robin.Sample@Fleet.example",
+        p_contact_phone: "(555) 010-2233",
+      }),
+    );
+    expect(r.error).toBeNull();
+    const wo = r.data as string;
+    const order = await must(admin.from("work_orders").select("vin, mileage, requested_date, return_to_location").eq("id", wo).single());
+    expect(order).toEqual({ vin: "1FUJGLDR5CLZZ1234", mileage: 287004, requested_date: "2026-10-22", return_to_location: true });
+    const internal = await must(
+      admin
+        .from("work_order_internal")
+        .select("order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone")
+        .eq("work_order_id", wo)
+        .single(),
+    );
+    expect(internal).toEqual({
+      order_type: "G14 Classified",
+      customer_region: "Northeast",
+      customer_contact_name: "Robin Sample",
+      customer_contact_email: "robin.sample@fleet.example",
+      customer_contact_phone: "(555) 010-2233",
+    });
+    // A shop never reads work_order_internal.
+    const shopRead = await shop.client.from("work_order_internal").select("customer_contact_email").eq("work_order_id", wo);
+    expect(shopRead.data ?? []).toEqual([]);
+    const bad = await admin.rpc("intake_create_draft_work_order", draftArgs(await insertEmail(11), { p_mileage: -1 }));
+    expect(bad.error?.message).toMatch(/Mileage/);
+  });
+
+  it("notes Ryder PO paperwork once on the one open order with that PO", async () => {
+    const po = `9${Date.now().toString().slice(-9)}`;
+    const wo = (await admin.rpc("intake_create_draft_work_order", draftArgs(await insertEmail(12), { p_po_number: po }))).data as string;
+    const paperwork = await insertEmail(13, { subject: `Ryder Purchase Order: PO # ${po} Issued for test`, status: "ignored" });
+
+    expect((await shop.client.rpc("intake_note_po_reference", { p_email: paperwork, p_po: po })).error?.code).toBe("42501");
+    const first = await cds.client.rpc("intake_note_po_reference", { p_email: paperwork, p_po: po });
+    expect(first.error).toBeNull();
+    expect(first.data).toEqual([expect.objectContaining({ work_order_id: wo })]);
+    await must(admin.rpc("intake_note_po_reference", { p_email: paperwork, p_po: po }));
+    const events = await must(admin.from("work_order_events").select("message, shop_visible").eq("work_order_id", wo).eq("event_type", "po_reference"));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ shop_visible: false });
+    expect(events[0].message).toContain(po);
+
+    // No open order with the PO (the order is cancelled): nothing is noted.
+    await must(admin.from("work_orders").update({ status: "cancelled" }).eq("id", wo));
+    const none = await admin.rpc("intake_note_po_reference", { p_email: paperwork, p_po: po });
+    expect(none.data).toEqual([]);
+  });
+
+  it("stores the inbox and In-Reply-To and reads them back for a reprocess", async () => {
+    const store = supabaseIntakeStore(admin);
+    const rec = await store.insertEmail(
+      {
+        messageId: MSG(14),
+        from: "Tech <tech@xpo.example>",
+        to: ["xpo@cds.direct"],
+        subject: "DPF CLEANING PICKUP",
+        receivedAt: new Date().toISOString(),
+        text: "PO# 902814 UNIT # 0632-4471 METER 512880 PICK UP FOR CLEANING QTY. 1 A6809999 DPF MODULE",
+        html: null,
+        attachments: [],
+        inReplyTo: "<earlier@xpo.example>",
+      },
+      "webhook",
+    );
+    const row = await must(admin.from("inbound_emails").select("mailbox, in_reply_to").eq("id", rec.id).single());
+    expect(row).toEqual({ mailbox: "xpo@cds.direct", in_reply_to: "<earlier@xpo.example>" });
+    const back = await store.getEmail(rec.id);
+    expect(back?.email).toMatchObject({ deliveredTo: "xpo@cds.direct", inReplyTo: "<earlier@xpo.example>" });
   });
 });
 
