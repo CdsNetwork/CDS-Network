@@ -1,3 +1,5 @@
+import { isTaxable, type TaxClass } from "@/lib/tax";
+
 /**
  * Builds the QuickBooks Online Invoice for a work order. Pure: no database, no network.
  *
@@ -25,7 +27,7 @@
  * entered on the line.
  */
 
-export type TaxClass = "parts" | "labor" | "shipping" | "exempt";
+export { isTaxable, type TaxClass };
 
 export type InvoiceWorkOrder = {
   id: string;
@@ -190,20 +192,6 @@ export function measurementDescription(c: InvoiceComponent): string {
     .map(([label, value]) => `${label}: ${value}`)
     .join(" / ");
   return clip(text || `${c.componentType} #${c.seq}`, DESCRIPTION_MAX);
-}
-
-export function isTaxable(taxClass: TaxClass, wo: Pick<InvoiceWorkOrder, "taxParts" | "taxLabor" | "taxShipping" | "customerTaxExempt">): boolean {
-  if (wo.customerTaxExempt) return false;
-  switch (taxClass) {
-    case "parts":
-      return wo.taxParts;
-    case "labor":
-      return wo.taxLabor;
-    case "shipping":
-      return wo.taxShipping;
-    default:
-      return false;
-  }
 }
 
 /**

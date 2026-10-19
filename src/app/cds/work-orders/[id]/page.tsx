@@ -19,6 +19,7 @@ import {
   TAX_CLASS_LABEL,
 } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
+import { taxLabel, taxSummary, type TaxFlags } from "@/lib/tax";
 import {
   ATTACHMENT_CATEGORY_LABEL,
   CATEGORY_LABEL,
@@ -365,7 +366,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   if (!woData) notFound();
   const wo = woData as unknown as WorkOrder;
 
-  const [internalRes, finRes, linesRes, compRes, authRes, attRes, shipRes, eventRes, shopsRes, catalogRes, locationCounts] =
+  const [internalRes, finRes, linesRes, compRes, authRes, attRes, shipRes, eventRes, shopsRes, catalogRes, locationCounts, billingRes] =
     await Promise.all([
       supabase
         .from("work_order_internal")
@@ -410,6 +411,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         .order("display_name"),
       supabase.from("catalog_items").select("id, sku, name, category, oe_cross, price_per_line").eq("active", true).order("sku"),
       loadLocationCounts(supabase),
+      supabase.from("customer_billing").select("tax_exempt").eq("customer_id", wo.customer_id).maybeSingle(),
     ]);
 
   // QuickBooks: only for orders that are ready to invoice or invoiced.
@@ -474,27 +476,26 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const tbd = fin?.supplier_cost_tbd ?? false;
   const approver = one(internal?.profiles ?? null);
 
-  // Tax summary from the line snapshots and the order's tax flags.
-  const rate = Number(internal?.tax_rate ?? 0);
-  const taxed: Record<string, boolean> = {
-    parts: internal?.tax_parts ?? false,
-    labor: internal?.tax_labor ?? false,
-    shipping: internal?.tax_shipping ?? false,
-    exempt: false,
+  // Tax summary from the line snapshots, the order's tax flags and the customer's tax
+  // exemption: the same rule as the QuickBooks invoice (src/lib/tax.ts).
+  const customerTaxExempt = (billingRes.data as { tax_exempt: boolean } | null)?.tax_exempt ?? false;
+  const taxFlags: TaxFlags = {
+    taxParts: internal?.tax_parts ?? false,
+    taxLabor: internal?.tax_labor ?? false,
+    taxShipping: internal?.tax_shipping ?? false,
+    customerTaxExempt,
   };
-  let subtotal = 0;
-  let taxable = 0;
+  const rate = customerTaxExempt ? 0 : Number(internal?.tax_rate ?? 0);
   let shopTotal = 0;
-  for (const l of lines) {
-    const p = one(l.work_order_line_pricing);
-    const amount = (p?.customer_unit_price ?? 0) * l.qty;
-    subtotal += amount;
-    shopTotal += (l.shop_unit_rate ?? 0) * l.qty;
-    if (p && taxed[p.tax_class]) taxable += amount;
-  }
-  subtotal = round2(subtotal);
-  taxable = round2(taxable);
-  const salesTax = round2((taxable * rate) / 100);
+  for (const l of lines) shopTotal += (l.shop_unit_rate ?? 0) * l.qty;
+  const { subtotal, taxable, salesTax, total: invoiceTotal } = taxSummary(
+    lines.map((l) => {
+      const p = one(l.work_order_line_pricing);
+      return { amount: (p?.customer_unit_price ?? 0) * l.qty, taxClass: p?.tax_class ?? null };
+    }),
+    taxFlags,
+    rate,
+  );
   const compName = new Map(components.map((c) => [c.id, `${c.component_type} #${c.seq}`]));
   const defaultShop = location?.default_affiliate_id ?? wo.affiliate_id ?? "";
 
@@ -825,7 +826,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                         <td>{p ? PRICE_SOURCE_LABEL[p.price_source] ?? p.price_source : "-"}</td>
                         <td>
                           {p && <span className="tag">{TAX_CLASS_LABEL[p.tax_class] ?? p.tax_class}</span>}
-                          <div className="small">{p && taxed[p.tax_class] ? "Taxable" : "Non-taxable"}</div>
+                          <div className="small">{p ? taxLabel(p.tax_class, taxFlags) : "Non-taxable"}</div>
                         </td>
                         <td className="num money">{l.shop_unit_rate === null ? "TBD" : money(round2(custAmt - shopAmt))}</td>
                         {removeColumn && (
@@ -1205,12 +1206,12 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 <b className="money">{money(taxable)}</b>
               </div>
               <div className="summaryrow">
-                <span>Sales tax ({rate}%)</span>
+                <span>{customerTaxExempt ? "Sales tax (customer exempt)" : `Sales tax (${rate}%)`}</span>
                 <b className="money">{money(salesTax)}</b>
               </div>
               <div className="summaryrow">
                 <span>Customer invoice total</span>
-                <b className="money">{money(round2(subtotal + salesTax))}</b>
+                <b className="money">{money(invoiceTotal)}</b>
               </div>
               <div className="summaryrow">
                 <span>Affiliate payable</span>
@@ -1221,7 +1222,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 <b className="money">{tbd ? "TBD" : money(fin?.margin)}</b>
               </div>
             </div>
-            {internal && (
+            {customerTaxExempt && (
+              <div className="notice">
+                {customer?.name ?? "This customer"} is tax exempt: no sales tax on this order, and every line is invoiced as
+                non-taxable in QuickBooks. The exemption is set on the customer.
+              </div>
+            )}
+            {internal && !customerTaxExempt && (
               <ActionForm action={updateTax.bind(null, wo.id)} submitLabel="Save Tax Settings" buttonClass="btn btn-secondary" disabled={wo.status === "invoiced"}>
                 <div className="field" style={{ marginTop: 12 }}>
                   <label htmlFor="tax-rate">Sales tax rate (%)</label>
