@@ -102,15 +102,25 @@ const COMPONENT_WORDS: [string, Component][] = [
 // "Clean Diesel" is CDS's own name, not a request.
 const CLEAN_WORDS = String.raw`clean(?:ing|ed)?(?!\W+diesel\b)|bake|baked|flush(?:ed)?|service`;
 
+const ANY_COMPONENT = COMPONENT_WORDS.map(([re]) => `(?:${re})`).join("|");
+// A list of components: "DPF", "DPF and DOC", "DPF, DOC, and SCR", "DPF/DOC/SCR", "DPF & the DOC".
+const COMPONENT_LIST = String.raw`\b(?:${ANY_COMPONENT})\b(?:\s*(?:,\s*(?:and\s+)?|\/|&|\+|\band\b)\s*(?:the\s+)?\b(?:${ANY_COMPONENT})\b)*`;
+const CLEANING_REQUESTS = [
+  // "clean the DPF and DOC", "Clean DPF, DOC and SCR"
+  new RegExp(String.raw`\b(?:${CLEAN_WORDS})\W+(?:\w+\W+){0,2}?(${COMPONENT_LIST})`, "gi"),
+  // "DPF and DOC cleaning", "DPF/DOC/SCR cleaning", "EGR cooler cleaning"
+  new RegExp(String.raw`(${COMPONENT_LIST})\W+(?:\w+\W+){0,2}?(?:${CLEAN_WORDS})\b`, "gi"),
+];
+
 /**
- * Components the text asks to have cleaned: a component and a cleaning word at most two
- * words apart ("DPF clean", "clean the DPF", "DPF and DOC cleaning"). A component named only
- * in a part description ("DPF inlet gasket") is not a cleaning request.
+ * Components the text asks to have cleaned: a component, or a list of components, and a
+ * cleaning word at most two words apart ("DPF clean", "clean the DPF", "Clean DPF, DOC and
+ * SCR", "DPF and DOC cleaning"). A component named only in a part description ("DPF inlet
+ * gasket") is not a cleaning request.
  */
 export function requestedCleanings(text: string): Component[] {
-  return COMPONENT_WORDS.filter(([c]) =>
-    new RegExp(String.raw`\b(?:${c})\b\W+(?:\w+\W+){0,2}?(?:${CLEAN_WORDS})\b|\b(?:${CLEAN_WORDS})\W+(?:\w+\W+){0,2}?(?:${c})\b`, "i").test(text),
-  ).map(([, c]) => c);
+  const lists = CLEANING_REQUESTS.flatMap((re) => [...text.matchAll(re)].map((m) => m[1]));
+  return COMPONENT_WORDS.filter(([re]) => lists.some((list) => new RegExp(String.raw`\b(?:${re})\b`, "i").test(list))).map(([, c]) => c);
 }
 
 export function extractDeterministic(subject: string, text: string): Deterministic {

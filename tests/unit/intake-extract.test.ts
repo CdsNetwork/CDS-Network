@@ -187,4 +187,14 @@ describe("requestedCleanings", () => {
     expect(requestedCleanings("Send 2 DPF inlet gaskets")).toEqual([]);
     expect(requestedCleanings("Hi Clean Diesel team, DPF gasket needed")).toEqual([]);
   });
+
+  it("BUG-M2-7: reads every component in a list after or before one cleaning word", () => {
+    expect(requestedCleanings("Please clean the DPF and DOC, and add CDS-G-1051 x1")).toEqual(["DPF", "DOC"]);
+    expect(requestedCleanings("Clean DPF, DOC and SCR")).toEqual(["DPF", "DOC", "SCR"]);
+    expect(requestedCleanings("Clean DPF, DOC, and SCR please")).toEqual(["DPF", "DOC", "SCR"]);
+    expect(requestedCleanings("Needs DPF/DOC/SCR cleaning")).toEqual(["DPF", "DOC", "SCR"]);
+    expect(requestedCleanings("DPF, DOC & EGR cooler to be cleaned")).toEqual(["DPF", "DOC", "EGR"]);
+    // A component after the list that is not part of it is still not a cleaning request.
+    expect(requestedCleanings("Clean the DPF. Also send 2 DOC gaskets")).toEqual(["DPF"]);
+  });
 });

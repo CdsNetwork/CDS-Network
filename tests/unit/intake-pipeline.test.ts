@@ -109,6 +109,19 @@ describe("parseEmail without the AI stage", () => {
     expect(p.request_type).toBe("parts_only");
   });
 
+  it("BUG-M2-7: keeps every cleaning in a list next to a part number", async () => {
+    const email = {
+      ...fixture("ryder-dpf-with-parts"),
+      text: "Location: 0424\nUnit #: 284190\nPO#: 7741255\n\nPlease clean the DPF and DOC, and add CDS-G-1051 x1\n",
+    };
+    const p = await parseEmail(email, reference(), { llm: null });
+    expect(p.items.map((i) => [i.catalog_item_id, i.qty])).toEqual([
+      [DPF_GASKET.id, 1],
+      [DPF_CLEAN.id, 1],
+      [DOC_CLEAN.id, 1],
+    ]);
+  });
+
   it("does not add the same cleaning twice when a part number already maps to it", async () => {
     const p = await parseEmail(fixture("first-student-parts"), reference(), { llm: null });
     expect(p.items.filter((i) => i.catalog_item_id === DPF_CLEAN.id)).toHaveLength(1);
