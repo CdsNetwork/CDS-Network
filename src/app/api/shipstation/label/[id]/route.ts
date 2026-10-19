@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 /**
  * The label PDF. CDS sees every label, a shop only the labels on its own work orders
  * (the shipment_labels policies decide; the file is then read with the service role).
+ * A voided label answers 410 Gone.
  */
 export const dynamic = "force-dynamic";
 
@@ -21,10 +22,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   const { data: label } = await supabase
     .from("shipment_labels")
-    .select("id, label_file_path, label_url, tracking_number, is_test")
+    .select("id, label_file_path, label_url, tracking_number, is_test, status")
     .eq("id", id)
     .maybeSingle();
   if (!label) return new NextResponse("Not found", { status: 404 });
+  // A voided label must not be printed and shipped on.
+  if (label.status !== "active") return new NextResponse("This label was voided. Ask CDS for a new label.", { status: 410 });
 
   const name = `${label.is_test ? "TEST-" : ""}label-${(label.tracking_number ?? label.id).replace(/[^A-Za-z0-9-]/g, "")}.pdf`;
   if (label.label_file_path) {
