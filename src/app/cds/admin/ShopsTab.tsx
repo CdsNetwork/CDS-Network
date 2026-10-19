@@ -4,6 +4,7 @@ import styles from "@/components/cds-admin/cds-admin.module.css";
 import { createClient } from "@/lib/supabase/server";
 import { inviteShopLogin, saveShop, setProfileActive, setShopActive } from "./actions";
 import { wrapCell } from "@/lib/format";
+import { fetchAllSettled } from "@/lib/supabase/fetch-all";
 
 export type Shop = {
   id: string;
@@ -40,8 +41,19 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
         "id, short_code, display_name, kind, active, address_line1, city, region, postal_code, can_egr, can_oil_soaked, can_one_box, hours_note, customer_locations(count)",
       )
       .order("display_name"),
-    supabase.from("profiles").select("id, full_name, email, active, affiliate_id").eq("kind", "shop").order("active", { ascending: false }),
-    supabase.from("affiliate_contacts").select("affiliate_id, email").eq("receives_dispatch", true).order("email"),
+    // Logins and contacts grow with every shop: read in pages past the 1000 row cap.
+    fetchAllSettled((from, to) =>
+      supabase
+        .from("profiles")
+        .select("id, full_name, email, active, affiliate_id")
+        .eq("kind", "shop")
+        .order("active", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAllSettled((from, to) =>
+      supabase.from("affiliate_contacts").select("affiliate_id, email").eq("receives_dispatch", true).order("email").order("id").range(from, to),
+    ),
   ]);
   const shops = (shopData ?? []) as ShopRow[];
   const logins = (loginData ?? []) as Login[];

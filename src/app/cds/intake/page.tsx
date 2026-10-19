@@ -110,17 +110,20 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
     .limit(100);
   if (status !== "all") query = query.eq("status", status);
 
-  const [emailsRes, customersRes, domainsRes, countsRes] = await Promise.all([
+  const countOf = (s: "parsed" | "failed") => supabase.from("inbound_emails").select("id", { count: "exact", head: true }).eq("status", s);
+  const [emailsRes, customersRes, domainsRes, waitingRes, failedRes] = await Promise.all([
     query,
     supabase.from("customers").select("id, name").eq("active", true).order("name"),
     supabase.from("customer_email_domains").select("id, domain, customer_id, customers(name)").order("domain"),
-    supabase.from("inbound_emails").select("status").in("status", ["parsed", "failed"]).limit(1000),
+    // Counted by the database: reading rows would stop at 1000.
+    countOf("parsed"),
+    countOf("failed"),
   ]);
   const emails = (emailsRes.data ?? []) as EmailRow[];
   const customers = (customersRes.data ?? []) as { id: string; name: string }[];
   const domains = (domainsRes.data ?? []) as unknown as { id: string; domain: string; customers: { name: string } | { name: string }[] | null }[];
-  const waiting = (countsRes.data ?? []).filter((r) => r.status === "parsed").length;
-  const failed = (countsRes.data ?? []).filter((r) => r.status === "failed").length;
+  const waiting = waitingRes.count ?? 0;
+  const failed = failedRes.count ?? 0;
 
   return (
     <>

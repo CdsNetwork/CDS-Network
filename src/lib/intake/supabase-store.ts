@@ -2,21 +2,9 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { INTAKE_MAILBOX } from "./config";
 import { emailAddress } from "./email";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import type { IntakeStatus, IntakeStore, StoredEmail } from "./process";
 import { splitCatalog, type AliasRef, type CatalogRef, type CustomerRef, type DomainRef, type IntakeReference, type LocationRef, type NormalizedEmail } from "./types";
-
-const PAGE = 1000;
-
-/** Every row of a query, in pages (the API returns at most 1000 rows per request). */
-async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
-  const out: T[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await page(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
-    out.push(...(data ?? []));
-    if (!data || data.length < PAGE) return out;
-  }
-}
 
 type EmailRow = {
   id: string;

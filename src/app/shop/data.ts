@@ -2,6 +2,7 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { CATEGORY_LABEL, money } from "@/lib/format";
 import { pacificToday } from "@/lib/dates";
+import { fetchAllSettled } from "@/lib/supabase/fetch-all";
 import {
   TAB_STATUSES,
   type AttachmentView,
@@ -63,12 +64,17 @@ export async function loadQueue(
   const where = <Q extends { or: (f: string) => Q }>(q: Q): Q => (filter ? q.or(filter) : q);
 
   const [open, done, doneCount] = await Promise.all([
-    where(
-      supabase
-        .from("work_orders")
-        .select(cols)
-        .in("status", [...TAB_STATUSES.awaiting, ...TAB_STATUSES.active]),
-    ).order("wo_number", { ascending: false }),
+    // Every open job (no cap): read in pages past the 1000 row API limit.
+    fetchAllSettled((from, to) =>
+      where(
+        supabase
+          .from("work_orders")
+          .select(cols)
+          .in("status", [...TAB_STATUSES.awaiting, ...TAB_STATUSES.active]),
+      )
+        .order("wo_number", { ascending: false })
+        .range(from, to),
+    ),
     where(supabase.from("work_orders").select(cols).in("status", TAB_STATUSES.completed))
       .order("wo_number", { ascending: false })
       .limit(COMPLETED_LIMIT),
@@ -277,12 +283,17 @@ async function loadCatalogOptions(market: string) {
   const [items, rates] = await Promise.all([
     supabase.from("catalog_items").select("id, sku, name, category, oe_cross, shop_selectable").eq("active", true).order("sku"),
     // RLS returns the default rows plus this shop's own rows only.
-    supabase
-      .from("shop_rates")
-      .select("catalog_item_id, affiliate_id, amount, effective_from, effective_to")
-      .eq("market", market)
-      .lte("effective_from", today)
-      .or(`effective_to.is.null,effective_to.gt.${today}`),
+    // Up to two rows per catalog item: paged so a larger catalog never passes the 1000 row cap.
+    fetchAllSettled((from, to) =>
+      supabase
+        .from("shop_rates")
+        .select("catalog_item_id, affiliate_id, amount, effective_from, effective_to")
+        .eq("market", market)
+        .lte("effective_from", today)
+        .or(`effective_to.is.null,effective_to.gt.${today}`)
+        .order("id")
+        .range(from, to),
+    ),
   ]);
 
   // Same rule as the database: the shop's own rate first, else the default; latest start date.

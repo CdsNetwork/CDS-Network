@@ -8,6 +8,7 @@ import { one } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL, dateTime, money, woLabel, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllSettled } from "@/lib/supabase/fetch-all";
 import { createShipment, setShipmentStatus, updateShipment } from "./actions";
 import { LABEL_STATUSES, NEW_SHIPMENT_STATUS, PACKAGE_TYPES, SERVICE_LEVELS, labelStatusLabel } from "./options";
 
@@ -30,6 +31,7 @@ type ShipmentRow = {
   ship_to: string | null;
   eta_text: string | null;
   delivered_at: string | null;
+  created_at: string;
   work_orders: WoRef | WoRef[] | null;
   shipment_internal: Internal | Internal[] | null;
 };
@@ -37,6 +39,11 @@ type WoRef = { wo_number: number; location_label: string; customers: { name: str
 type OpenWo = WoRef & { id: string };
 
 const IN_TRANSIT = ["picked_up", "in_transit", "out_for_delivery"];
+const OPEN_LABEL = ["needed", "error"];
+/** Newest legs listed; open legs (OPEN_LABEL, IN_TRANSIT) are added however old they are. */
+const RECENT = 300;
+const SHIPMENT_COLUMNS =
+  "id, work_order_id, direction, carrier, service_level, tracking_number, label_status, status, package_type, weight_lb, length_in, width_in, height_in, ship_from, ship_to, eta_text, delivered_at, created_at, work_orders(wo_number, location_label, customers(name)), shipment_internal(notes, quoted_cost, actual_cost)";
 const STATUS_TAG: Record<string, string> = { delivered: "tag green", in_transit: "tag blue", out_for_delivery: "tag blue", picked_up: "tag blue" };
 
 export default async function ShippingPage({ searchParams }: PageProps<"/cds/shipping">) {
@@ -44,28 +51,40 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
   const { edit, new: showNew, settings } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: shipData, error }, { data: woData }] = await Promise.all([
-    supabase
-      .from("shipments")
-      .select(
-        "id, work_order_id, direction, carrier, service_level, tracking_number, label_status, status, package_type, weight_lb, length_in, width_in, height_in, ship_from, ship_to, eta_text, delivered_at, work_orders(wo_number, location_label, customers(name)), shipment_internal(notes, quoted_cost, actual_cost)",
-      )
-      .order("created_at", { ascending: false })
-      .limit(300),
-    supabase
-      .from("work_orders")
-      .select("id, wo_number, location_label, customers(name)")
-      .not("status", "in", "(cancelled,invoiced)")
-      .order("wo_number", { ascending: false })
-      .limit(500),
+  const [recentRes, openRes, woRes] = await Promise.all([
+    supabase.from("shipments").select(SHIPMENT_COLUMNS).order("created_at", { ascending: false }).limit(RECENT),
+    // Legs that still need attention stay listed however old: label exceptions and legs in transit.
+    fetchAllSettled((from, to) =>
+      supabase
+        .from("shipments")
+        .select(SHIPMENT_COLUMNS)
+        .or(`label_status.in.(${OPEN_LABEL.join(",")}),status.in.(${IN_TRANSIT.join(",")})`)
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    // Every open order can get a shipment: read in pages past the 1000 row API limit.
+    fetchAllSettled((from, to) =>
+      supabase
+        .from("work_orders")
+        .select("id, wo_number, location_label, customers(name)")
+        .not("status", "in", "(cancelled,invoiced)")
+        .order("wo_number", { ascending: false })
+        .range(from, to),
+    ),
   ]);
-  const shipments = (shipData ?? []) as ShipmentRow[];
-  const openWos = (woData ?? []) as OpenWo[];
+  const error = recentRes.error ?? openRes.error;
+  const byId = new Map<string, ShipmentRow>();
+  for (const s of [...((openRes.data ?? []) as unknown as ShipmentRow[]), ...((recentRes.data ?? []) as unknown as ShipmentRow[])]) {
+    byId.set(s.id, s);
+  }
+  const shipments = [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id));
+  const openWos = (woRes.data ?? []) as unknown as OpenWo[];
   const editing = typeof edit === "string" ? shipments.find((s) => s.id === edit) : undefined;
   const labels = await activeLabels(supabase, { shipmentIds: shipments.map((s) => s.id) }, true);
   const canShip = shipStationConfigured();
 
-  const exceptions = shipments.filter((s) => s.label_status === "needed" || s.label_status === "error").length;
+  const exceptions = shipments.filter((s) => OPEN_LABEL.includes(s.label_status)).length;
   const inTransit = shipments.filter((s) => IN_TRANSIT.includes(s.status)).length;
 
   return (

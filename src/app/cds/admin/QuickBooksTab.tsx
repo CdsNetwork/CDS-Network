@@ -15,6 +15,7 @@ import { qboStatus } from "@/lib/qbo/status";
 import { qboApi } from "@/lib/qbo/tokens";
 import { wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllSettled } from "@/lib/supabase/fetch-all";
 import {
   removeAlias,
   removeCustomerMap,
@@ -64,12 +65,21 @@ export async function QuickBooksTab() {
     supabase.from("customers").select("id, code, name").eq("active", true).order("name"),
     supabase.from("catalog_items").select("id, sku, name").eq("active", true).order("sku"),
     supabase.from("qbo_customer_map").select("customer_id, qbo_customer_id, qbo_display_name"),
-    supabase.from("qbo_item_map").select("id, customer_id, catalog_item_id, qbo_item_id, qbo_item_name"),
-    supabase.from("qbo_measurement_map").select("id, customer_id, component_type, qbo_item_id, qbo_item_name"),
-    supabase
-      .from("customer_item_aliases")
-      .select("id, customer_part_number, customer_description, customers(code, name), catalog_items(sku, name)")
-      .order("customer_part_number"),
+    // Per customer and item: can pass the 1000 row cap, so read in pages.
+    fetchAllSettled((from, to) =>
+      supabase.from("qbo_item_map").select("id, customer_id, catalog_item_id, qbo_item_id, qbo_item_name").order("id").range(from, to),
+    ),
+    fetchAllSettled((from, to) =>
+      supabase.from("qbo_measurement_map").select("id, customer_id, component_type, qbo_item_id, qbo_item_name").order("id").range(from, to),
+    ),
+    fetchAllSettled((from, to) =>
+      supabase
+        .from("customer_item_aliases")
+        .select("id, customer_part_number, customer_description, customers(code, name), catalog_items(sku, name)")
+        .order("customer_part_number")
+        .order("id")
+        .range(from, to),
+    ),
     qboLists(status.connected),
   ]);
   const loadError = [customersRes, itemsRes, customerMapRes, itemMapRes, measurementRes, aliasRes].some((r) => r.error);

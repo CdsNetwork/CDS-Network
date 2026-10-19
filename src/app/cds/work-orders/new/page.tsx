@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { NewWorkOrderForm, type CatalogOption, type LocationOption } from "@/components/cds-wo/NewWorkOrderForm";
-import { one } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createWorkOrder } from "./actions";
 import { pacificToday } from "@/lib/dates";
+import { fetchAllSettled } from "@/lib/supabase/fetch-all";
+import { loadPickerLocations } from "./locations";
 
 type PriceRow = { catalog_item_id: string; amount: number; effective_from: string };
 type OverrideRow = PriceRow & { customer_id: string };
@@ -24,14 +25,7 @@ export default async function NewWorkOrderPage() {
 
   const [customersRes, locationsRes, catalogRes, sellRes, overrideRes] = await Promise.all([
     supabase.from("customers").select("id, code, name").eq("active", true).order("name"),
-    supabase
-      .from("customer_locations")
-      .select(
-        "id, customer_id, code, location_number, name, address_raw, city, region, postal_code, fulfillment, routing_notes, dock_note, affiliates(display_name)",
-      )
-      .eq("active", true)
-      .eq("market", "US")
-      .order("code"),
+    loadPickerLocations(supabase),
     supabase.from("catalog_items").select("id, sku, name, category, oe_cross").eq("active", true).order("category").order("sku"),
     supabase
       .from("sell_prices")
@@ -40,13 +34,18 @@ export default async function NewWorkOrderPage() {
       .lte("effective_from", today)
       .or(current)
       .order("effective_from", { ascending: false }),
-    supabase
-      .from("customer_price_overrides")
-      .select("customer_id, catalog_item_id, amount, effective_from")
-      .eq("market", "US")
-      .lte("effective_from", today)
-      .or(current)
-      .order("effective_from", { ascending: false }),
+    // One row per customer and item in effect today: grows with customers times items, so paged.
+    fetchAllSettled<OverrideRow>((from, to) =>
+      supabase
+        .from("customer_price_overrides")
+        .select("customer_id, catalog_item_id, amount, effective_from")
+        .eq("market", "US")
+        .lte("effective_from", today)
+        .or(current)
+        .order("effective_from", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
   ]);
 
   const fleet = newest((sellRes.data ?? []) as PriceRow[], (r) => r.catalog_item_id);
@@ -59,12 +58,7 @@ export default async function NewWorkOrderPage() {
     (catalogRes.data ?? []) as { id: string; sku: string; name: string; category: string; oe_cross: string | null }[]
   ).map((c) => ({ ...c, fleetPrice: fleet.has(c.id) ? Number(fleet.get(c.id)!.amount) : null }));
 
-  type LocRow = Omit<LocationOption, "shopName"> & {
-    affiliates: { display_name: string } | { display_name: string }[] | null;
-  };
-  const locations: LocationOption[] = ((locationsRes.data ?? []) as unknown as LocRow[]).map(
-    ({ affiliates, ...l }) => ({ ...l, shopName: one(affiliates)?.display_name ?? null }),
-  );
+  const locations: LocationOption[] = locationsRes.data ?? [];
 
   const loadError = customersRes.error ?? locationsRes.error ?? catalogRes.error ?? sellRes.error ?? overrideRes.error;
 
