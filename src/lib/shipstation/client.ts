@@ -14,6 +14,8 @@ export class ShipStationError extends Error {
     /** HTTP status, or 0 when ShipStation could not be reached. */
     readonly status: number,
     readonly requestId?: string,
+    /** Seconds ShipStation asked to wait (Retry-After on a 429), when it said. */
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "ShipStationError";
@@ -79,10 +81,12 @@ export async function shipStationRequest<T>(
   const requestId = (body as ErrorBody | null)?.request_id;
   if (res.status === 429) {
     const wait = res.headers.get("retry-after");
+    const seconds = wait && /^\d{1,5}$/.test(wait.trim()) ? Number(wait.trim()) : undefined;
     throw new ShipStationError(
-      `ShipStation is busy (rate limit reached). Try again${wait ? ` in ${wait} seconds` : " in a minute"}.`,
+      `ShipStation is busy (rate limit reached). Try again${seconds !== undefined ? ` in ${seconds} seconds` : " in a minute"}.`,
       429,
       requestId,
+      seconds,
     );
   }
   if (res.status === 401 || res.status === 403) {

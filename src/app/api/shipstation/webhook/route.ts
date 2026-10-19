@@ -6,7 +6,10 @@ import { createJwksKeyFinder, tokenMatches, verifyWebhook } from "@/lib/shipstat
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
- * ShipStation tracking webhook (event "track"). Register it in ShipStation as
+ * ShipStation tracking webhook (event "track"). NOT registered: CDS keeps an existing
+ * webhook on the account (2026-10-19), so tracking is polled instead
+ * (src/app/api/cron/shipstation-tracking/route.ts). Both apply results through the same
+ * database function (private.apply_tracking). It could be registered later as
  * https://<portal domain>/api/shipstation/webhook.
  *
  * Authenticity: the RSA-SHA256 signature ShipStation puts on every webhook (see
@@ -50,7 +53,8 @@ export async function POST(request: Request) {
     p_tracking_number: track?.trackingNumber ?? null,
     p_status_code: track?.statusCode ?? null,
     p_status: track?.status ?? null,
-    p_estimated_delivery: track?.actualDelivery ?? track?.estimatedDelivery ?? null,
+    p_estimated_delivery: track?.estimatedDelivery ?? null,
+    p_actual_delivery: track?.actualDelivery ?? null,
     p_events: (track?.events ?? []).map((e) => ({
       occurred_at: e.occurredAt,
       carrier_code: e.carrierCode,

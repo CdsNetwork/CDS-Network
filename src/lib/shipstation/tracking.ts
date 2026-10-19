@@ -1,6 +1,7 @@
 /**
- * Tracking webhooks (event "track", resource_type API_TRACK) and how a carrier status maps
- * to the portal's shipment status. Pure functions.
+ * Tracking results (the polled GET /v2/labels/{label_id}/track and the webhook event
+ * "track", resource_type API_TRACK) and how a carrier status maps to the portal's shipment
+ * status. Pure functions.
  *
  * Payload: https://docs.shipstation.com/apis/shipengine/docs/guides/webhooks
  * status_code values: UN unknown, NY not yet in system, AC accepted (picked up),
@@ -88,15 +89,21 @@ function carrierFromUrl(url: unknown): string | null {
 
 type RawEvent = Record<string, unknown>;
 
-export function parseTrackWebhook(body: unknown): ParsedWebhook {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return { kind: "invalid", reason: "not an object" };
-  const b = body as { resource_type?: unknown; resource_url?: unknown; data?: Record<string, unknown> };
-  const type = typeof b.resource_type === "string" ? b.resource_type : "";
-  if (type !== "API_TRACK") return { kind: "ignored", resourceType: type || "unknown" };
-  const d = b.data && typeof b.data === "object" ? b.data : {};
-  const trackingNumber = str(d.tracking_number, 100);
-  if (!trackingNumber) return { kind: "invalid", reason: "no tracking number" };
+export type ParsedTrack = {
+  statusCode: string | null;
+  status: ShipmentStatus | null;
+  description: string | null;
+  estimatedDelivery: string | null;
+  actualDelivery: string | null;
+  events: TrackEvent[];
+};
 
+/**
+ * The tracking fields both sources share: the webhook's "data" object and the body of
+ * GET /v2/labels/{label_id}/track (https://docs.shipstation.com/tracking).
+ */
+export function parseTrackResponse(body: unknown): ParsedTrack {
+  const d = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
   const rawEvents = Array.isArray(d.events) ? (d.events as RawEvent[]) : [];
   const events: TrackEvent[] = rawEvents.slice(0, MAX_EVENTS).map((e) => {
     const city = str(e.city_locality, 100);
@@ -116,9 +123,6 @@ export function parseTrackWebhook(body: unknown): ParsedWebhook {
   const statusCode = str(d.status_code, 10);
   const description = str(d.status_description);
   return {
-    kind: "track",
-    trackingNumber,
-    carrierCode: carrierFromUrl(b.resource_url),
     statusCode,
     status: mapTrackStatus({
       statusCode,
@@ -130,4 +134,15 @@ export function parseTrackWebhook(body: unknown): ParsedWebhook {
     actualDelivery: str(d.actual_delivery_date, 40),
     events,
   };
+}
+
+export function parseTrackWebhook(body: unknown): ParsedWebhook {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return { kind: "invalid", reason: "not an object" };
+  const b = body as { resource_type?: unknown; resource_url?: unknown; data?: Record<string, unknown> };
+  const type = typeof b.resource_type === "string" ? b.resource_type : "";
+  if (type !== "API_TRACK") return { kind: "ignored", resourceType: type || "unknown" };
+  const d = b.data && typeof b.data === "object" ? b.data : {};
+  const trackingNumber = str(d.tracking_number, 100);
+  if (!trackingNumber) return { kind: "invalid", reason: "no tracking number" };
+  return { kind: "track", trackingNumber, carrierCode: carrierFromUrl(b.resource_url), ...parseTrackResponse(d) };
 }
