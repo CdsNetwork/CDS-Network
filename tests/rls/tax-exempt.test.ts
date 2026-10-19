@@ -237,6 +237,27 @@ describe("BUG-M2-9: tax settings follow the customer's tax exemption", () => {
     expect(await tax(wo)).toEqual(before);
   });
 
+  it("BUG-M2-13: a cancelled order keeps its stored tax when the exemption or the customer changes", async () => {
+    const cancelled = await createLikeForm(f.taxable, f.taxableLoc);
+    const moved = await createLikeForm(f.taxable, f.taxableLoc);
+    await must(admin.from("work_orders").update({ status: "cancelled" }).in("id", [cancelled, moved]));
+    const before = await tax(cancelled);
+    expect(before).toMatchObject({ tax_rate: ohio.rate, tax_source: "state_fallback" });
+
+    // The customer becomes exempt, then not: the cancelled order never changes.
+    await must(admin.from("customer_billing").upsert({ customer_id: f.taxable, tax_exempt: true }));
+    expect(await tax(cancelled)).toEqual(before);
+    // Editing another field of the cancelled order does not apply the exemption either.
+    await must(admin.from("work_order_internal").update({ internal_notes: `cancelled ${runId}` }).eq("work_order_id", cancelled));
+    expect(await tax(cancelled)).toEqual(before);
+    await must(admin.from("customer_billing").update({ tax_exempt: false }).eq("customer_id", f.taxable));
+    expect(await tax(cancelled)).toEqual(before);
+
+    // Moved to an exempt customer while cancelled: unchanged.
+    await must(admin.from("work_orders").update({ customer_id: f.exempt, location_id: f.exemptLoc }).eq("id", moved));
+    expect(await tax(moved)).toEqual(before);
+  });
+
   it("CDS cannot change the tax of an invoiced order through the API", async () => {
     const wo = await createLikeForm(f.taxable, f.taxableLoc);
     await must(admin.from("work_orders").update({ status: "invoiced", fulfillment: "shipping", affiliate_id: f.shop, affiliate_invoice_ref: "INV-1" }).eq("id", wo));
