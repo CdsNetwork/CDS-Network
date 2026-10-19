@@ -122,6 +122,17 @@ describe("parseEmail without the AI stage", () => {
     ]);
   });
 
+  it.each([
+    "Please send misc hardware (bolts and nuts) for unit 284190.",
+    "Please add CDS-MISC-HARDWARE x2 for this unit.",
+  ])("warns on a draft that asks only for Misc. hardware: %j", async (line) => {
+    const email = { ...fixture("ryder-dpf-with-parts"), text: `Location: 0424\nUnit #: 284190\nPO#: 7741255\n\n${line}\n` };
+    const p = await parseEmail(email, reference(), { llm: null });
+    expect(p.items).toEqual([]);
+    expect(p.warnings).toContain("No services or parts found: add the lines by hand.");
+    expect(p.warnings).toContain("Misc. hardware is asked for: add it by hand with the amount from the shop's invoice.");
+  });
+
   it("does not add the same cleaning twice when a part number already maps to it", async () => {
     const p = await parseEmail(fixture("first-student-parts"), reference(), { llm: null });
     expect(p.items.filter((i) => i.catalog_item_id === DPF_CLEAN.id)).toHaveLength(1);

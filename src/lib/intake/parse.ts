@@ -163,6 +163,17 @@ export async function parseEmail(email: NormalizedEmail, ref: IntakeReference, o
   }
   const unmatched = items.filter((i) => !i.catalog_item_id);
   if (unmatched.length) warnings.push(`${unmatched.length} requested item(s) not matched to the catalog.`);
+  if (isWorkRequest && !items.length) warnings.push("No services or parts found: add the lines by hand.");
+  // Items priced per line are never proposed, so say so when the email asks for one.
+  const words = (v: string) => ` ${v.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  const allWords = words(all);
+  const perLine = ref.catalog.filter((c) => c.price_per_line);
+  const asked = perLine.filter((c) =>
+    [c.name, c.sku, ...ref.aliases.filter((a) => a.catalog_item_id === c.id).map((a) => a.customer_part_number)].some(
+      (n) => n && words(n).trim() && allWords.includes(words(n)),
+    ),
+  );
+  for (const c of asked) warnings.push(`${c.name} is asked for: add it by hand with the amount from the shop's invoice.`);
 
   const matched = items.filter((i) => i.catalog_item_id);
   const requestType = matched.length > 0 && matched.every((i) => categoryOf.get(i.catalog_item_id!) !== "service") ? "parts_only" : "service";
