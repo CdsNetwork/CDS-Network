@@ -72,6 +72,10 @@ type WorkOrder = {
   unit_number: string;
   po_number: string | null;
   requested_work: string;
+  vin: string | null;
+  mileage: number | null;
+  requested_date: string | null;
+  return_to_location: boolean;
   pickup_window: string | null;
   shop_ship_status: string | null;
   affiliate_invoice_ref: string | null;
@@ -90,6 +94,11 @@ type Internal = {
   review_reason: string | null;
   routing_notes: string | null;
   internal_notes: string | null;
+  order_type: string | null;
+  customer_region: string | null;
+  customer_contact_name: string | null;
+  customer_contact_email: string | null;
+  customer_contact_phone: string | null;
   approved_at: string | null;
   approved_by: string | null;
   approved_by_name: string | null;
@@ -371,7 +380,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase
         .from("work_order_internal")
         .select(
-          "source, review_reason, routing_notes, internal_notes, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, profiles(full_name)",
+          "source, review_reason, routing_notes, internal_notes, order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, profiles(full_name)",
         )
         .eq("work_order_id", id)
         .maybeSingle(),
@@ -600,7 +609,24 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               ) : (
                 <Fact label="Shop shipping status">{wo.shop_ship_status ? SHIP_STATUS_LABEL[wo.shop_ship_status] : null}</Fact>
               )}
-              <Fact label="Requested work">{wo.requested_work}</Fact>
+              <Fact label="Requested work">
+                {wo.requested_work}
+                {wo.return_to_location ? "\nReturn to the customer's location" : ""}
+              </Fact>
+              {(wo.vin || wo.mileage !== null) && (
+                <Fact label="VIN / mileage">
+                  {[wo.vin, wo.mileage !== null ? `${wo.mileage.toLocaleString("en-US")} mi` : null].filter(Boolean).join(" · ")}
+                </Fact>
+              )}
+              {wo.requested_date && <Fact label="Requested date">{wo.requested_date}</Fact>}
+              {(internal?.customer_contact_name || internal?.customer_contact_email || internal?.customer_contact_phone) && (
+                <Fact label="Customer contact">
+                  {[internal.customer_contact_name, internal.customer_contact_email, internal.customer_contact_phone].filter(Boolean).join("\n")}
+                </Fact>
+              )}
+              {(internal?.order_type || internal?.customer_region) && (
+                <Fact label="Customer order type / region">{[internal.order_type, internal.customer_region].filter(Boolean).join(" · ")}</Fact>
+              )}
               <Fact label="Location">
                 {wo.location_label}
                 {location?.dock_note ? `\nDock: ${location.dock_note}` : ""}

@@ -48,15 +48,41 @@ function Field({ label, value, source }: { label: string; value: string | null |
     <div>
       <span className="small">{label}: </span>
       {value ? <b>{value}</b> : <span className="small">not found</span>}
-      {value && source && source !== "none" && <span className="small"> ({source === "llm" ? "AI" : source === "regex" ? "pattern" : "location default"})</span>}
+      {value && source && source !== "none" && (
+        <span className="small"> ({source === "llm" ? "AI" : source === "regex" ? "pattern" : source === "template" ? "template" : "location default"})</span>
+      )}
     </div>
   );
 }
 
+const TEMPLATE_LABEL: Record<string, string> = {
+  ryder: "Ryder pick up request",
+  first_student_iprocure: "First Student iProcure PO",
+  website_form: "Website fleet request form",
+};
+
 function Details({ p }: { p: ParsedEmail }) {
   const f = p.fields;
+  // Extra fields read from the request templates (and XPO's meter), shown only when found.
+  const extra: [string, string | null | undefined, string | undefined][] = [
+    ["Requested date", f.requested_date?.value, f.requested_date?.source],
+    ["Mileage", f.mileage?.value != null ? f.mileage.value.toLocaleString("en-US") : null, f.mileage?.source],
+    ["Region", f.region?.value, f.region?.source],
+    ["Order type", f.order_type?.value, f.order_type?.source],
+    ["Manufacturer", f.manufacturer?.value, f.manufacturer?.source],
+    ["Serial #", f.serial_number?.value, f.serial_number?.source],
+    ["Part #", f.part_number?.value, f.part_number?.source],
+    ["Return to location", f.return_to_location?.value ? "Yes" : null, f.return_to_location?.source],
+    ["Contact", [f.contact_name?.value, f.contact_email?.value, f.contact_phone?.value].filter(Boolean).join(", ") || null, f.contact_name?.source ?? f.contact_email?.source],
+    ["Store room #", f.store_room?.value, f.store_room?.source],
+    ["Pickup option", f.pickup_option?.value, f.pickup_option?.source],
+    ["Cost center", f.cost_center?.value, f.cost_center?.source],
+    ["Order description", f.order_description?.value, f.order_description?.source],
+  ];
   return (
     <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
+      {p.template && <Field label="Template" value={TEMPLATE_LABEL[p.template] ?? p.template} />}
+      {p.mailbox && p.mailbox !== INTAKE_MAILBOX && <Field label="Inbox" value={p.mailbox} />}
       <Field label="Customer" value={p.customer ? `${p.customer.name} (${p.customer.via.replace("_", " ")})` : p.customer_candidates.map((c) => c.name).join(" or ") || null} />
       <Field
         label="Location"
@@ -72,6 +98,15 @@ function Details({ p }: { p: ParsedEmail }) {
       <Field label="PO" value={f.po_number.value} source={f.po_number.source} />
       {f.vin.value && <Field label="VIN" value={f.vin.value} source={f.vin.source} />}
       <Field label="Method" value={f.fulfillment.value ? FULFILLMENT_LABEL[f.fulfillment.value] ?? f.fulfillment.value : null} source={f.fulfillment.source} />
+      {extra.filter(([, value]) => value).map(([label, value, source]) => (
+        <Field key={label} label={label} value={value} source={source} />
+      ))}
+      {p.po_reference && (
+        <Field
+          label="PO paperwork"
+          value={p.po_reference.wo_number ? `PO ${p.po_reference.po_number}, noted on WO ${p.po_reference.wo_number}` : `PO ${p.po_reference.po_number}, no open order`}
+        />
+      )}
       <div>
         <span className="small">Items: </span>
         {p.items.length === 0 && <span className="small">none found</span>}
@@ -81,6 +116,9 @@ function Details({ p }: { p: ParsedEmail }) {
             <span className="small">
               {i.part_number ? `${i.part_number} ` : ""}
               {i.name ?? i.description}
+              {i.return_to_location ? " (return to the location)" : ""}
+              {i.price != null ? ` · PO price ${i.price.toFixed(2)}` : ""}
+              {i.price != null && i.portal_price != null && Math.abs(i.price - i.portal_price) > 0.005 ? ` (portal ${i.portal_price.toFixed(2)})` : ""}
             </span>
           </div>
         ))}
