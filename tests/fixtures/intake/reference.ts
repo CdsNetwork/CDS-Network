@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AliasRef, CatalogRef, CustomerRef, DomainRef, IntakeReference, LocationRef, NormalizedEmail } from "@/lib/intake/types";
 import { validateNormalizedEmail } from "@/lib/intake/email";
+import { splitCatalog } from "@/lib/intake/types";
 
 export const RYDER = "00000000-0000-4000-8000-00000000a001";
 export const FIRST_STUDENT = "00000000-0000-4000-8000-00000000a002";
@@ -78,7 +79,7 @@ export function reference(): IntakeReference {
   return {
     customers,
     domains,
-    catalog,
+    ...splitCatalog(catalog),
     aliases,
     locationsFor: async (customerId) => locations.filter((l) => l.customer_id === customerId),
   };

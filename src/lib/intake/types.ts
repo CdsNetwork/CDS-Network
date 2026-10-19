@@ -56,13 +56,25 @@ export type CatalogRef = {
 export function matchableCatalog(catalog: CatalogRef[]): CatalogRef[] {
   return catalog.filter((c) => !c.price_per_line);
 }
+
+/**
+ * Splits the active catalog into the items intake may propose and the items priced per line
+ * (Misc. hardware), which are never proposed but are named in a warning when an email asks
+ * for one. The Supabase store and the test fixtures both build their reference with it.
+ */
+export function splitCatalog(all: CatalogRef[]): Pick<IntakeReference, "catalog" | "perLineItems"> {
+  return { catalog: matchableCatalog(all), perLineItems: all.filter((c) => c.price_per_line) };
+}
 export type AliasRef = { customer_id: string; catalog_item_id: string; customer_part_number: string };
 
 /** Reference data the matcher reads. Locations are loaded per customer (there are many). */
 export type IntakeReference = {
   customers: CustomerRef[];
   domains: DomainRef[];
+  /** Items intake may propose (never items priced per line). */
   catalog: CatalogRef[];
+  /** Items priced per line (Misc. hardware): never proposed, only warned about. */
+  perLineItems: CatalogRef[];
   aliases: AliasRef[];
   locationsFor: (customerId: string) => Promise<LocationRef[]>;
 };

@@ -167,7 +167,7 @@ export async function parseEmail(email: NormalizedEmail, ref: IntakeReference, o
   // Items priced per line are never proposed, so say so when the email asks for one.
   const words = (v: string) => ` ${v.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
   const allWords = words(all);
-  const perLine = ref.catalog.filter((c) => c.price_per_line);
+  const perLine = ref.perLineItems;
   const asked = perLine.filter((c) =>
     [c.name, c.sku, ...ref.aliases.filter((a) => a.catalog_item_id === c.id).map((a) => a.customer_part_number)].some(
       (n) => n && words(n).trim() && allWords.includes(words(n)),
