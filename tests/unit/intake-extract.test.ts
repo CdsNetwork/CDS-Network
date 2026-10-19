@@ -213,3 +213,18 @@ describe("requestedCleanings", () => {
     expect(requestedCleanings("Clean the DPF plus the DOC")).toEqual(["DPF", "DOC"]);
   });
 });
+
+describe("BUG-M2-12: requestedCleanings with parts after the list and 'then'", () => {
+  it("a component followed by a part word is a part, not a cleaning", () => {
+    expect(requestedCleanings("CDS-G-1051 x1. We need a DPF cleaning and new DOC clamps")).toEqual(["DPF"]);
+    expect(requestedCleanings("Clean the DPF and send DOC clamps")).toEqual(["DPF"]);
+    expect(requestedCleanings("Please clean DPF and the DOC inlet gasket")).toEqual(["DPF"]);
+    // The part word belongs to a later sentence: the list stays a cleaning request.
+    expect(requestedCleanings("Clean the DPF and DOC. Gaskets too")).toEqual(["DPF", "DOC"]);
+  });
+
+  it("reads 'then' between components", () => {
+    expect(requestedCleanings("Clean DPF then DOC")).toEqual(["DPF", "DOC"]);
+    expect(requestedCleanings("Clean DPF then ship it back")).toEqual(["DPF"]);
+  });
+});

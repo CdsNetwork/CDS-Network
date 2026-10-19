@@ -104,26 +104,30 @@ const CLEAN_WORDS = String.raw`clean(?:ing|ed)?(?!\W+diesel\b)|bake|baked|flush(
 
 const ANY_COMPONENT = COMPONENT_WORDS.map(([re]) => `(?:${re})`).join("|");
 // A list of components: "DPF", "DPF and DOC", "DPF, DOC, and SCR", "DPF/DOC/SCR", "DPF & the DOC",
-// "DPF and also the DOC", "DPF plus the DOC".
+// "DPF and also the DOC", "DPF plus the DOC", "DPF then DOC".
 const LIST_FILLER = String.raw`(?:(?:also|then|the)\s+){0,2}`;
-const COMPONENT_LIST = String.raw`\b(?:${ANY_COMPONENT})\b(?:\s*(?:,\s*(?:and\s+)?|\/|&|\+|\band\b|\bplus\b)\s*${LIST_FILLER}\b(?:${ANY_COMPONENT})\b)*`;
+const COMPONENT_LIST = String.raw`\b(?:${ANY_COMPONENT})\b(?:\s*(?:,\s*(?:and\s+)?|\/|&|\+|\band\b|\bplus\b|\bthen\b)\s*${LIST_FILLER}\b(?:${ANY_COMPONENT})\b)*`;
 const NEGATION = /\b(?:no|not|without|never|skip)\b|n't\b/i;
 const NEGATED_BEFORE = /(?:\b(?:no|not|without|never|skip)|n't)\W+(?:(?:need|needs|want|any|the|a)\W+){0,2}$/i;
 // Parts named next to a component ("DOC clamp", "DPF inlet gasket"): not a cleaning request.
-const PART_WORDS = /\b(?:gaskets?|clamps?|sensors?|bolts?|nuts?|hardware|kits?|seals?|bands?|pipes?|hoses?|brackets?|studs?)\b/i;
-const CLEANING_REQUESTS = [
-  // "clean the DPF and DOC", "Clean DPF, DOC and SCR"
-  new RegExp(String.raw`\b(?:${CLEAN_WORDS})\W+(?:\w+\W+){0,2}?(${COMPONENT_LIST})`, "gi"),
-  // "DPF and DOC cleaning", "DPF/DOC/SCR cleaning", "EGR cooler cleaning"
-  new RegExp(String.raw`(${COMPONENT_LIST})\W+(?:\w+\W+){0,2}?(?:${CLEAN_WORDS})\b`, "gi"),
-];
+const PART_WORD_LIST = String.raw`gaskets?|clamps?|sensors?|bolts?|nuts?|hardware|kits?|seals?|bands?|pipes?|hoses?|brackets?|studs?`;
+const PART_WORDS = new RegExp(String.raw`\b(?:${PART_WORD_LIST})\b`, "i");
+// A part word right after a component, at most one word apart: "DOC clamps", "DOC inlet gasket".
+const PART_AFTER = new RegExp(String.raw`^[ \t]*(?:[a-z-]+[ \t]+)?(?:${PART_WORD_LIST})\b`, "i");
+const LAST_COMPONENT = new RegExp(String.raw`\b(?:${ANY_COMPONENT})\b(?!.*\b(?:${ANY_COMPONENT})\b)`, "is");
+// "clean the DPF and DOC", "Clean DPF, DOC and SCR": the list ends the match.
+const CLEAN_THEN_LIST = new RegExp(String.raw`\b(?:${CLEAN_WORDS})\W+(?:\w+\W+){0,2}?(${COMPONENT_LIST})`, "gi");
+// "DPF and DOC cleaning", "DPF/DOC/SCR cleaning", "EGR cooler cleaning"
+const LIST_THEN_CLEAN = new RegExp(String.raw`(${COMPONENT_LIST})\W+(?:\w+\W+){0,2}?(?:${CLEAN_WORDS})\b`, "gi");
+const CLEANING_REQUESTS = [CLEAN_THEN_LIST, LIST_THEN_CLEAN];
 
 /**
  * Components the text asks to have cleaned: a component, or a list of components, and a
  * cleaning word at most two words apart ("DPF clean", "clean the DPF", "Clean DPF, DOC and
  * SCR", "DPF and DOC cleaning"). A component named only in a part description ("DPF inlet
  * gasket", "DOC clamp, cleaning not needed") or a declined cleaning ("no DOC cleaning", "DOC
- * clamp, no cleaning") is not a cleaning request.
+ * clamp, no cleaning") is not a cleaning request, nor is a component followed by a part
+ * ("clean the DPF and send DOC clamps" asks for the DPF only).
  */
 export function requestedCleanings(text: string): Component[] {
   const lists = CLEANING_REQUESTS.flatMap((re) =>
@@ -136,7 +140,13 @@ export function requestedCleanings(text: string): Component[] {
         // "no DPF cleaning", "do not clean the DOC", "don't need DOC cleaning".
         return !NEGATED_BEFORE.test(text.slice(Math.max(0, m.index - 30), m.index));
       })
-      .map((m) => m[1]),
+      .map((m) => {
+        // "clean the DPF and new DOC clamps": the last component names a part, not a cleaning.
+        if (re === CLEAN_THEN_LIST && PART_AFTER.test(text.slice(m.index + m[0].length, m.index + m[0].length + 40))) {
+          return m[1].slice(0, m[1].search(LAST_COMPONENT));
+        }
+        return m[1];
+      }),
   );
   return COMPONENT_WORDS.filter(([re]) => lists.some((list) => new RegExp(String.raw`\b(?:${re})\b`, "i").test(list))).map(([, c]) => c);
 }

@@ -133,6 +133,20 @@ describe("parseEmail without the AI stage", () => {
     expect(p.warnings).toContain("Misc. hardware is asked for: add it by hand with the amount from the shop's invoice.");
   });
 
+  it.each([
+    // No part number: the draft used every component named.
+    ["Location 0424, Unit 284190, PO 7741255\nDPF inlet gasket and DOC clamp, no cleaning", []],
+    ["Location 0424, Unit 284190, PO 7741255\nPlease clean the DPF, the DOC clamp is fine", ["DPF"]],
+    ["Location 0424, Unit 284190, PO 7741255\nClean DPF then DOC", ["DPF", "DOC"]],
+    // With a part number: a DOC named only as a part is not a cleaning.
+    ["Location 0424, Unit 284190, PO 7741255\nCDS-G-1051 x1. We need a DPF cleaning and new DOC clamps", ["GASKET", "DPF"]],
+  ])("BUG-M2-12: proposes only the cleanings asked for: %j", async (text, expected) => {
+    const email = { ...fixture("ryder-dpf-with-parts"), subject: "Work request", text: `${text}\n` };
+    const p = await parseEmail(email, reference(), { llm: null });
+    const name = (id: string | null) => (id === DPF_CLEAN.id ? "DPF" : id === DOC_CLEAN.id ? "DOC" : id === DPF_GASKET.id ? "GASKET" : id);
+    expect(p.items.map((i) => name(i.catalog_item_id))).toEqual(expected);
+  });
+
   it("does not add the same cleaning twice when a part number already maps to it", async () => {
     const p = await parseEmail(fixture("first-student-parts"), reference(), { llm: null });
     expect(p.items.filter((i) => i.catalog_item_id === DPF_CLEAN.id)).toHaveLength(1);

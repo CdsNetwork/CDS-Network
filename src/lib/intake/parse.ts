@@ -146,14 +146,17 @@ export async function parseEmail(email: NormalizedEmail, ref: IntakeReference, o
   }
   const cleaning = (c: Component): ItemInput => ({ description: `${c} cleaning`, partNumber: null, qty: 1, component: c, source: "regex" });
   const categoryOf = new Map(catalog.map((c) => [c.id, c.category]));
+  // Only components the text asks to have cleaned, in both paths: a component named in a part
+  // description ("DOC clamp") or in a declined cleaning ("no cleaning") is not a cleaning.
+  const cleanings = requestedCleanings(all);
   let items: ItemMatch[];
   if (!inputs.length) {
-    items = d.components.map((c) => matchItem(cleaning(c), customerId, catalog, ref.aliases));
+    items = cleanings.map((c) => matchItem(cleaning(c), customerId, catalog, ref.aliases));
   } else {
     items = inputs.map((i) => matchItem(i, customerId, catalog, ref.aliases));
     // A cleaning asked for in the text ("Work needed: DPF clean") is kept next to part numbers,
     // unless a matched service already covers that component.
-    for (const c of requestedCleanings(all)) {
+    for (const c of cleanings) {
       const word = new RegExp(String.raw`\b${c}\b`, "i");
       const covered = items.some((i) => i.catalog_item_id && categoryOf.get(i.catalog_item_id) === "service" && word.test(`${i.name} ${i.sku}`));
       if (covered) continue;
