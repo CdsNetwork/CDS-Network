@@ -19,7 +19,7 @@ import {
   TAX_CLASS_LABEL,
 } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
-import { taxLabel, taxSummary, type TaxFlags } from "@/lib/tax";
+import { orderTaxExempt, TAX_FROZEN_STATUSES, taxLabel, taxSummary, type TaxFlags } from "@/lib/tax";
 import {
   ATTACHMENT_CATEGORY_LABEL,
   CATEGORY_LABEL,
@@ -477,8 +477,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const approver = one(internal?.profiles ?? null);
 
   // Tax summary from the line snapshots, the order's tax flags and the customer's tax
-  // exemption: the same rule as the QuickBooks invoice (src/lib/tax.ts).
-  const customerTaxExempt = (billingRes.data as { tax_exempt: boolean } | null)?.tax_exempt ?? false;
+  // exemption: the same rule as the QuickBooks invoice (src/lib/tax.ts). Invoiced and
+  // cancelled orders show what is stored on them, whatever the customer's exemption is now.
+  const customerTaxExempt = orderTaxExempt({
+    status: wo.status,
+    customerTaxExempt: (billingRes.data as { tax_exempt: boolean } | null)?.tax_exempt ?? false,
+    taxSource: internal?.tax_source ?? null,
+  });
   const taxFlags: TaxFlags = {
     taxParts: internal?.tax_parts ?? false,
     taxLabor: internal?.tax_labor ?? false,
@@ -1224,8 +1229,14 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
             </div>
             {customerTaxExempt && (
               <div className="notice">
-                {customer?.name ?? "This customer"} is tax exempt: no sales tax on this order, and every line is invoiced as
-                non-taxable in QuickBooks. The exemption is set on the customer.
+                {TAX_FROZEN_STATUSES.includes(wo.status) ? (
+                  <>No sales tax on this order: {customer?.name ?? "the customer"} was tax exempt when it was {wo.status}.</>
+                ) : (
+                  <>
+                    {customer?.name ?? "This customer"} is tax exempt: no sales tax on this order, and every line is invoiced
+                    as non-taxable in QuickBooks. The exemption is set on the customer.
+                  </>
+                )}
               </div>
             )}
             {internal && !customerTaxExempt && (

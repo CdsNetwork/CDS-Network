@@ -20,6 +20,19 @@ export type TaxFlags = {
 
 export const CUSTOMER_EXEMPT_LABEL = "Not taxable (customer exempt)";
 
+/** Orders whose tax is final: they keep the tax settings stored on them. */
+export const TAX_FROZEN_STATUSES = ["invoiced", "cancelled"];
+
+/**
+ * Whether the order is treated as customer exempt. Open orders follow the customer's
+ * current exemption. Invoiced and cancelled orders never change: their stored settings
+ * decide (tax_source "customer_exempt" when the customer was exempt at the time).
+ */
+export function orderTaxExempt(o: { status: string; customerTaxExempt: boolean; taxSource: string | null }): boolean {
+  if (TAX_FROZEN_STATUSES.includes(o.status)) return o.taxSource === "customer_exempt";
+  return o.customerTaxExempt;
+}
+
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
