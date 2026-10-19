@@ -197,4 +197,19 @@ describe("requestedCleanings", () => {
     // A component after the list that is not part of it is still not a cleaning request.
     expect(requestedCleanings("Clean the DPF. Also send 2 DOC gaskets")).toEqual(["DPF"]);
   });
+
+  it("does not read a cleaning that is declined or a part named next to the component", () => {
+    expect(requestedCleanings("DPF inlet gasket and DOC clamp, no cleaning")).toEqual([]);
+    expect(requestedCleanings("Need a DOC clamp, no cleaning")).toEqual([]);
+    expect(requestedCleanings("DPF clean, no DOC cleaning")).toEqual(["DPF"]);
+    expect(requestedCleanings("Do not clean the DOC, just the DPF gasket")).toEqual([]);
+    expect(requestedCleanings("Don't need DOC cleaning this time")).toEqual([]);
+    expect(requestedCleanings("Clean the DPF without the DOC")).toEqual(["DPF"]);
+  });
+
+  it("reads a component added to the list with a filler word", () => {
+    expect(requestedCleanings("Clean DPF and also the DOC")).toEqual(["DPF", "DOC"]);
+    expect(requestedCleanings("Please clean the DPF and then the DOC")).toEqual(["DPF", "DOC"]);
+    expect(requestedCleanings("Clean the DPF plus the DOC")).toEqual(["DPF", "DOC"]);
+  });
 });

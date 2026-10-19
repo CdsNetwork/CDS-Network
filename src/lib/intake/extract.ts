@@ -103,8 +103,14 @@ const COMPONENT_WORDS: [string, Component][] = [
 const CLEAN_WORDS = String.raw`clean(?:ing|ed)?(?!\W+diesel\b)|bake|baked|flush(?:ed)?|service`;
 
 const ANY_COMPONENT = COMPONENT_WORDS.map(([re]) => `(?:${re})`).join("|");
-// A list of components: "DPF", "DPF and DOC", "DPF, DOC, and SCR", "DPF/DOC/SCR", "DPF & the DOC".
-const COMPONENT_LIST = String.raw`\b(?:${ANY_COMPONENT})\b(?:\s*(?:,\s*(?:and\s+)?|\/|&|\+|\band\b)\s*(?:the\s+)?\b(?:${ANY_COMPONENT})\b)*`;
+// A list of components: "DPF", "DPF and DOC", "DPF, DOC, and SCR", "DPF/DOC/SCR", "DPF & the DOC",
+// "DPF and also the DOC", "DPF plus the DOC".
+const LIST_FILLER = String.raw`(?:(?:also|then|the)\s+){0,2}`;
+const COMPONENT_LIST = String.raw`\b(?:${ANY_COMPONENT})\b(?:\s*(?:,\s*(?:and\s+)?|\/|&|\+|\band\b|\bplus\b)\s*${LIST_FILLER}\b(?:${ANY_COMPONENT})\b)*`;
+const NEGATION = /\b(?:no|not|without|never|skip)\b|n't\b/i;
+const NEGATED_BEFORE = /(?:\b(?:no|not|without|never|skip)|n't)\W+(?:(?:need|needs|want|any|the|a)\W+){0,2}$/i;
+// Parts named next to a component ("DOC clamp", "DPF inlet gasket"): not a cleaning request.
+const PART_WORDS = /\b(?:gaskets?|clamps?|sensors?|bolts?|nuts?|hardware|kits?|seals?|bands?|pipes?|hoses?|brackets?|studs?)\b/i;
 const CLEANING_REQUESTS = [
   // "clean the DPF and DOC", "Clean DPF, DOC and SCR"
   new RegExp(String.raw`\b(?:${CLEAN_WORDS})\W+(?:\w+\W+){0,2}?(${COMPONENT_LIST})`, "gi"),
@@ -116,10 +122,22 @@ const CLEANING_REQUESTS = [
  * Components the text asks to have cleaned: a component, or a list of components, and a
  * cleaning word at most two words apart ("DPF clean", "clean the DPF", "Clean DPF, DOC and
  * SCR", "DPF and DOC cleaning"). A component named only in a part description ("DPF inlet
- * gasket") is not a cleaning request.
+ * gasket", "DOC clamp, cleaning not needed") or a declined cleaning ("no DOC cleaning", "DOC
+ * clamp, no cleaning") is not a cleaning request.
  */
 export function requestedCleanings(text: string): Component[] {
-  const lists = CLEANING_REQUESTS.flatMap((re) => [...text.matchAll(re)].map((m) => m[1]));
+  const lists = CLEANING_REQUESTS.flatMap((re) =>
+    [...text.matchAll(re)]
+      .filter((m) => {
+        // The words between the cleaning word and the components: a declined cleaning
+        // ("DOC clamp, no cleaning") or a part ("DOC clamp ... cleaning") is not a request.
+        const between = m[0].replace(m[1], " ");
+        if (NEGATION.test(between) || PART_WORDS.test(between)) return false;
+        // "no DPF cleaning", "do not clean the DOC", "don't need DOC cleaning".
+        return !NEGATED_BEFORE.test(text.slice(Math.max(0, m.index - 30), m.index));
+      })
+      .map((m) => m[1]),
+  );
   return COMPONENT_WORDS.filter(([re]) => lists.some((list) => new RegExp(String.raw`\b(?:${re})\b`, "i").test(list))).map(([, c]) => c);
 }
 
