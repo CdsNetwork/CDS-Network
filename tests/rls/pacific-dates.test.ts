@@ -23,6 +23,13 @@ function pacificToday(): string {
   }).format(new Date());
 }
 
+/** The day after a "YYYY-MM-DD" date. */
+function nextDay(day: string): string {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 async function insertOne<T extends { id: string }>(table: string, row: Record<string, unknown>): Promise<T> {
   return must(admin.from(table).insert(row).select().single()) as Promise<T>;
 }
@@ -71,6 +78,7 @@ afterAll(async () => {
     }
   });
   await step("delete logins", () => deleteLogins());
+  await step("delete work orders", () => must(admin.from("work_orders").delete().eq("customer_id", f.customer)));
   await step("delete catalog items", () => must(admin.from("catalog_items").delete().like("sku", suffix)));
   await step("delete customers", () => must(admin.from("customers").delete().like("code", suffix)));
   await step("delete shops", () => must(admin.from("affiliates").delete().like("short_code", suffix)));
@@ -128,6 +136,45 @@ describe("BUG-17: price start dates are Pacific dates", () => {
       admin.from("shop_rates").insert({ catalog_item_id: f.item, affiliate_id: f.shop, amount: 15 }).select("effective_from").single(),
     );
     expect(shop.effective_from).toBe(pacificToday());
+  });
+});
+
+describe("Line prices resolve on the Pacific date", () => {
+  // From 17:00 Pacific (16:00 in winter) the UTC date is already tomorrow. A price that
+  // starts tomorrow (Pacific) must not apply yet, so a line added in the evening still gets
+  // today's price. Outside that window the test passes either way; in it, a resolution on
+  // the UTC date (current_date) fails.
+  it("a fleet price or customer override that starts tomorrow does not apply today", async () => {
+    const today = pacificToday();
+    const tomorrow = nextDay(today);
+    const item = await insertOne<{ id: string }>("catalog_items", {
+      sku: `PD-B-${runId}`,
+      category: "service",
+      name: "Test boundary cleaning",
+      tax_class: "labor",
+    });
+    await must(
+      admin.from("sell_prices").insert([
+        { catalog_item_id: item.id, market: "US", amount: 50, effective_from: "2026-01-01", effective_to: tomorrow },
+        { catalog_item_id: item.id, market: "US", amount: 60, effective_from: tomorrow },
+      ]),
+    );
+    await must(
+      admin.from("customer_price_overrides").insert({ customer_id: f.customer, catalog_item_id: item.id, market: "US", amount: 40, effective_from: tomorrow }),
+    );
+    const wo = await insertOne<{ id: string }>("work_orders", {
+      customer_id: f.customer,
+      location_label: `PD ${runId}`,
+      fulfillment: "shipping",
+      unit_number: "PD-1",
+      requested_work: "Test cleaning",
+    });
+    const line = await insertOne<{ id: string }>("work_order_lines", { work_order_id: wo.id, catalog_item_id: item.id, qty: 1, origin: "cds_order" });
+    const price = await must(
+      admin.from("work_order_line_pricing").select("customer_unit_price, price_source").eq("line_id", line.id).single(),
+    );
+    expect({ ...price, customer_unit_price: Number(price.customer_unit_price) }).toMatchObject({ customer_unit_price: 50 });
+    expect(price.price_source).not.toMatch(/override/);
   });
 });
 
