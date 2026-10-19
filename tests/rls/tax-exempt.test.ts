@@ -211,4 +211,49 @@ describe("BUG-M2-9: tax settings follow the customer's tax exemption", () => {
     });
     expect(await tax(invoiced)).toEqual(invoicedBefore);
   });
+
+  it("changing an order's customer re-evaluates its tax", async () => {
+    const wo = await createLikeForm(f.taxable, f.taxableLoc);
+    await must(admin.from("work_orders").update({ customer_id: f.exempt, location_id: f.exemptLoc }).eq("id", wo));
+    expect(await tax(wo)).toMatchObject(NO_TAX);
+
+    // Back to a customer without an exemption: the state's starting tax, as a new order.
+    await must(cds.client.from("work_orders").update({ customer_id: f.taxable, location_id: f.taxableLoc }).eq("id", wo));
+    expect(await tax(wo)).toMatchObject({
+      tax_rate: ohio.rate,
+      tax_parts: ohio.taxes_parts,
+      tax_labor: ohio.taxes_labor,
+      tax_shipping: ohio.taxes_shipping,
+      tax_jurisdiction: "OH",
+      tax_source: "state_fallback",
+    });
+  });
+
+  it("an invoiced order's customer change leaves its tax alone", async () => {
+    const wo = await createLikeForm(f.taxable, f.taxableLoc);
+    await must(admin.from("work_orders").update({ status: "invoiced", fulfillment: "shipping", affiliate_id: f.shop, affiliate_invoice_ref: "INV-1" }).eq("id", wo));
+    const before = await tax(wo);
+    await must(admin.from("work_orders").update({ customer_id: f.exempt, location_id: f.exemptLoc }).eq("id", wo));
+    expect(await tax(wo)).toEqual(before);
+  });
+
+  it("CDS cannot change the tax of an invoiced order through the API", async () => {
+    const wo = await createLikeForm(f.taxable, f.taxableLoc);
+    await must(admin.from("work_orders").update({ status: "invoiced", fulfillment: "shipping", affiliate_id: f.shop, affiliate_invoice_ref: "INV-1" }).eq("id", wo));
+    const before = await tax(wo);
+    for (const change of [
+      { tax_rate: 9 },
+      { tax_parts: !before.tax_parts },
+      { tax_labor: !before.tax_labor },
+      { tax_shipping: !before.tax_shipping },
+      { tax_source: "manual" },
+      { tax_jurisdiction: "CA" },
+    ]) {
+      const { error } = await cds.client.from("work_order_internal").update(change).eq("work_order_id", wo);
+      expect(error?.message, JSON.stringify(change)).toMatch(/invoiced/);
+    }
+    expect(await tax(wo)).toEqual(before);
+    // Other fields of an invoiced order can still be edited, and writing the same tax is fine.
+    await must(cds.client.from("work_order_internal").update({ internal_notes: `note ${runId}`, tax_rate: before.tax_rate }).eq("work_order_id", wo));
+  });
 });
