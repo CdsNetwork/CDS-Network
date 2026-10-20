@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Brand } from "@/components/Brand";
+import { safeNext } from "@/lib/safe-next";
 import { LoginForm } from "./LoginForm";
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
@@ -21,7 +22,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
         <div className="card">
           <h1 style={{ margin: "0 0 4px", fontSize: 22 }}>Sign in</h1>
           <p className="small" style={{ marginTop: 0 }}>For CDS staff and network shops. Logins are by invitation.</p>
-          <LoginForm notice={notice} next={typeof next === "string" ? next : undefined} />
+          <LoginForm notice={notice} next={typeof next === "string" ? safeNext(next, "") || undefined : undefined} />
         </div>
         <p className="small legal-links">
           <Link className="link" href="/legal/terms">Terms of Use</Link>

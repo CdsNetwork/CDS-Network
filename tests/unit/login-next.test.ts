@@ -32,6 +32,20 @@ describe("signIn and next", () => {
     ["/quickbooks/connect", "/quickbooks/connect"],
     ["https://evil.example", "/"],
     ["//evil.example", "/"],
+    // BUG-M2-15: dot segments, encodings, backslashes, controls and schemes.
+    ["/.//evil.example", "/"],
+    ["/..//evil.example", "/"],
+    ["/%2e%2e//evil.example", "/"],
+    ["/%2E%2E%2F/evil.example", "/"],
+    ["/%252e%252e//evil.example", "/"],
+    ["/a/..//evil.example", "/"],
+    ["/.\\/evil.example", "/"],
+    ["/%5C/evil.example", "/"],
+    ["/\t/evil.example", "/"],
+    ["/%0a/evil.example", "/"],
+    ["JaVaScRiPt:alert(1)", "/"],
+    ["//portal.invalid@evil.example", "/"],
+    ["/" + "a".repeat(5000), "/"],
   ])("next %s -> %s", async (next, expected) => {
     await expect(signIn({}, form(next))).rejects.toThrow(`REDIRECT ${expected}`);
   });
