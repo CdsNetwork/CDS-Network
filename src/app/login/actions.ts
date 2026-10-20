@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
+import { safeNext } from "@/lib/safe-next";
 import { createClient } from "@/lib/supabase/server";
 
 export type FormState = { error?: string; message?: string };
@@ -14,7 +15,8 @@ export async function signIn(_prev: FormState, formData: FormData): Promise<Form
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { error: "Email or password is not correct." };
-  redirect("/");
+  // next comes from links such as the QuickBooks launch and connect URLs; only portal paths.
+  redirect(safeNext(String(formData.get("next") ?? "") || null, "/"));
 }
 
 export async function signOut() {

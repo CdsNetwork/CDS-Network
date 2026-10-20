@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useActionState } from "react";
 import { signIn, type FormState } from "./actions";
 
-export function LoginForm({ notice }: { notice?: string }) {
+export function LoginForm({ notice, next }: { notice?: string; next?: string }) {
   const [state, action, pending] = useActionState<FormState, FormData>(signIn, {});
   return (
     <form action={action}>
+      {next && <input type="hidden" name="next" value={next} />}
       {notice && <div className="notice warning">{notice}</div>}
       <div className="field">
         <label htmlFor="email">Email</label>

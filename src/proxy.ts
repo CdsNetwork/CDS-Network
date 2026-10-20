@@ -3,7 +3,18 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // The webhooks have no session: the ShipStation webhook checks the ShipStation signature,
 // the email intake webhook checks INTAKE_WEBHOOK_TOKEN, the cron routes check CRON_SECRET.
-export const PUBLIC_PATHS = ["/login", "/forgot-password", "/auth/confirm", "/api/shipstation/webhook", "/api/intake/email", "/api/cron/"];
+// /legal/ (terms, privacy) and /quickbooks/ (Intuit's disconnect, launch and connect URLs)
+// must open without a login; the launch and connect routes check the login themselves.
+export const PUBLIC_PATHS = [
+  "/login",
+  "/forgot-password",
+  "/auth/confirm",
+  "/api/shipstation/webhook",
+  "/api/intake/email",
+  "/api/cron/",
+  "/legal/",
+  "/quickbooks/",
+];
 
 /** Refreshes the Supabase session cookie and sends signed-out visitors to /login. */
 export async function proxy(request: NextRequest) {
