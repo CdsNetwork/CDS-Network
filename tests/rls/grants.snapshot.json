@@ -1,0 +1,313 @@
+{
+  "function public.api_grants_matrix()": {
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_add_pass_through_line(uuid,uuid,text,numeric)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_create_work_order(uuid,uuid,text,text,public.request_type,public.fulfillment_method,text,text,text,text,jsonb)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_decide_authorization(uuid,boolean,text,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_dispatch_work_order(uuid,uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_mark_invoiced(uuid,text,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_record_shipment_label(uuid,jsonb)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_remove_pass_through_line(uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_set_price(text,uuid,uuid,numeric)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_set_status(uuid,public.wo_status,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_void_shipment_label(uuid,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.intake_create_draft_work_order(uuid,uuid,uuid,text,text,public.request_type,public.fulfillment_method,text,text,text,text,text,jsonb,text,integer,date,boolean,text,text,text,text,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.intake_note_po_reference(uuid,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.qbo_connection_status()": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.qbo_delete_connection(uuid)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.qbo_get_connection()": {
+    "service_role": "EXECUTE"
+  },
+  "function public.qbo_save_connection(text,text,text,boolean,text,timestamp with time zone,text,timestamp with time zone,uuid)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.qbo_save_tokens(text,text,text,timestamp with time zone,text,timestamp with time zone)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.shipstation_auto_deliver_sweep()": {
+    "service_role": "EXECUTE"
+  },
+  "function public.shipstation_labels_to_track(integer)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.shipstation_record_tracking(uuid,text,public.shipment_status,timestamp with time zone,timestamp with time zone,jsonb,text)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.shipstation_record_webhook(text,text,text,text,public.shipment_status,timestamp with time zone,jsonb,jsonb,timestamp with time zone)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_accept_work_order(uuid,public.pickup_window)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_add_part(uuid,uuid,numeric)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_complete_work_order(uuid,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_decline_work_order(uuid,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_delete_component(uuid,uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_remove_part(uuid,uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_request_authorization(uuid,uuid,numeric,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_save_component(uuid,uuid,public.component_type,text,text,text,numeric,numeric,numeric,numeric,public.component_result,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_set_progress(uuid,public.wo_status)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_set_ship_status(uuid,public.shop_ship_status)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "sequence public.audit_log_id_seq": {
+    "authenticated": "SELECT,UPDATE,USAGE",
+    "service_role": "SELECT,UPDATE,USAGE"
+  },
+  "sequence public.integration_sync_id_seq": {
+    "authenticated": "SELECT,UPDATE,USAGE",
+    "service_role": "SELECT,UPDATE,USAGE"
+  },
+  "sequence public.shipment_tracking_events_id_seq": {
+    "authenticated": "SELECT,UPDATE,USAGE",
+    "service_role": "SELECT,UPDATE,USAGE"
+  },
+  "sequence public.shipstation_webhook_events_id_seq": {
+    "authenticated": "SELECT,UPDATE,USAGE",
+    "service_role": "SELECT,UPDATE,USAGE"
+  },
+  "sequence public.wo_number_seq": {
+    "authenticated": "SELECT,UPDATE,USAGE",
+    "service_role": "SELECT,UPDATE,USAGE"
+  },
+  "sequence public.work_order_events_id_seq": {
+    "authenticated": "SELECT,UPDATE,USAGE",
+    "service_role": "SELECT,UPDATE,USAGE"
+  },
+  "table public.affiliate_contacts": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.affiliate_internal": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.affiliates": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.app_settings": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.attachments": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.audit_log": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.authorization_decisions": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.authorization_requests": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.catalog_items": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.customer_billing": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.customer_email_domains": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.customer_item_aliases": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.customer_locations": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.customer_price_overrides": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.customers": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.inbound_emails": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.integration_sync": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.markets": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.profiles": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.qbo_customer_map": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.qbo_item_map": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.qbo_measurement_map": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.sell_prices": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipment_internal": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipment_label_costs": {
+    "authenticated": "MAINTAIN,SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipment_label_tracking": {
+    "authenticated": "MAINTAIN,SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipment_labels": {
+    "authenticated": "MAINTAIN,SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipment_tracking_events": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipments": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipping_carriers": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipping_services": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipping_settings": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipstation_webhook_events": {
+    "authenticated": "MAINTAIN,SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shop_rates": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.tax_rates": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.work_order_components": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.work_order_events": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.work_order_internal": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.work_order_line_pricing": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.work_order_lines": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.work_orders": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "view public.work_order_financials": {
+    "authenticated": "MAINTAIN,SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  }
+}
