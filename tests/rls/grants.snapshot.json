@@ -2,6 +2,9 @@
   "function public.api_grants_matrix()": {
     "service_role": "EXECUTE"
   },
+  "function public.api_grants_probe_no_grants()": {
+    "(none)": ""
+  },
   "function public.cds_add_pass_through_line(uuid,uuid,text,numeric)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"

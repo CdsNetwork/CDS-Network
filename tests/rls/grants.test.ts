@@ -5,8 +5,11 @@
  * service_role by default, so every migration grants its objects explicitly
  * (20261020000000_explicit_api_grants.sql). This test reads the live privileges of PUBLIC,
  * anon, authenticated and service_role on every table, view, sequence and function in public
- * and fails on any difference: a new object, a missing grant, or a wider one. When a migration
- * adds or changes an object on purpose, add its grants to the snapshot in the same change.
+ * and fails on any difference: a new object, a missing grant, or a wider one. Every object
+ * has at least one row: an object none of those roles can use shows grantee "(none)" with
+ * empty privileges, so a new table created without grants (which the app could not read)
+ * still fails the test. When a migration adds or changes an object on purpose, add its
+ * grants to the snapshot in the same change.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { admin, anon, createLogin, deleteLogins, type Login } from "./helpers";
@@ -34,6 +37,24 @@ describe("Data API grants", () => {
       live[key] = { ...live[key], [row.grantee]: row.privileges };
     }
     expect(live).toEqual(snapshot);
+  });
+
+  it("list an object that has no grants at all (BUG-M2-16)", async () => {
+    // public.api_grants_probe_no_grants() is revoked from PUBLIC, anon, authenticated and
+    // service_role on purpose (20261020010000_grants_matrix_every_object.sql).
+    const { data, error } = await admin.rpc("api_grants_matrix");
+    if (error) throw new Error(error.message);
+    const probe = (data as Row[]).filter((r) => r.object === "public.api_grants_probe_no_grants()");
+    expect(probe).toEqual([
+      { kind: "function", object: "public.api_grants_probe_no_grants()", grantee: "(none)", privileges: "" },
+    ]);
+  });
+
+  it("list every object in the snapshot with at least one grantee", () => {
+    for (const [object, grantees] of Object.entries(snapshot)) {
+      expect(Object.keys(grantees).length, object).toBeGreaterThan(0);
+      if ("(none)" in grantees) expect(grantees, object).toEqual({ "(none)": "" });
+    }
   });
 
   it("give anon nothing in public", () => {
