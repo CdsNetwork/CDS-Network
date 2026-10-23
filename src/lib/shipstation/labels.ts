@@ -8,6 +8,7 @@ import {
   buildRatesRequest,
   mapLabel,
   mapRates,
+  ratesFailureMessage,
   toShipAddress,
   type PackageInput,
   type PortalAddress,
@@ -262,7 +263,8 @@ export async function ratesForShipment(db: Db, shipmentId: string): Promise<Rate
   }
   try {
     const res = await shipStationRequest<unknown>(config.apiKey, "POST", "rates", { body });
-    const { rates, problems } = mapRates(res, allowedServices(ctx.carriers));
+    const { rates, problems, upstream } = mapRates(res, allowedServices(ctx.carriers));
+    if (upstream.length) console.warn(`ShipStation rates for shipment ${shipmentId}: carrier errors: ${upstream.join(" | ").slice(0, 2000)}`);
     const names = new Map(ctx.carriers.map((c) => [c.shipstation_carrier_id, c.name]));
     return {
       ok: true,
@@ -275,7 +277,12 @@ export async function ratesForShipment(db: Db, shipmentId: string): Promise<Rate
     };
   } catch (e) {
     await logSync(db, "rates", shipmentId, "error", null, failure(e));
-    return { ok: false, error: `ShipStation rates failed: ${failure(e)}` };
+    if (e instanceof ShipStationError) {
+      if (e.status === 0 || e.status >= 500) console.error(`ShipStation rates for shipment ${shipmentId} failed: ${e.message}`);
+      return { ok: false, error: ratesFailureMessage(e) };
+    }
+    console.error(`ShipStation rates for shipment ${shipmentId} failed: ${failure(e)}`);
+    return { ok: false, error: ratesFailureMessage({ message: failure(e), status: 0 }) };
   }
 }
 

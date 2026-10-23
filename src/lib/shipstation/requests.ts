@@ -253,20 +253,64 @@ function onePerService(rates: Rate[]): Rate[] {
   );
 }
 
+type RawRateError = {
+  message?: string;
+  error_source?: string;
+  error_type?: string;
+  carrier_id?: string;
+  carrier_code?: string;
+  carrier_name?: string;
+  carrier_friendly_name?: string;
+};
+
+const CARRIER_NAMES: Record<string, string> = { ups: "UPS", fedex: "FedEx", usps: "USPS", stamps_com: "USPS", dhl_express: "DHL Express" };
+
+/**
+ * A carrier failing on its side (seen 2026-10-20: UPS answered "A shipping carrier error occurred:
+ * Request failed with status code 500 (Generic). (520, ...)"). Nothing CDS can fix, so staff get a
+ * short retry hint instead of the carrier's raw text.
+ */
+const UPSTREAM_TEXT = /carrier error occurred|status code 5\d\d|\b5\d\d\b.*error|timed? ?out|temporarily|unavailable|try again later/i;
+
+function isUpstream(e: { message: string; error_type?: string }): boolean {
+  return e.error_type === "system" || UPSTREAM_TEXT.test(e.message);
+}
+
+function carrierLabel(e: { carrier_code?: string; carrier_name?: string; carrier_friendly_name?: string }): string {
+  return CARRIER_NAMES[e.carrier_code ?? ""] ?? (e.carrier_friendly_name?.trim() || e.carrier_name?.trim() || "This carrier");
+}
+
+export const unavailableMessage = (carrier: string) => `${carrier} rates are temporarily unavailable, try again in a minute.`;
+
 /**
  * Rates from a POST /v2/rates answer, one per carrier service, cheapest first. `allowed` maps a carrier id to the
  * service codes CDS allows (an empty list or a missing carrier allows all of its services).
+ * `problems` is shown to CDS staff; `upstream` holds the raw text of carrier side failures, for the
+ * server log only.
  */
-export function mapRates(body: unknown, allowed: Record<string, string[]> = {}): { rates: Rate[]; problems: string[] } {
-  const rr = (body as { rate_response?: { rates?: RawRate[]; invalid_rates?: RawRate[]; errors?: { message?: string }[] } } | null)
+export function mapRates(
+  body: unknown,
+  allowed: Record<string, string[]> = {},
+): { rates: Rate[]; problems: string[]; upstream: string[] } {
+  const rr = (body as { rate_response?: { rates?: RawRate[]; invalid_rates?: (RawRate & RawRateError)[]; errors?: RawRateError[] } } | null)
     ?.rate_response;
-  if (!rr) return { rates: [], problems: ["ShipStation returned no rates"] };
+  if (!rr) return { rates: [], problems: ["ShipStation returned no rates"], upstream: [] };
 
   const problems: string[] = [];
-  for (const e of rr.errors ?? []) if (e?.message) problems.push(e.message);
+  const upstream: string[] = [];
+  const add = (message: string, source: RawRateError, prefix = "") => {
+    if (isUpstream({ message, error_type: source.error_type })) {
+      upstream.push(prefix + message);
+      const friendly = unavailableMessage(carrierLabel(source));
+      if (!problems.includes(friendly)) problems.push(friendly);
+    } else {
+      problems.push(prefix + message);
+    }
+  };
+  for (const e of rr.errors ?? []) if (e?.message) add(e.message, e);
   for (const r of rr.invalid_rates ?? []) {
     const msg = (r.error_messages ?? []).join("; ");
-    if (msg) problems.push(`${r.service_code ?? "rate"}: ${msg}`);
+    if (msg) add(msg, r, `${r.service_code ?? "rate"}: `);
   }
 
   const rates: Rate[] = [];
@@ -295,7 +339,7 @@ export function mapRates(body: unknown, allowed: Record<string, string[]> = {}):
   }
   const unique = onePerService(rates);
   unique.sort((a, b) => a.total - b.total || (a.deliveryDays ?? 99) - (b.deliveryDays ?? 99));
-  return { rates: unique, problems };
+  return { rates: unique, problems, upstream };
 }
 
 // ---------------------------------------------------------------- labels
@@ -349,4 +393,14 @@ export function mapLabel(body: unknown, testRequested: boolean): CreatedLabel {
     currency: (l.shipment_cost?.currency ?? "usd").toUpperCase(),
     status: l.status ?? null,
   };
+}
+
+/**
+ * What CDS staff see when the whole rates call fails. ShipStation or carrier outages (5xx, no
+ * answer) get a short retry hint and the raw text stays in the server log; a request ShipStation
+ * refused (4xx, rate limit) keeps its message because it says what to fix or when to retry.
+ */
+export function ratesFailureMessage(e: { message: string; status: number }): string {
+  if (e.status === 0 || e.status >= 500) return "Rates are temporarily unavailable, try again in a minute.";
+  return `ShipStation rates failed: ${e.message}`;
 }

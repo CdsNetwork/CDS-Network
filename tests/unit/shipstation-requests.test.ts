@@ -5,6 +5,7 @@ import {
   buildRatesRequest,
   mapLabel,
   mapRates,
+  ratesFailureMessage,
   toShipAddress,
   type PortalAddress,
 } from "@/lib/shipstation/requests";
@@ -339,8 +340,63 @@ describe("mapRates", () => {
     );
   });
 
+  it("shows a short message when a carrier is down upstream and keeps the raw text out of problems", () => {
+    // UPS failed upstream on the first run of QA m2-r9 (2026-10-20); FedEx still answered.
+    const raw = "A shipping carrier error occurred: Request failed with status code 500 (Generic). (520, req-1)";
+    const { rates, problems, upstream } = mapRates({
+      rate_response: {
+        status: "partial",
+        rates: RATES_RESPONSE.rate_response.rates.filter((r) => r.carrier_code === "fedex"),
+        errors: [
+          {
+            error_source: "carrier",
+            error_type: "system",
+            error_code: "unspecified",
+            message: raw,
+            carrier_id: "se-7157770",
+            carrier_code: "ups",
+            carrier_name: "UPS",
+          },
+        ],
+      },
+    });
+    expect(rates.map((r) => r.carrierCode)).toEqual(["fedex", "fedex"]);
+    expect(problems).toEqual(["UPS rates are temporarily unavailable, try again in a minute."]);
+    expect(problems.join(" ")).not.toContain("status code");
+    expect(upstream).toEqual([raw]);
+  });
+
+  it("recognises an upstream failure by its text even without a carrier error type", () => {
+    const { problems, upstream } = mapRates({
+      rate_response: {
+        rates: [],
+        errors: [{ message: "A shipping carrier error occurred: Request failed with status code 503", carrier_code: "fedex" }],
+        invalid_rates: [{ carrier_id: "se-9", carrier_code: "ups", service_code: "ups_ground", error_messages: ["The carrier timed out"] }],
+      },
+    });
+    expect(problems).toEqual([
+      "FedEx rates are temporarily unavailable, try again in a minute.",
+      "UPS rates are temporarily unavailable, try again in a minute.",
+    ]);
+    expect(upstream).toHaveLength(2);
+  });
+
+  it("names each unavailable carrier once", () => {
+    const err = { error_source: "carrier", error_type: "system", message: "Request failed with status code 500", carrier_code: "ups" };
+    const { problems } = mapRates({ rate_response: { rates: [], errors: [err, err] } });
+    expect(problems).toEqual(["UPS rates are temporarily unavailable, try again in a minute."]);
+  });
+
+  it("keeps validation messages that staff can act on", () => {
+    const { problems, upstream } = mapRates({
+      rate_response: { rates: [], errors: [{ error_source: "carrier", error_type: "validation", message: "Invalid postal code", carrier_code: "ups" }] },
+    });
+    expect(problems).toEqual(["Invalid postal code"]);
+    expect(upstream).toEqual([]);
+  });
+
   it("survives a body without rate_response", () => {
-    expect(mapRates(null)).toEqual({ rates: [], problems: ["ShipStation returned no rates"] });
+    expect(mapRates(null)).toEqual({ rates: [], problems: ["ShipStation returned no rates"], upstream: [] });
   });
 });
 
@@ -453,5 +509,23 @@ describe("shipStationConfig", () => {
   it("reads the optional webhook token", () => {
     expect(shipStationConfig({ SHIPSTATION_API_KEY: "k" })?.webhookToken).toBeNull();
     expect(shipStationConfig({ SHIPSTATION_API_KEY: "k", SHIPSTATION_WEBHOOK_TOKEN: " abc " })?.webhookToken).toBe("abc");
+  });
+});
+
+describe("ratesFailureMessage", () => {
+  it("hides the raw text when ShipStation or a carrier is down", () => {
+    expect(ratesFailureMessage(new ShipStationError("A shipping carrier error occurred: Request failed with status code 500", 500))).toBe(
+      "Rates are temporarily unavailable, try again in a minute.",
+    );
+    expect(ratesFailureMessage(new ShipStationError("ShipStation could not be reached (fetch failed)", 0))).toBe(
+      "Rates are temporarily unavailable, try again in a minute.",
+    );
+  });
+
+  it("keeps ShipStation's own message for a request it refused", () => {
+    expect(ratesFailureMessage(new ShipStationError("ship_to.postal_code is invalid", 400))).toBe("ShipStation rates failed: ship_to.postal_code is invalid");
+    expect(ratesFailureMessage(new ShipStationError("ShipStation is busy (rate limit reached). Try again in a minute.", 429))).toBe(
+      "ShipStation rates failed: ShipStation is busy (rate limit reached). Try again in a minute.",
+    );
   });
 });
