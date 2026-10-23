@@ -2,9 +2,12 @@ import { ActionForm } from "@/components/cds-admin/ActionForm";
 import { DISCONNECT_QUICKBOOKS_CONFIRM } from "@/components/cds-admin/confirm";
 import { dateTime } from "@/lib/format";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
+import { sheetsConfig } from "@/lib/sheets/config";
+import { backupStatus, type BackupStatus } from "@/lib/sheets/source";
 import { createClient } from "@/lib/supabase/server";
 import { saveSettings } from "./actions";
 import { disconnectQuickBooks } from "./qbo-actions";
+import { backupNow } from "./sheets-actions";
 
 /** Messages for the result of the QuickBooks connect flow (?qbo=...). */
 const QBO_RESULT: Record<string, { ok: boolean; text: string }> = {
@@ -18,6 +21,12 @@ const QBO_RESULT: Record<string, { ok: boolean; text: string }> = {
 export async function SettingsTab({ qboResult }: { qboResult?: string }) {
   const supabase = await createClient();
   const qbo = await qboStatus(supabase);
+  let backup: BackupStatus | { error: string };
+  try {
+    backup = await backupStatus(supabase, sheetsConfig() !== null);
+  } catch (e) {
+    backup = { error: `Could not read the backup status: ${e instanceof Error ? e.message : "unknown error"}` };
+  }
   const { data } = await supabase
     .from("app_settings")
     .select("value, updated_at, profiles(full_name)")
@@ -29,6 +38,7 @@ export async function SettingsTab({ qboResult }: { qboResult?: string }) {
   return (
     <>
     <QuickBooksSection status={qbo} result={qboResult ? QBO_RESULT[qboResult] : undefined} />
+    <BackupSection status={backup} />
     <div className="section">
       <h3>Dispatch</h3>
       <div className="notice warning">
@@ -109,6 +119,35 @@ function QuickBooksSection({ status, result }: { status: QboStatus; result?: { o
           <a className="btn btn-blue" href="/cds/quickbooks/connect">
             Connect to QuickBooks
           </a>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BackupSection({ status }: { status: BackupStatus | { error: string } }) {
+  return (
+    <div className="section">
+      <h3>Google Sheets backup</h3>
+      {"error" in status ? (
+        <div className="notice danger">{status.error}</div>
+      ) : !status.configured ? (
+        <p className="small">
+          The backup is not configured on this server. The Google service account (GOOGLE_SHEETS_SA_JSON) and the sheet
+          id (BACKUP_SHEET_ID) must be set first.
+        </p>
+      ) : (
+        <>
+          {status.lastError && (
+            <div className="notice danger" role="status">
+              The last backup failed ({dateTime(status.lastError.at)}): {status.lastError.message}
+            </div>
+          )}
+          <p>
+            Last backup: {status.lastOkAt ? dateTime(status.lastOkAt) : "never"}
+            {status.rows !== null ? `, ${status.rows} orders` : ""}
+          </p>
+          <ActionForm action={backupNow} submitLabel="Back up now" pendingLabel="Backing up..." />
         </>
       )}
     </div>
