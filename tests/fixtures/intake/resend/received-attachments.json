@@ -1,0 +1,16 @@
+{
+  "object": "list",
+  "has_more": false,
+  "data": [
+    {
+      "id": "2a0c9ce0-3112-4728-976e-47ddcd16a318",
+      "filename": "unit-284113-dpf-tag.jpg",
+      "size": 184220,
+      "content_type": "image/jpeg",
+      "content_disposition": "attachment",
+      "content_id": null,
+      "download_url": "https://inbound-cdn.resend.com/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/attachments/2a0c9ce0-3112-4728-976e-47ddcd16a318?signature=sig-123",
+      "expires_at": "2026-10-23T15:05:02.674Z"
+    }
+  ]
+}

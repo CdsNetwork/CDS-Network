@@ -20,6 +20,19 @@ export function ignoreRule(email: Pick<NormalizedEmail, "from" | "subject" | "in
   const domain = emailDomain(from);
   const fromHeader = email.from.toLowerCase();
 
+  // Gmail asks the forwarding target (intake@in.cds.direct) to confirm auto-forwarding. Kept as
+  // Ignored with the code in the reason, so a CDS admin can read it on the Email Intake page.
+  if (from === "forwarding-noreply@google.com" && /Forwarding Confirmation/i.test(subject)) {
+    const code = text.match(/Confirmation code:\s*(\d{4,12})/i)?.[1] ?? subject.match(/\(#(\d{4,12})\)/)?.[1] ?? null;
+    const inbox = subject.match(/Receive Mail from\s+(\S+@\S+)/i)?.[1] ?? "the forwarding inbox";
+    return {
+      kind: "forwarding_confirmation",
+      reason: code
+        ? `Gmail forwarding confirmation for ${inbox}: confirmation code ${code}. Enter it in that Gmail account under Settings > Forwarding and POP/IMAP.`
+        : `Gmail forwarding confirmation for ${inbox}: no code found, open the email text.`,
+    };
+  }
+
   // CDS writing to shops and suppliers (dispatch@, xpo@), and CDS's own outgoing subjects.
   if (from && (CDS_SENDERS as readonly string[]).includes(from)) {
     return { kind: "cds_sent", reason: `Sent by CDS (${from}), not a request.` };

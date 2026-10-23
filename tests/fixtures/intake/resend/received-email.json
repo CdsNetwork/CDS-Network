@@ -1,0 +1,39 @@
+{
+  "object": "email",
+  "id": "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+  "to": ["dispatch@cds.direct"],
+  "from": "mdelgado@ryder.example",
+  "created_at": "2026-10-23T14:05:02.674Z",
+  "subject": "DPF and DOC cleaning request - Location 0424 - Unit 284113",
+  "html": "<div>Hi CDS team,</div><div>Please schedule a pickup.</div>",
+  "html_format": "cid",
+  "text": "Hi CDS team,\n\nPlease schedule a pickup for the following:\n\nLocation: 0424\nUnit #: 284113\nVIN: 3AKJHHDR0KSKA7731\nPO#: 7741200\n\nWork needed: DPF clean and DOC clean. The DPF and DOC are off the truck and on a pallet by bay 3.\nParts ready for pick up any time after 8am, dock closes at 4pm.\n\nThanks,\nMarcus Delgado\nFleet Maintenance Manager\n",
+  "headers": {
+    "from": "Marcus Delgado <mdelgado@ryder.example>",
+    "to": "dispatch@cds.direct",
+    "x-forwarded-to": "intake@in.cds.direct",
+    "x-forwarded-for": "dispatch@cds.direct intake@in.cds.direct",
+    "return-path": "dispatch+caf_=intake=in.cds.direct@cds.direct",
+    "mime-version": "1.0"
+  },
+  "bcc": [],
+  "cc": [],
+  "reply_to": [],
+  "received_for": ["intake@in.cds.direct"],
+  "authentication": { "spf": "pass", "dkim": "pass", "dmarc": "pass" },
+  "message_id": "<CAF-ryder-0424-0001@mail.ryder.example>",
+  "raw": {
+    "download_url": "https://example.resend.com/receiving/raw/054da427-439a-4e91-b785-e4fb1966285f?Signature=x",
+    "expires_at": "2026-10-23T15:05:02.674Z"
+  },
+  "attachments": [
+    {
+      "id": "2a0c9ce0-3112-4728-976e-47ddcd16a318",
+      "filename": "unit-284113-dpf-tag.jpg",
+      "content_type": "image/jpeg",
+      "content_disposition": "attachment",
+      "content_id": null,
+      "size": 184220
+    }
+  ]
+}

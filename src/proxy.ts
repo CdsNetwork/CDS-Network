@@ -2,7 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // The webhooks have no session: the ShipStation webhook checks the ShipStation signature,
-// the email intake webhook checks INTAKE_WEBHOOK_TOKEN, the cron routes check CRON_SECRET.
+// the email intake webhook checks INTAKE_WEBHOOK_TOKEN, the Resend intake webhook checks the
+// Resend (Svix) signature, the cron routes check CRON_SECRET.
 // /legal/ (terms, privacy) and /quickbooks/ (Intuit's disconnect, launch and connect URLs)
 // must open without a login; the launch and connect routes check the login themselves.
 export const PUBLIC_PATHS = [
@@ -11,6 +12,7 @@ export const PUBLIC_PATHS = [
   "/auth/confirm",
   "/api/shipstation/webhook",
   "/api/intake/email",
+  "/api/intake/resend",
   "/api/cron/",
   "/legal/",
   "/quickbooks/",
