@@ -189,3 +189,15 @@ export function wrapCell(...values: (string | null | undefined)[]): string | und
 export function idCell(value: string | null | undefined): string {
   return wrapCell(value) ?? "nowrap";
 }
+
+/**
+ * The ETA to show for a shipment leg, or null. A void moves a leg the carrier has not scanned
+ * back to "label_needed" but keeps eta_text from the voided label, so it is hidden until a new
+ * label is created; a delivered leg shows its delivery time instead.
+ */
+export function shipmentEta(s: { eta_text: string | null; status: string; label_status: string }): string | null {
+  const eta = s.eta_text?.trim();
+  if (!eta || s.status === "delivered") return null;
+  if (s.label_status === "voided" && s.status === "label_needed") return null;
+  return eta;
+}

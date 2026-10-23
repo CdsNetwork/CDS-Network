@@ -6,7 +6,7 @@ import { ShippingSettings } from "@/components/shipping/ShippingSettings";
 import { activeLabels, shipStationConfigured } from "@/lib/shipstation/views";
 import { one } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
-import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL, dateTime, money, woLabel, wrapCell } from "@/lib/format";
+import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL, dateTime, money, shipmentEta, woLabel, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllSettled } from "@/lib/supabase/fetch-all";
 import { createShipment, setShipmentStatus, updateShipment } from "./actions";
@@ -217,13 +217,13 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
                     {s.carrier ?? "-"}
                     {s.service_level && <div className="small">{s.service_level}</div>}
                   </td>
-                  <td className={wrapCell(s.tracking_number, s.eta_text)}>
+                  <td className={wrapCell(s.tracking_number, shipmentEta(s))}>
                     {s.tracking_number ? (
                       <b style={{ color: "var(--blue)" }}>{s.tracking_number}</b>
                     ) : (
                       <span className="small">No tracking yet</span>
                     )}
-                    {s.eta_text && <div className="small">ETA {s.eta_text}</div>}
+                    {shipmentEta(s) && <div className="small">ETA {shipmentEta(s)}</div>}
                   </td>
                   <td>
                     <span className={`tag${s.label_status === "error" || s.label_status === "needed" ? "" : " blue"}`}>

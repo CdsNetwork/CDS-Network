@@ -31,6 +31,7 @@ import {
   pickupWindowLabel,
   SHIP_STATUS_LABEL,
   SHIPMENT_STATUS_LABEL,
+  shipmentEta,
   STATUS_LABEL,
   woLabel,
   type WoStatus,
@@ -670,7 +671,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                     <div className="small">
                       {s.carrier ?? "Carrier not set"}
                       {s.service_level ? ` • ${s.service_level}` : ""} • Label: {LABEL_STATUS_LABEL[s.label_status] ?? s.label_status}
-                      {s.eta_text && s.status !== "delivered" ? ` • ETA ${s.eta_text}` : ""}
+                      {shipmentEta(s) ? ` • ETA ${shipmentEta(s)}` : ""}
                       {s.delivered_at ? ` • Delivered ${dateTime(s.delivered_at)}` : ""}
                     </div>
                     <div style={{ fontSize: 18, fontWeight: 850, color: "var(--blue)", margin: "6px 0" }}>
