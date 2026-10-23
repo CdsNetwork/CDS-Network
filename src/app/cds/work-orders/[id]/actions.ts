@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
 import { isUuid, LINES_LOCKED_STATUSES, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
+import { recordSync } from "@/lib/integration-sync";
 import { passThroughInput } from "@/lib/pass-through";
 import { createInvoice, type CreatedInvoice } from "@/lib/qbo/api";
 import { QboError } from "@/lib/qbo/client";
@@ -321,7 +322,7 @@ async function logSync(
   externalId: string | null,
   error: string | null,
 ) {
-  await supabase.from("integration_sync").insert({
+  await recordSync(supabase, {
     system: "quickbooks",
     entity: "invoice",
     entity_id: woId,

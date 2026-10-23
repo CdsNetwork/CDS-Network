@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { recordSync } from "@/lib/integration-sync";
 import { shipStationRequest, ShipStationError } from "./client";
 import { shipStationConfig } from "./config";
 import {
@@ -232,7 +233,7 @@ function failure(e: unknown): string {
 }
 
 async function logSync(db: Db, entity: string, shipmentId: string, status: string, externalId: string | null, error: string | null) {
-  await db.from("integration_sync").insert({
+  await recordSync(db, {
     system: "shipstation",
     entity,
     entity_id: shipmentId,

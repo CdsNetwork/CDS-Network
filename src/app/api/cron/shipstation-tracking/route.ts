@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordSync } from "@/lib/integration-sync";
 import { shipStationRequest } from "@/lib/shipstation/client";
 import { shipStationConfig } from "@/lib/shipstation/config";
 import { cronAuthorized, pollTracking, runRow, type LabelToTrack } from "@/lib/shipstation/poll";
@@ -60,7 +61,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, ...summary });
   } catch (e) {
     const message = (e instanceof Error ? e.message : "unknown error").slice(0, 2000);
-    await db.from("integration_sync").insert({ system: "shipstation", entity: "tracking_poll", direction: "pull", status: "error", error: message });
+    await recordSync(db, { system: "shipstation", entity: "tracking_poll", direction: "pull", status: "error", error: message });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
