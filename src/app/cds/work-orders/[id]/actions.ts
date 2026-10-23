@@ -9,6 +9,7 @@ import { passThroughInput } from "@/lib/pass-through";
 import { createInvoice, type CreatedInvoice } from "@/lib/qbo/api";
 import { QboError } from "@/lib/qbo/client";
 import { loadInvoice } from "@/lib/qbo/invoice-input";
+import { createdNote, type PendingQbInvoice } from "@/lib/qbo/pending";
 import { qboApi } from "@/lib/qbo/tokens";
 import { createClient } from "@/lib/supabase/server";
 
@@ -320,6 +321,7 @@ async function logSync(
   woId: string,
   status: "ok" | "rejected" | "error",
   externalId: string | null,
+  /** The failure, or on an 'ok' row the note from createdNote. */
   error: string | null,
 ) {
   await recordSync(supabase, {
@@ -359,6 +361,7 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   if (invoice.qbInvoiceId) {
     return { error: `This work order already has QuickBooks invoice ${invoice.qbInvoiceNumber ?? invoice.qbInvoiceId}.` };
   }
+  if (invoice.pendingQb) return recordPendingInvoice(supabase, woId, invoice.status, invoice.pendingQb);
   if (invoice.status !== "ready_to_invoice") return { error: "Only a work order that is Ready to Invoice can be invoiced." };
   if (!invoice.result.ok) return { error: `Fix these first: ${invoice.result.problems.join(" ")}` };
   const payload = invoice.result.payload;
@@ -397,7 +400,9 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
     };
   }
 
-  await logSync(supabase, woId, "ok", created.Id, null);
+  // Recorded before the work order is marked, so a failed update leaves the invoice findable
+  // (see @/lib/qbo/pending) and the next click records it instead of sending a new one.
+  await logSync(supabase, woId, "ok", created.Id, createdNote(created.DocNumber));
   const { error } = await supabase.rpc("cds_mark_invoiced", {
     p_work_order: woId,
     p_qb_invoice_id: created.Id,
@@ -410,4 +415,29 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
     };
   }
   return done(woId, `QuickBooks invoice ${created.DocNumber ?? created.Id} created. The work order is now Invoiced.`);
+}
+
+/**
+ * QuickBooks already created an invoice for this order but the work order was not marked
+ * (see @/lib/qbo/pending). Records that invoice; never sends a new one.
+ */
+async function recordPendingInvoice(supabase: Supabase, woId: string, status: string, pending: PendingQbInvoice): Promise<ActionState> {
+  const name = pending.number ?? `id ${pending.id}`;
+  if (status !== "ready_to_invoice") {
+    return {
+      error: `QuickBooks invoice ${name} was created for this work order but is not recorded on it, and the order is no longer Ready to Invoice. Check the invoice in QuickBooks and void it there if it should not exist.`,
+    };
+  }
+  const { error } = await supabase.rpc("cds_mark_invoiced", {
+    p_work_order: woId,
+    p_qb_invoice_id: pending.id,
+    p_qb_invoice_number: pending.number,
+  });
+  if (error) {
+    await logSync(supabase, woId, "error", pending.id, `Invoice created in QuickBooks, portal not updated: ${error.message}`);
+    return {
+      error: `QuickBooks invoice ${name} exists, but the work order could not be updated (${error.message}). Click again to finish; no second invoice is created.`,
+    };
+  }
+  return done(woId, `QuickBooks invoice ${name} (created earlier) is now recorded. The work order is now Invoiced.`);
 }

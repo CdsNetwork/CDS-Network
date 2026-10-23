@@ -17,6 +17,7 @@ import {
   type MeasurementMappings,
   type TaxClass,
 } from "./invoice";
+import { pendingQbInvoice, type InvoiceSyncRow, type PendingQbInvoice } from "./pending";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 type MaybeOne<T> = T | T[] | null;
@@ -26,6 +27,8 @@ export type InvoiceState = {
   qbInvoiceId: string | null;
   qbInvoiceNumber: string | null;
   invoicedAt: string | null;
+  /** Created in QuickBooks but not recorded on the work order yet (see ./pending). */
+  pendingQb: PendingQbInvoice | null;
   result: BuildResult;
 };
 
@@ -64,7 +67,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     }>;
   };
 
-  const [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes] = await Promise.all([
+  const [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes, syncRes] = await Promise.all([
     supabase
       .from("work_order_internal")
       .select("tax_parts, tax_labor, tax_shipping, qb_invoice_id, qb_invoice_number, invoiced_at")
@@ -88,8 +91,17 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
       .from("qbo_measurement_map")
       .select("customer_id, component_type, qbo_item_id, qbo_item_name")
       .or(`customer_id.is.null,customer_id.eq.${wo.customer_id}`),
+    supabase
+      .from("integration_sync")
+      .select("status, external_id, error, at")
+      .eq("system", "quickbooks")
+      .eq("entity", "invoice")
+      .eq("entity_id", woId)
+      .eq("status", "ok")
+      .order("at", { ascending: false })
+      .limit(5),
   ]);
-  for (const r of [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes]) {
+  for (const r of [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes, syncRes]) {
     if (r.error) throw new Error(`Could not read the invoice details: ${r.error.message}`);
   }
 
@@ -229,6 +241,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     qbInvoiceId: internal?.qb_invoice_id ?? null,
     qbInvoiceNumber: internal?.qb_invoice_number ?? null,
     invoicedAt: internal?.invoiced_at ?? null,
+    pendingQb: internal?.qb_invoice_id ? null : pendingQbInvoice((syncRes.data ?? []) as InvoiceSyncRow[]),
     result: buildInvoicePayload(workOrder, lines, customerMap, itemMap, aliases, location, components, measurementMap),
   };
 }

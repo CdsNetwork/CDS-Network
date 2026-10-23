@@ -298,6 +298,28 @@ function InvoicePanel({
     );
   }
 
+  const pending = invoice?.pendingQb ?? null;
+  if (pending) {
+    const name = pending.number ?? `id ${pending.id}`;
+    return (
+      <section className="section panel-invoice">
+        <h3>Ready to Invoice</h3>
+        <div className="notice warning" role="status">
+          QuickBooks invoice <b>{name}</b> was created in QuickBooks {dateTime(pending.at)}, but the work order was not marked
+          Invoiced. Record it below; no second invoice is created.
+        </div>
+        <ActionForm
+          action={createQuickBooksInvoice.bind(null, woId)}
+          submitLabel={`Record QuickBooks invoice ${name}`}
+          pendingLabel="Recording invoice..."
+          buttonClass="btn btn-blue"
+          disabled={loadError}
+        />
+        {emailButton}
+      </section>
+    );
+  }
+
   const problems = invoice && !invoice.result.ok ? invoice.result.problems : [];
   const warnings = invoice?.result.warnings ?? [];
   return (
