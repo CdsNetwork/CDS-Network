@@ -29,7 +29,7 @@ type Row = {
   updated_at: string;
   status: WoStatus;
   location_label: string;
-  unit_number: string;
+  unit_number: string | null;
   po_number: string | null;
   vin: string | null;
   mileage: number | null;

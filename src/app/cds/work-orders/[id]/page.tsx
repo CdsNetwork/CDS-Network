@@ -70,7 +70,7 @@ type WorkOrder = {
   request_type: string;
   fulfillment: string;
   affiliate_id: string | null;
-  unit_number: string;
+  unit_number: string | null;
   po_number: string | null;
   requested_work: string;
   vin: string | null;
@@ -577,7 +577,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         <div className="title">
           <h1>{woLabel(wo.wo_number)}</h1>
           <p>
-            {customer?.name ?? "Unknown customer"} • {wo.location_label} • Unit {wo.unit_number}
+            {customer?.name ?? "Unknown customer"} • {wo.location_label} • Unit {wo.unit_number ?? "-"}
           </p>
         </div>
         <div className="row">
@@ -1156,7 +1156,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                     <label htmlFor="edit-unit">
                       Unit # <span className="req">*</span>
                     </label>
-                    <input id="edit-unit" name="unit_number" className="input" defaultValue={wo.unit_number} required maxLength={100} />
+                    <input id="edit-unit" name="unit_number" className="input" defaultValue={wo.unit_number ?? ""} required maxLength={100} />
                   </div>
                   <div className="field">
                     <label htmlFor="edit-po">PO #</label>

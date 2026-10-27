@@ -55,7 +55,7 @@ type Job = {
   fulfillment: string;
   location_label: string;
   site_address: string | null;
-  unit_number: string;
+  unit_number: string | null;
   po_number: string | null;
   requested_work: string;
   pickup_window: string | null;
@@ -221,7 +221,7 @@ export function ShopPreview({ data }: { data: PreviewData }) {
           {woLabel(job.wo_number)} · {customer} - {job.location_label}
         </h2>
         <div>
-          Unit {job.unit_number} · PO {job.po_number || "-"}
+          Unit {job.unit_number ?? "-"} · PO {job.po_number || "-"}
         </div>
         {job.site_address && (
           <div className="small" style={{ marginTop: 4 }}>

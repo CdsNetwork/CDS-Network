@@ -17,6 +17,7 @@ const LABELS = [
   "Pick Up Location",
   "Pick Up Address",
   "Ship to City, State, ZIP",
+  "Ship to City, State",
   "City",
   "State",
   "ZIP",
@@ -30,6 +31,18 @@ const LABELS = [
 ] as const;
 
 const BODY_MARKERS = ["Customer Name", "Date Requested", "Pick Up Location", "Unit #", "PO #"] as const;
+
+/**
+ * The form is a table of four cells per row. Its text part puts a row on one line, with the
+ * tabs between cells expanded to spaces, so these labels are also read inside a line. City
+ * and State are left out: they are common words in a place name.
+ */
+const INLINE = LABELS.filter((l) => l !== "City" && l !== "State");
+
+/** The service list the form repeats in some cells (`["DPF Cleaning "] Manufacturer`). */
+const SERVICE_LIST = /\[\s*"[^\]]*"\s*\]/g;
+/** Links a mail app adds to a quoted form: `400 Example Rd<https://maps...>`, `0424118850<tel:...>`. */
+const LINKS = /<(?:https?|tel|mailto):[^>\s]*>/gi;
 
 type Service = { re: RegExp; item: (name: string) => TemplateItem };
 const svc = (sku: string, component: Component) => (name: string): TemplateItem => ({
@@ -83,7 +96,8 @@ export function isRyder(subject: string, text: string): boolean {
 export function parseRyder(subject: string, text: string): TemplateResult | null {
   const s = subject.match(SUBJECT);
   if (!s) return null;
-  const v = readLabels(text, LABELS);
+  // The service list repeated in a cell, and links a mail app added, are not part of a value.
+  const v = readLabels(text.replace(SERVICE_LIST, " ").replace(LINKS, ""), LABELS, ["COMMENTS"], { inline: INLINE, stacked: true });
   const warnings: string[] = [];
 
   const names = serviceNames(s[3]);
@@ -104,7 +118,12 @@ export function parseRyder(subject: string, text: string): TemplateResult | null
 
   const po = v["PO #"];
   if (po && !/^\d{10}$/.test(po.replace(/\s/g, ""))) warnings.push(`Ryder PO ${po} is not 10 digits: check the PO.`);
-  const cityLine = v["Ship to City, State, ZIP"] ?? ([v.City, v.State, v.ZIP].filter(Boolean).join(", ") || null);
+  // A ZIP that lost its leading zero ("7074" for 07074).
+  const zip = v.ZIP && /^\d{4}$/.test(v.ZIP) ? `0${v.ZIP}` : v.ZIP;
+  const cityLine =
+    v["Ship to City, State, ZIP"] ??
+    (v["Ship to City, State"] ? [v["Ship to City, State"], zip].filter(Boolean).join(" ") : null) ??
+    ([v.City, v.State, zip].filter(Boolean).join(", ") || null);
   const address = [v["Pick Up Address"], cityLine].filter(Boolean).join(", ") || null;
   const returnToLocation = items.some((i) => i.returnToLocation);
 

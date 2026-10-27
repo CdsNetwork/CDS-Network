@@ -68,24 +68,67 @@ const escape = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * Reads "Label: value" lines. A label is matched at the start of a line, followed by a colon,
  * a tab (HTML table cells), two spaces or the end of the line. An empty value is null. Labels
  * listed in `multiline` also take the following lines up to a blank line or another label.
+ *
+ * Options for a table of several label and value cells per row:
+ *  * `inline`: these labels are also found later in a line that starts with a label, after
+ *    whitespace, with a single space before the value and written exactly (case included).
+ *    A row arrives as one line of text ("Unit #  284113  Manufacturer  Cummins", tabs
+ *    expanded to spaces). Each label is read once, at its first place, so the same word
+ *    later in a value ("Region  North Region") stays in the value.
+ *  * `stacked`: a label alone on its line takes the next line as its value, unless that line
+ *    is empty or starts with a label (each cell on its own line, as some mail apps quote it).
  */
-export function readLabels<L extends string>(text: string, labels: readonly L[], multiline: readonly L[] = []): Record<L, string | null> {
+export function readLabels<L extends string>(
+  text: string,
+  labels: readonly L[],
+  multiline: readonly L[] = [],
+  options: { inline?: readonly L[]; stacked?: boolean } = {},
+): Record<L, string | null> {
+  const inline = options.inline ?? [];
   const lines = text.split("\n").map((l) => l.replace(/ /g, " ").trim());
   // Longest first, so "Ship to City, State, ZIP" wins over a shorter label at the same start.
   const ordered = [...labels].sort((a, b) => b.length - a.length);
   const res = ordered.map((label) => ({ label, re: new RegExp(String.raw`^${escape(label)}\s*(?::|\t|\s{2,}|$)\s*(.*)$`, "i") }));
   const labelAt = (line: string) => res.find(({ re }) => re.test(line));
+  const inlineRes = ordered
+    .filter((l) => inline.includes(l))
+    .map((label) => ({ label, re: new RegExp(String.raw`(?<=^|\s)${escape(label)}(?=\s|:|$)`, "g") }));
   const out = Object.fromEntries(labels.map((l) => [l, null])) as Record<L, string | null>;
+  const seen = new Set<L>();
   for (let i = 0; i < lines.length; i++) {
-    const hit = labelAt(lines[i]);
-    if (!hit || out[hit.label] !== null) continue;
-    let value = clean(lines[i].match(hit.re)![1]);
-    if (multiline.includes(hit.label)) {
-      const more: string[] = value ? [value] : [];
-      for (let j = i + 1; j < lines.length && lines[j] && !labelAt(lines[j]); j++) more.push(clean(lines[j]));
-      value = more.filter(Boolean).join("\n");
+    const line = lines[i];
+    const hit = labelAt(line);
+    // Where each label of the line starts and ends, in order: the next label ends a value.
+    const cells: { label: L; start: number; end: number }[] = [];
+    // A label at the start of the line is read while it has no value yet, as before.
+    if (hit && out[hit.label] === null) cells.push({ label: hit.label, start: 0, end: line.length - line.match(hit.re)![1].length });
+    if (hit) seen.add(hit.label);
+    const later = inlineRes
+      .flatMap(({ label, re }) => [...line.matchAll(re)].map((m) => ({ label, start: m.index, end: m.index + label.length })))
+      .sort((a, b) => a.start - b.start || b.end - a.end);
+    // Only a row (a line that starts with a label) holds more labels: "the PO # to ..." in a
+    // sentence is not one.
+    const row = !!hit || later.some((h) => h.start === 0);
+    for (const h of row ? later : []) {
+      const last = cells[cells.length - 1];
+      if ((last && h.start < last.end) || seen.has(h.label) || cells.some((c) => c.label === h.label)) continue;
+      cells.push(h);
     }
-    out[hit.label] = value || null;
+    for (let k = 0; k < cells.length; k++) {
+      const { label, start, end } = cells[k];
+      seen.add(label);
+      let value = clean(line.slice(end, cells[k + 1]?.start ?? line.length).replace(/^\s*:?\s*/, ""));
+      const alone = start === 0 && cells.length === 1;
+      const startsWithLabel = (l: string) => !!labelAt(l) || inlineRes.some(({ re }) => new RegExp(`^${re.source}`).test(l));
+      if (alone && multiline.includes(label)) {
+        const more: string[] = value ? [value] : [];
+        for (let j = i + 1; j < lines.length && lines[j] && !startsWithLabel(lines[j]); j++) more.push(clean(lines[j]));
+        value = more.filter(Boolean).join("\n");
+      } else if (alone && !value && options.stacked && lines[i + 1] && !startsWithLabel(lines[i + 1])) {
+        value = clean(lines[i + 1]);
+      }
+      out[label] = value || null;
+    }
   }
   return out;
 }

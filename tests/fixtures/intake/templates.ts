@@ -126,6 +126,85 @@ export const ryderPoIssued = email({
   attachments: [{ filename: "RyderPO_0424118833.pdf", contentType: "application/pdf", size: 20480 }],
 });
 
+/** A table row as the text part of the Ryder form carries it: cells joined by tabs expanded to 8-column stops. */
+const tabRow = (...cells: string[]) =>
+  cells.reduce((out, cell, i) => (i === cells.length - 1 ? out + cell : out + cell + " ".repeat(8 - ((out + cell).length % 8))), "");
+
+/**
+ * The Ryder form's text part: four cells per row, so a label, its value and the next label
+ * share a line, and the service list leaks into the Manufacturer and Serial # cells.
+ */
+function ryderTextForm(o: { list: string; unit: string; manufacturer: string; po: string; comments: string }): string {
+  return [
+    "Hello Team CDS,",
+    "",
+    `Please see below for a ${o.list} pickup`,
+    "",
+    "Clean Diesel Specialists Pick Up Request",
+    tabRow("Customer Name", "Ryder System Inc", "Region", "North Region"),
+    tabRow("Date Requested", "10/27/2026", "Order Type", "G14 Classified"),
+    tabRow("Pick Up Location", "Ryder - LAKEMONT"),
+    tabRow("Pick Up Address", "400 Example Rd"),
+    tabRow("Ship to City, State", "LAKEMONT, PA", "ZIP", "15000"),
+    tabRow("Unit #", o.unit, `${o.list} Manufacturer`, o.manufacturer),
+    "Miles",
+    tabRow(`${o.list} Serial #`, "", "PO #", o.po),
+    "Part #",
+    "COMMENTS",
+    o.comments,
+    "",
+    "Thank you,",
+    "Project Desk",
+  ].join("\n");
+}
+
+/** The real text layout of the form, with a unit number. */
+export const ryderTextRows = email({
+  from: RYDER_FROM,
+  to: ["ryder@cds.direct"],
+  subject: '***Ryder Location 424-LAKEMONT has a ["DPF Cleaning ","DPF Clamps and Gaskets "] ready for pick up***',
+  text: ryderTextForm({
+    list: '["DPF Cleaning ","DPF Clamps and Gaskets "]',
+    unit: "284177",
+    manufacturer: "Detroit",
+    po: "0424118850",
+    comments: "please send clamps and gaskets",
+  }),
+});
+
+/**
+ * A reply on that request: the dispatcher's sentence names "PO #" first, and the mail app
+ * turned the quoted address and PO into links.
+ */
+export const ryderTextRowsReply = email({
+  from: "Dana Sample <dana_sample@ryder.example>",
+  to: ["ryder@cds.direct"],
+  subject: `Re: ${ryderTextRows.subject}`,
+  inReplyTo: "<dispatch-reply-1@cds.example>",
+  text: [
+    "The filter is on the rack.",
+    "",
+    "From: Central Dispatch <dispatch@cds.direct>",
+    `Subject: Re: ${ryderTextRows.subject}`,
+    "",
+    "Please ensure your filter is marked with your location name and PO # to avoid any mix ups.",
+    "",
+    "On Tue, Oct 27, 2026 at 11:43 AM 'Central Desk' via Ryder Dispatch <ryder@cds.direct> wrote:",
+    "",
+    ryderTextRows
+      .text!.replace("400 Example Rd", "400 Example Rd<https://maps.example/search/400+Example+Rd>")
+      .replace("0424118850", "0424118850<tel:(042)%20411-8850>"),
+  ].join("\n"),
+});
+
+/** The same layout with the unit and manufacturer left empty. */
+export const ryderTextRowsNoUnit = email({
+  from: RYDER_FROM,
+  to: ["ryder@cds.direct"],
+  subject: '***Ryder Location 424-LAKEMONT has a ["DPF Cleaning "] ready for pick up***',
+  text: ryderTextForm({ list: '["DPF Cleaning "]', unit: "", manufacturer: "", po: "0424118851", comments: "" }),
+});
+
 // ---------------------------------------------------------------- First Student iProcure
 
 const IPROCURE_FROM = "Administrator - iProcure <notify@iprocure.example>";

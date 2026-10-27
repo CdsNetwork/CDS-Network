@@ -83,7 +83,7 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
           {woLabel(job.wo_number)} • {job.customer_name} - {job.location_label}
         </h2>
         <div>
-          Unit {job.unit_number} • PO {job.po_number || "-"}
+          Unit {job.unit_number ?? "-"} • PO {job.po_number || "-"}
         </div>
         {job.site_address && <div className="small" style={{ marginTop: 4 }}>{job.site_address}</div>}
         <div className="row" style={{ marginTop: 10 }}>

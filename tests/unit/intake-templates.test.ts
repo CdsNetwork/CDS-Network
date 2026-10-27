@@ -135,6 +135,46 @@ describe("Ryder pick up request", () => {
     expect(p.warnings.join(" ")).toMatch(/PO.*10 digits/);
   });
 
+  it("reads the unit number alone from the text form, where a row holds two labels and the service list", async () => {
+    const p = await parseTemplate(t.ryderTextRows);
+    const f = p.fields;
+    expect(f.unit_number.value).toBe("284177");
+    expect(f.manufacturer?.value).toBe("Detroit");
+    expect(f.po_number.value).toBe("0424118850");
+    expect(f.serial_number?.value ?? null).toBeNull();
+    expect(f.mileage?.value ?? null).toBeNull();
+    expect(f.region?.value).toBe("North Region");
+    expect(f.requested_date?.value).toBe("2026-10-27");
+    expect(f.order_type?.value).toBe("G14 Classified");
+    expect(f.location_name?.value).toBe("Ryder - LAKEMONT");
+    expect(f.location_address.value).toBe("400 Example Rd, LAKEMONT, PA 15000");
+    expect(f.comments?.value).toBe("please send clamps and gaskets");
+    expect(p.location?.id).toBe(loc0424.id);
+    const d = buildDraftParams(EMAIL_ID, t.ryderTextRows, p);
+    if (!d.ok) throw new Error(d.reason);
+    expect(d.params.p_unit_number).toBe("284177");
+    expect(d.params.p_po_number).toBe("0424118850");
+  });
+
+  it("reads the quoted text form of a reply, not the PO named in the dispatcher's sentence", async () => {
+    const p = await parseTemplate(t.ryderTextRowsReply);
+    expect(p.fields.unit_number.value).toBe("284177");
+    expect(p.fields.po_number.value).toBe("0424118850");
+    expect(p.fields.location_address.value).toBe("400 Example Rd, LAKEMONT, PA 15000");
+  });
+
+  it("leaves the unit number empty when the text form has none", async () => {
+    const p = await parseTemplate(t.ryderTextRowsNoUnit);
+    expect(p.fields.unit_number.value).toBeNull();
+    expect(p.fields.manufacturer?.value ?? null).toBeNull();
+    expect(p.fields.po_number.value).toBe("0424118851");
+    expect(p.fields.comments?.value ?? null).toBeNull();
+    const d = buildDraftParams(EMAIL_ID, t.ryderTextRowsNoUnit, p);
+    if (!d.ok) throw new Error(d.reason);
+    expect(d.params.p_unit_number).toBeNull();
+    expect(d.params.p_review_reason).toMatch(/missing .*unit number/);
+  });
+
   it("is read as a template even as a reply on a thread", async () => {
     const p = await parseTemplate({ ...t.ryderEgrReturn, inReplyTo: "<x@ryder.example>" });
     expect(p.is_work_request).toBe(true);

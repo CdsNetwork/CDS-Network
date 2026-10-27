@@ -14,7 +14,7 @@ type Row = {
   status: WoStatus;
   created_at: string;
   location_label: string;
-  unit_number: string;
+  unit_number: string | null;
   po_number: string | null;
   customers: { name: string } | { name: string }[] | null;
   affiliates: { display_name: string } | { display_name: string }[] | null;

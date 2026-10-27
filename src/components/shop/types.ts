@@ -38,7 +38,7 @@ export type JobRow = {
   fulfillment: "pickup" | "shipping" | "supplier_direct" | "unspecified";
   location_label: string;
   site_address: string | null;
-  unit_number: string;
+  unit_number: string | null;
   po_number: string | null;
   requested_work: string;
   pickup_window: string | null;

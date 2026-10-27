@@ -30,7 +30,7 @@ export type BackupOrder = {
   locationCode: string | null;
   location: string;
   shop: string | null;
-  unitNumber: string;
+  unitNumber: string | null;
   poNumber: string | null;
   vin: string | null;
   mileage: number | null;
@@ -107,7 +107,7 @@ export function toRow(o: BackupOrder): Cell[] {
     o.locationCode ?? "",
     o.location,
     o.shop ?? "",
-    o.unitNumber,
+    o.unitNumber ?? "",
     o.poNumber ?? "",
     o.vin ?? "",
     o.mileage ?? "",

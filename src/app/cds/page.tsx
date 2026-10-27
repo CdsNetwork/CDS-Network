@@ -30,7 +30,7 @@ type WoRow = {
   wo_number: number;
   status: WoStatus;
   location_label: string;
-  unit_number: string;
+  unit_number: string | null;
   po_number: string | null;
   customers: Named | Named[];
   affiliates: Shop | Shop[];
