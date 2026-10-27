@@ -210,7 +210,7 @@ describe("intake_create_draft_work_order", () => {
   });
 
   it("leaves the unit number empty when the email gives none", async () => {
-    const email = await insertEmail(14);
+    const email = await insertEmail(15);
     const r = await admin.rpc("intake_create_draft_work_order", draftArgs(email, { p_unit_number: null }));
     expect(r.error).toBeNull();
     const order = await must(admin.from("work_orders").select("unit_number").eq("id", r.data as string).single());
