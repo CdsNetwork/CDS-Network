@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { emailAddress, intakeMailbox } from "./email";
 import { pacificToday } from "@/lib/dates";
 import { fetchAll } from "@/lib/supabase/fetch-all";
-import type { IntakeStatus, IntakeStore, StoredEmail } from "./process";
+import type { IntakeStatus, IntakeStore, RecentOrder, StoredEmail } from "./process";
 import { splitCatalog, type AliasRef, type CatalogRef, type CustomerRef, type DomainRef, type IntakeReference, type LocationRef, type NormalizedEmail } from "./types";
 
 type EmailRow = {
@@ -194,6 +194,56 @@ export function supabaseIntakeStore(client: SupabaseClient, actorId: string | nu
       const { data, error } = await client.rpc("intake_create_draft_work_order", params);
       if (error || !data) throw new Error(error?.message ?? "The draft work order could not be created.");
       return data as string;
+    },
+
+    async threadEmail(messageId) {
+      const { data, error } = await client
+        .from("inbound_emails")
+        .select("in_reply_to, work_order_id, thread_reference:parsed->thread_reference")
+        .eq("provider_message_id", messageId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) return null;
+      const r = data as { in_reply_to: string | null; work_order_id: string | null; thread_reference: { work_order_id?: unknown } | null };
+      const linked = typeof r.thread_reference?.work_order_id === "string" ? r.thread_reference.work_order_id : null;
+      const workOrderId = r.work_order_id ?? linked;
+      type Order = { wo_number: number; status: string };
+      let order: Order | null = null;
+      if (workOrderId) {
+        const wo = await client.from("work_orders").select("wo_number, status").eq("id", workOrderId).maybeSingle();
+        if (wo.error) throw new Error(wo.error.message);
+        order = (wo.data as Order | null) ?? null;
+      }
+      return {
+        inReplyTo: r.in_reply_to,
+        workOrderId: order ? workOrderId : null,
+        woNumber: order ? Number(order.wo_number) : null,
+        workOrderStatus: order?.status ?? null,
+      };
+    },
+
+    async recentOrders(customerId, since): Promise<RecentOrder[]> {
+      const { data, error } = await client
+        .from("work_orders")
+        .select("id, wo_number, location_id, unit_number, created_at, inbound_emails!inbound_emails_work_order_id_fkey(subject)")
+        .eq("customer_id", customerId)
+        .gte("created_at", since)
+        .not("status", "in", "(cancelled,invoiced)")
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (error) throw new Error(error.message);
+      type Row = { id: string; wo_number: number; location_id: string | null; unit_number: string | null; created_at: string; inbound_emails: { subject: string | null }[] | { subject: string | null } | null };
+      return ((data ?? []) as unknown as Row[]).map((r) => {
+        const email = Array.isArray(r.inbound_emails) ? r.inbound_emails[0] : r.inbound_emails;
+        return {
+          id: r.id,
+          woNumber: Number(r.wo_number),
+          locationId: r.location_id,
+          unitNumber: r.unit_number,
+          createdAt: r.created_at,
+          subject: email?.subject ?? null,
+        };
+      });
     },
   };
 }

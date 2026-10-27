@@ -9,6 +9,7 @@
 import { buildDraftParams, type DraftParams } from "./draft";
 import type { LlmExtractor } from "./llm";
 import { parseEmail } from "./parse";
+import { findThreadOrder, isReplyOrForward } from "./thread";
 import type { IntakeReference, NormalizedEmail, ParsedEmail } from "./types";
 
 export type IntakeStatus = "new" | "parsed" | "failed" | "ignored" | "converted";
@@ -38,6 +39,24 @@ export type IntakeStore = {
   notePoReference?(id: string, poNumber: string): Promise<{ workOrderId: string; woNumber: number } | null>;
   /** Creates the draft order and marks the email converted (one transaction, in the database). */
   createDraft(params: DraftParams): Promise<string>;
+  /**
+   * The stored email with this message id, for following a reply up its thread: its own
+   * In-Reply-To, and the work order it made or was linked to (with that order's number and status).
+   */
+  threadEmail?(messageId: string): Promise<ThreadEmail | null>;
+  /** The customer's orders created since the date, newest first, without cancelled and invoiced ones. */
+  recentOrders?(customerId: string, since: string): Promise<RecentOrder[]>;
+};
+
+export type ThreadEmail = { inReplyTo: string | null; workOrderId: string | null; woNumber: number | null; workOrderStatus: string | null };
+export type RecentOrder = {
+  id: string;
+  woNumber: number | null;
+  locationId: string | null;
+  unitNumber: string | null;
+  createdAt: string;
+  /** The subject of the email that made the order, if one did. */
+  subject: string | null;
 };
 
 export type IntakeOutcome = {
@@ -103,6 +122,16 @@ export async function processEmail(
       }
       await store.saveResult(id, { status: "ignored", parsed, error: null, attempts });
       return outcome("ignored", null, parsed.ignore_reason);
+    }
+    // A reply or forward of a request that already has an order is noted, not a second draft.
+    if (!options.forceWorkRequest && isReplyOrForward(row.email)) {
+      const thread = await findThreadOrder(store, row.email, parsed);
+      if (thread) {
+        const reason = `Reply on the thread of work order ${thread.wo_number ?? "(no number)"}: no new draft.`;
+        parsed = { ...parsed, is_work_request: false, ignore_kind: "thread_reply", ignore_reason: reason, thread_reference: thread };
+        await store.saveResult(id, { status: "ignored", parsed, error: null, attempts });
+        return outcome("ignored", null, reason);
+      }
     }
     const decision = buildDraftParams(id, row.email, parsed);
     // Store what was read first, so it is kept even if creating the order fails.

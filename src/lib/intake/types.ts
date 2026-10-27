@@ -123,7 +123,13 @@ export type ItemMatch = {
 export type TemplateName = "ryder" | "first_student_iprocure" | "website_form";
 
 /** Why an email is not a request: replies, invoices, carrier notices, CDS's own mail and so on. */
-export type IgnoreKind = "reply" | "invoice" | "carrier" | "security" | "cds_sent" | "ryder_po" | "forwarding_confirmation";
+export type IgnoreKind = "reply" | "invoice" | "carrier" | "security" | "cds_sent" | "ryder_po" | "forwarding_confirmation" | "thread_reply";
+
+/**
+ * A reply or forward of a request that already has a work order: found by the thread
+ * (In-Reply-To), or by the same location and unit, or the same subject, on a recent open order.
+ */
+export type ThreadReference = { work_order_id: string; wo_number: number | null; via: "thread" | "unit" | "subject" };
 
 /** Fields read from the templates (and XPO free text) beyond the original set. */
 export type DetailFields = {
@@ -160,6 +166,8 @@ export type ParsedEmail = {
   mailbox?: string | null;
   /** A Ryder PO issued email noted on the open order with that PO number. */
   po_reference?: { po_number: string; work_order_id: string | null; wo_number: number | null } | null;
+  /** A reply or forward linked to the work order its request already has: no new draft. */
+  thread_reference?: ThreadReference | null;
   original_sender: string | null;
   llm: { used: boolean; model: string | null; error: string | null };
   fields: {

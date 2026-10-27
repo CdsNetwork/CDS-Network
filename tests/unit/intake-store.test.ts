@@ -83,3 +83,69 @@ describe("supabaseIntakeStore.reference", () => {
     expect(ids(fake)).toEqual(ids(real));
   });
 });
+
+describe("supabaseIntakeStore thread lookups", () => {
+  /** A client that answers each table with fixed rows filtered by eq(), and records the calls. */
+  function threadClient(rows: Record<string, Record<string, unknown>[]>) {
+    const selects: Record<string, string> = {};
+    const client = {
+      from(table: string) {
+        const filters: [string, unknown][] = [];
+        const result = () => ({ data: (rows[table] ?? []).filter((r) => filters.every(([c, v]) => r[c] === v)), error: null });
+        const chain = {
+          select(columns: string) {
+            selects[table] = columns;
+            return chain;
+          },
+          eq(column: string, value: unknown) {
+            filters.push([column, value]);
+            return chain;
+          },
+          gte: () => chain,
+          not: () => chain,
+          order: () => chain,
+          limit: async () => result(),
+          maybeSingle: async () => ({ data: result().data[0] ?? null, error: null }),
+        };
+        return chain;
+      },
+    };
+    return { client, selects };
+  }
+
+  it("gives the order a stored email made or was linked to, with its number and status", async () => {
+    const { supabaseIntakeStore } = await import("@/lib/intake/supabase-store");
+    const { client } = threadClient({
+      inbound_emails: [
+        { provider_message_id: "<a@x>", in_reply_to: null, work_order_id: "wo-1", thread_reference: null },
+        { provider_message_id: "<b@x>", in_reply_to: "<a@x>", work_order_id: null, thread_reference: { work_order_id: "wo-1", wo_number: 101370, via: "thread" } },
+        { provider_message_id: "<c@x>", in_reply_to: "<b@x>", work_order_id: null, thread_reference: null },
+      ],
+      work_orders: [{ id: "wo-1", wo_number: 101370, status: "pending_review" }],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const store = supabaseIntakeStore(client as any);
+    const expected = { inReplyTo: null, workOrderId: "wo-1", woNumber: 101370, workOrderStatus: "pending_review" };
+    expect(await store.threadEmail!("<a@x>")).toEqual(expected);
+    expect(await store.threadEmail!("<b@x>")).toEqual({ ...expected, inReplyTo: "<a@x>" });
+    expect(await store.threadEmail!("<c@x>")).toEqual({ inReplyTo: "<b@x>", workOrderId: null, woNumber: null, workOrderStatus: null });
+    expect(await store.threadEmail!("<missing@x>")).toBeNull();
+  });
+
+  it("lists the customer's recent orders with the subject of the email that made each", async () => {
+    const { supabaseIntakeStore } = await import("@/lib/intake/supabase-store");
+    const { client, selects } = threadClient({
+      work_orders: [
+        { id: "wo-1", customer_id: "c1", wo_number: 101370, location_id: "l1", unit_number: "284177", created_at: "2026-10-27T17:43:00Z", inbound_emails: [{ subject: "***Ryder***" }] },
+        { id: "wo-2", customer_id: "c1", wo_number: 101371, location_id: null, unit_number: null, created_at: "2026-10-27T18:00:00Z", inbound_emails: [] },
+      ],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orders = await supabaseIntakeStore(client as any).recentOrders!("c1", "2026-10-13T00:00:00Z");
+    expect(orders).toEqual([
+      { id: "wo-1", woNumber: 101370, locationId: "l1", unitNumber: "284177", createdAt: "2026-10-27T17:43:00Z", subject: "***Ryder***" },
+      { id: "wo-2", woNumber: 101371, locationId: null, unitNumber: null, createdAt: "2026-10-27T18:00:00Z", subject: null },
+    ]);
+    expect(selects.work_orders).toContain("inbound_emails!inbound_emails_work_order_id_fkey(subject)");
+  });
+});
