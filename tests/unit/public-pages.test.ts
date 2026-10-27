@@ -42,12 +42,13 @@ describe("legal pages", () => {
   it.each([
     ["terms", "Terms of Use"],
     ["privacy", "Privacy Policy"],
-  ])("/legal/%s renders the content file with the draft notice", async (name, title) => {
+  ])("/legal/%s renders the approved content file without the draft notice or open items", async (name, title) => {
     const pages = { terms: () => import("@/app/legal/terms/page"), privacy: () => import("@/app/legal/privacy/page") };
     const { default: Page } = await pages[name as "terms" | "privacy"]();
     const html = renderToStaticMarkup(await Page());
     expect(html).toContain(title);
-    expect(html).toContain(DRAFT_NOTICE);
+    expect(html).not.toContain(DRAFT_NOTICE);
+    expect(html).not.toContain("CDS to confirm");
     expect(html).toContain("Clean Diesel Specialists, Inc.");
     expect(html).toContain('href="/legal/');
   });

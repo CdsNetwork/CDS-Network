@@ -1,10 +1,10 @@
 ---
 title: Privacy Policy
-updated: 2026-10-20
-draft: true
+updated: 2026-10-27
+draft: false
 ---
 
-This Privacy Policy explains how Clean Diesel Specialists, Inc., Anaheim, California ("CDS", "we", "us") collects, uses and protects information in the CDS Network Portal (the "Portal"). The Portal is an invite-only business tool used by CDS staff and the independent shops that work with CDS ("Affiliate Shops") to manage diesel emissions component work orders for CDS's fleet customers. It is not offered to consumers. [CDS to confirm: legal entity name and street address]
+This Privacy Policy explains how Clean Diesel Specialists, Inc., 220 W Santa Ana Street, Anaheim, CA 92805 ("CDS", "we", "us") collects, uses and protects information in the CDS Network Portal (the "Portal"). The Portal is an invite-only business tool used by CDS staff and the independent shops that work with CDS ("Affiliate Shops") to manage diesel emissions component work orders for CDS's fleet customers. It is not offered to consumers.
 
 ## 1. Information the Portal processes
 
@@ -28,7 +28,7 @@ This Privacy Policy explains how Clean Diesel Specialists, Inc., Anaheim, Califo
 
 ### Incoming work request emails
 
-- Work request emails sent to CDS's dispatch inbox: sender, recipients, subject, date, message text and the names of attachments. [CDS to confirm: which inboxes are forwarded to the Portal and how]
+- Emails received in CDS's dispatch inbox (dispatch@cds.direct), which forwards a copy of each incoming email to the Portal: sender, recipients, subject, date, message text and the names of attachments. Emails that are not work requests are set aside and not turned into work orders.
 
 ### Invoicing information
 
@@ -58,19 +58,19 @@ CDS can connect the Portal to CDS's own QuickBooks Online company through Intuit
 
 The Portal does not read bank accounts, payments, payroll, employees or other accounting data.
 
-The access and refresh tokens Intuit issues are encrypted (AES-256-GCM) before they are stored and are only readable by the Portal's server. Only CDS staff can connect or disconnect QuickBooks. You can disconnect at any time: in the Portal (Admin, Settings, Disconnect QuickBooks), which revokes the tokens at Intuit and deletes them from the Portal, or in QuickBooks (Settings, Apps). After a disconnect the Portal can no longer read from or write to QuickBooks. Invoices already created stay in QuickBooks, and the QuickBooks ids and names linked to Portal customers and items stay in the Portal until CDS removes them. [CDS to confirm: QuickBooks company the Portal will connect to in production]
+The access and refresh tokens Intuit issues are encrypted (AES-256-GCM) before they are stored and are only readable by the Portal's server. Only CDS staff can connect or disconnect QuickBooks. You can disconnect at any time: in the Portal (Admin, Settings, Disconnect QuickBooks), which revokes the tokens at Intuit and deletes them from the Portal, or in QuickBooks (Settings, Apps). After a disconnect the Portal can no longer read from or write to QuickBooks. Invoices already created stay in QuickBooks, and the QuickBooks ids and names linked to Portal customers and items stay in the Portal until CDS removes them.
 
 ## 4. Service providers (subprocessors)
 
 We share information only with service providers that run the Portal for us, and only as needed for the purposes above:
 
-- **Supabase**: database, user authentication and file storage (photos and files). [CDS to confirm: hosting region, expected United States]
+- **Supabase**: database, user authentication and file storage (photos and files), hosted in the United States.
 - **Vercel**: hosting of the Portal's web application.
 - **Intuit (QuickBooks Online)**: invoicing, as described in section 3.
 - **ShipStation**, with the carriers **FedEx** and **UPS** (UPS through Worldwide Express): shipping labels, rates and tracking. Addresses, contact names, phone numbers and package details are sent to create labels.
-- **Resend**: delivery of login emails (invitations and password resets) from the cds.direct domain.
-- **Anthropic**: the text of incoming work request emails (and the names of their attachments) is sent to Anthropic's API so its Claude model can read it into a draft work order. [CDS to confirm: Anthropic account and data retention settings]
-- **Google**: CDS's email (Google Workspace) and a backup of work order records to Google Sheets. [CDS to confirm: Google Sheets backup, not yet in use]
+- **Resend**: delivery of login emails (invitations and password resets) from the cds.direct domain, and receiving the copies of incoming emails forwarded from CDS's dispatch inbox.
+- **Anthropic**: the text of incoming work request emails (and the names of their attachments) is sent to Anthropic's API so its Claude model can read it into a draft work order. Under Anthropic's commercial terms this data is not used to train its models.
+- **Google**: CDS's email (Google Workspace) and a backup copy of work order records in a Google Sheet in CDS's own Google account.
 
 We may also disclose information when required by law, to protect our rights or the safety of others, or as part of a sale or reorganization of CDS's business.
 
@@ -91,7 +91,7 @@ No system is perfectly secure. If we learn of a security incident that affects y
 
 ## 7. Retention
 
-We keep work order, shipping and invoicing records for as long as CDS needs them to run its business and to meet legal, tax and accounting obligations. [CDS to confirm: retention period for work orders, photos, incoming emails and change records, for example 7 years] Logins are deactivated when a person or shop no longer works with CDS. QuickBooks tokens are deleted when QuickBooks is disconnected.
+We keep work orders, photos, incoming emails, shipping and invoicing records and change records for 7 years, to run CDS's business and to meet legal, tax and accounting obligations. Logins are deactivated when a person or shop no longer works with CDS. QuickBooks tokens are deleted when QuickBooks is disconnected.
 
 ## 8. Your choices and rights
 
@@ -107,6 +107,6 @@ We may update this Privacy Policy. The date at the top shows the latest version.
 
 ## 11. Contact
 
-Clean Diesel Specialists, Inc., Anaheim, California. [CDS to confirm: privacy contact email] [CDS to confirm: phone number and street address]
+Clean Diesel Specialists, Inc., 220 W Santa Ana Street, Anaheim, CA 92805, [Ashley@cds.direct](mailto:Ashley@cds.direct), 714-783-7792.
 
 See also the [Terms of Use](/legal/terms).

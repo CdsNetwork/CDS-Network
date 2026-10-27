@@ -1,10 +1,10 @@
 ---
 title: Terms of Use
-updated: 2026-10-20
-draft: true
+updated: 2026-10-27
+draft: false
 ---
 
-These Terms of Use (the "Terms") are an agreement between you and Clean Diesel Specialists, Inc., a California corporation with its office in Anaheim, California ("CDS", "we", "us"), and govern your use of the CDS Network Portal (the "Portal"). The Portal is CDS's own software for managing diesel emissions component work orders. By signing in to or using the Portal you agree to these Terms. If you use the Portal for a company (for example a shop in the CDS network), you confirm that you may accept these Terms for that company. [CDS to confirm: legal entity name, state of incorporation and registered address]
+These Terms of Use (the "Terms") are an agreement between you and Clean Diesel Specialists, Inc., a California corporation at 220 W Santa Ana Street, Anaheim, CA 92805 ("CDS", "we", "us"), and govern your use of the CDS Network Portal (the "Portal"). The Portal is CDS's own software for managing diesel emissions component work orders. By signing in to or using the Portal you agree to these Terms. If you use the Portal for a company (for example a shop in the CDS network), you confirm that you may accept these Terms for that company.
 
 ## 1. Who may use the Portal
 
@@ -46,7 +46,7 @@ The Portal works with services provided by other companies, including Intuit Qui
 
 Work order information, measurements, photos and other information entered into the Portal is used to perform and invoice the work and to run CDS's business. You confirm that you have the right to provide the information you enter, and you allow CDS to store, use and share it as needed for that purpose and as described in the [Privacy Policy](/legal/privacy). The Portal software, its design and its content (other than the information you enter) belong to CDS or its licensors. CDS grants you a limited, non-exclusive, non-transferable right to use the Portal for the purposes in these Terms while your login is active.
 
-[CDS to confirm: whether a separate written agreement with Affiliate Shops (rates, payment terms, confidentiality) takes priority over these Terms where they differ]
+If an Affiliate Shop has a separate written agreement with CDS (for example about rates, payment terms or confidentiality), that agreement applies alongside these Terms and takes priority where the two differ.
 
 ## 6. Availability and changes
 
@@ -54,11 +54,11 @@ CDS works to keep the Portal available and accurate, but it may be unavailable a
 
 ## 7. Disclaimer
 
-To the fullest extent the law allows, the Portal is provided "as is" and "as available", without warranties of any kind, whether express or implied, including warranties of merchantability, fitness for a particular purpose and non-infringement. [CDS to confirm: disclaimer wording with counsel]
+To the fullest extent the law allows, the Portal is provided "as is" and "as available", without warranties of any kind, whether express or implied, including warranties of merchantability, fitness for a particular purpose and non-infringement.
 
 ## 8. Limitation of liability
 
-To the fullest extent the law allows, CDS will not be liable for any indirect, incidental, special, consequential or punitive damages, or for lost profits, revenue or data, arising from your use of the Portal. CDS's total liability for any claim about the Portal is limited to [CDS to confirm: liability cap, for example the amount paid for the related work order or USD 100]. Nothing in these Terms limits liability that cannot be limited by law.
+To the fullest extent the law allows, CDS will not be liable for any indirect, incidental, special, consequential or punitive damages, or for lost profits, revenue or data, arising from your use of the Portal. CDS's total liability for any claim about the Portal is limited to the amount of the work order the claim relates to. This limit concerns the Portal itself and does not change any separate written agreement, insurance or certificate of insurance requirements between you and CDS. Nothing in these Terms limits liability that cannot be limited by law.
 
 ## 9. Ending your access
 
@@ -66,7 +66,7 @@ You can stop using the Portal at any time by asking CDS to remove your login. CD
 
 ## 10. Governing law
 
-These Terms are governed by the laws of the State of California, without regard to its conflict of law rules. Any dispute will be brought in the state or federal courts located in Orange County, California, and you and CDS agree to their jurisdiction. [CDS to confirm: governing law, venue, and whether disputes go to arbitration]
+These Terms are governed by the laws of the State of California, without regard to its conflict of law rules. Any dispute will be brought in the state or federal courts located in Orange County, California, and you and CDS agree to their jurisdiction.
 
 ## 11. Changes to these Terms
 
@@ -74,4 +74,6 @@ CDS may update these Terms. The date at the top shows the latest version. If a c
 
 ## 12. Contact
 
-Questions about these Terms: Clean Diesel Specialists, Inc., Anaheim, California. [CDS to confirm: contact email, phone and street address for questions about these Terms]
+Questions about these Terms: Clean Diesel Specialists, Inc., 220 W Santa Ana Street, Anaheim, CA 92805, [Ashley@cds.direct](mailto:Ashley@cds.direct), 714-783-7792.
+
+Help with using the Portal (questions or problems): Clyde Stires, [clyde@cds.direct](mailto:clyde@cds.direct), 951-213-1951.
