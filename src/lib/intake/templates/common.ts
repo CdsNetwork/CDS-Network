@@ -75,8 +75,9 @@ const escape = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  *    A row arrives as one line of text ("Unit #  284113  Manufacturer  Cummins", tabs
  *    expanded to spaces). Each label is read once, at its first place, so the same word
  *    later in a value ("Region  North Region") stays in the value.
- *  * `stacked`: a label alone on its line takes the next line as its value, unless that line
- *    is empty or starts with a label (each cell on its own line, as some mail apps quote it).
+ *  * `stacked`: a label alone on its line takes the next line with text as its value, unless
+ *    that line starts with a label (each cell on its own line, as some mail apps quote it,
+ *    Outlook with a blank line between a label and its value).
  */
 export function readLabels<L extends string>(
   text: string,
@@ -124,8 +125,11 @@ export function readLabels<L extends string>(
         const more: string[] = value ? [value] : [];
         for (let j = i + 1; j < lines.length && lines[j] && !startsWithLabel(lines[j]); j++) more.push(clean(lines[j]));
         value = more.filter(Boolean).join("\n");
-      } else if (alone && !value && options.stacked && lines[i + 1] && !startsWithLabel(lines[i + 1])) {
-        value = clean(lines[i + 1]);
+      } else if (alone && !value && options.stacked) {
+        // The next line with text, past the blank lines a quoted form may put after a label.
+        let j = i + 1;
+        while (j < lines.length && !lines[j]) j++;
+        if (j < lines.length && !startsWithLabel(lines[j])) value = clean(lines[j]);
       }
       out[label] = value || null;
     }

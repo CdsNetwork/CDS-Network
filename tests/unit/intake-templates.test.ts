@@ -175,6 +175,37 @@ describe("Ryder pick up request", () => {
     expect(d.params.p_review_reason).toMatch(/missing .*unit number/);
   });
 
+  it.each([
+    ["text", t.ryderGapReply],
+    ["HTML", t.ryderGapReplyHtml],
+  ])("reads the unit and PO of a quoted form with a blank line between each label and its value (%s part)", async (_, email) => {
+    const p = await parseTemplate(email);
+    const f = p.fields;
+    expect(p.template).toBe("ryder");
+    expect(f.unit_number.value).toBe("540001");
+    expect(f.po_number.value).toBe("0424951800");
+    expect(f.manufacturer?.value).toBe("Detroit Diesel");
+    expect(f.part_number?.value).toBe("EA0024900001");
+    // Empty cells: the next label after the gap is not their value.
+    expect(f.mileage?.value ?? null).toBeNull();
+    expect(f.serial_number?.value ?? null).toBeNull();
+    expect(f.region?.value).toBe("South Region");
+    expect(f.requested_date?.value).toBe("2026-10-23");
+    expect(f.location_address.value).toBe("400 Example Rd, LAKEMONT, PA 15000");
+    expect(p.location?.id).toBe(loc0424.id);
+    const d = buildDraftParams(EMAIL_ID, email, p);
+    if (!d.ok) throw new Error(d.reason);
+    expect(d.params.p_unit_number).toBe("540001");
+    expect(d.params.p_po_number).toBe("0424951800");
+  });
+
+  it("does not take the next label as the unit when the gapped form's unit is empty", async () => {
+    const p = await parseTemplate(t.ryderGapReplyNoUnit);
+    expect(p.fields.unit_number.value).toBeNull();
+    expect(p.fields.manufacturer?.value).toBe("Detroit Diesel");
+    expect(p.fields.po_number.value).toBe("0424951800");
+  });
+
   it("is read as a template even as a reply on a thread", async () => {
     const p = await parseTemplate({ ...t.ryderEgrReturn, inReplyTo: "<x@ryder.example>" });
     expect(p.is_work_request).toBe(true);

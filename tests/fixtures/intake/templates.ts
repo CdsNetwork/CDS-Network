@@ -205,6 +205,114 @@ export const ryderTextRowsNoUnit = email({
   text: ryderTextForm({ list: '["DPF Cleaning "]', unit: "", manufacturer: "", po: "0424118851", comments: "" }),
 });
 
+/** The form's cells in order: label, value, label, value, ... ("" for an empty cell). */
+const RYDER_GAP_CELLS = (unit: string) => [
+  ["Customer Name", "Ryder System Inc"],
+  ["Region", "South Region"],
+  ["Date Requested", "10/23/2026"],
+  ["Order Type", "G14 Classified"],
+  ["Pick Up Location", "Ryder - LAKEMONT"],
+  ["Pick Up Address", "400 Example Rd"],
+  ["Ship to City, State", "LAKEMONT, PA"],
+  ["ZIP", "15000"],
+  ["Unit #", unit],
+  ['["DPF Clamps and Gaskets "] Manufacturer', "Detroit Diesel"],
+  ["Miles", ""],
+  ['["DPF Clamps and Gaskets "] Serial #', ""],
+  ["PO #", "0424951800"],
+  ["Part #", "EA0024900001"],
+];
+
+/**
+ * A reply quoting the form as Outlook does: every cell on its own line, with a blank line
+ * between a label and its value. Empty cells (Miles, Serial #) leave the next label right
+ * after the gap.
+ */
+function ryderGapText(unit: string): string {
+  const subject = '***Ryder Location 424-LAKEMONT has a ["DPF Clamps and Gaskets "] ready for pick up***';
+  return [
+    "Do you have an eta on this filter coming back to me?  I have a truck waiting on it?",
+    "",
+    "From: Sam Example <sam_example@ryder.example>",
+    "Sent: Friday, October 23, 2026 11:44 AM",
+    "To: Central Dispatch <dispatch@cds.direct>",
+    `Subject: Re: ${subject}`,
+    "",
+    "Please provide pictures of the filter's inlet and outlet.",
+    "",
+    "On Fri, Oct 23, 2026 at 7:46 AM 'Central Desk' via Ryder Dispatch <ryder@cds.direct<mailto:ryder@cds.direct>> wrote:",
+    "",
+    "Hello Team CDS,",
+    "",
+    'Please see below for a ["DPF Clamps and Gaskets "] pickup',
+    "",
+    "Clean Diesel Specialists Pick Up Request",
+    "",
+    ...RYDER_GAP_CELLS(unit)
+      .flatMap(([label, value]) => [label, value])
+      .filter((cell, i) => i % 2 === 0 || cell !== "")
+      .map((cell) => (cell === "400 Example Rd" ? "400 Example Rd<https://maps.example/search/400+Example+Rd>" : cell))
+      .flatMap((cell) => [cell, ""]),
+    "COMMENTS",
+    "",
+    "18 x 17 x 17 45lbs",
+    "",
+    "Thank you,",
+    "Project Desk",
+  ].join("\n");
+}
+
+/** The same form as Outlook's HTML part: a <p> in each table cell. */
+function ryderGapHtml(unit: string): string {
+  const cell = (v: string) => `<td style="padding:.75pt"${v ? "" : ' colspan="3"'}>\n${v ? `<p class="xmsonormal">${v}<o:p></o:p></p>\n` : ""}</td>`;
+  const pairs = RYDER_GAP_CELLS(unit).map(([l, v]) => [l.replace(/"/g, "&quot;"), v]);
+  const rows: string[] = [];
+  for (let i = 0; i < pairs.length; i += 2) rows.push(`<tr>\n${pairs.slice(i, i + 2).flatMap(([l, v]) => [cell(l), cell(v)]).join("\n")}\n</tr>`);
+  return [
+    "<div><p>Do you have an eta on this filter coming back to me?</p>",
+    "<p><br><br></p>",
+    "<p>Hello Team CDS,<o:p></o:p></p>",
+    "<p>Please see below for a [&quot;DPF Clamps and Gaskets&nbsp;&quot;] pickup<o:p></o:p></p>",
+    '<table class="MsoNormalTable" border="1"><tbody>',
+    '<tr><td colspan="4"><h3><span><br>\nClean Diesel Specialists Pick Up Request</span></h3></td></tr>',
+    ...rows,
+    "<tr><td><p>COMMENTS</p></td><td><p>18 x 17 x 17 45lbs</p></td></tr>",
+    "</tbody></table>",
+    "<p>Thank you,<br>Project Desk</p></div>",
+  ].join("\n");
+}
+
+const RYDER_GAP_SUBJECT = 'RE: ***Ryder Location 424-LAKEMONT has a ["DPF Clamps and Gaskets "] ready for pick up***';
+
+/** A reply whose quoted form has a blank line between each label and its value (text part). */
+export const ryderGapReply = email({
+  from: "Sam Example <sam_example@ryder.example>",
+  to: ["dispatch@cds.direct"],
+  subject: RYDER_GAP_SUBJECT,
+  inReplyTo: "<dispatch-reply-2@cds.example>",
+  text: ryderGapText("540001"),
+  html: ryderGapHtml("540001"),
+});
+
+/** The same reply with only the HTML part. */
+export const ryderGapReplyHtml = email({
+  from: "Sam Example <sam_example@ryder.example>",
+  to: ["dispatch@cds.direct"],
+  subject: RYDER_GAP_SUBJECT,
+  inReplyTo: "<dispatch-reply-3@cds.example>",
+  text: null,
+  html: ryderGapHtml("540001"),
+});
+
+/** The gapped reply with the unit cell left empty: "Unit #" is followed by the next label. */
+export const ryderGapReplyNoUnit = email({
+  from: "Sam Example <sam_example@ryder.example>",
+  to: ["dispatch@cds.direct"],
+  subject: RYDER_GAP_SUBJECT,
+  inReplyTo: "<dispatch-reply-4@cds.example>",
+  text: ryderGapText(""),
+});
+
 // ---------------------------------------------------------------- First Student iProcure
 
 const IPROCURE_FROM = "Administrator - iProcure <notify@iprocure.example>";
