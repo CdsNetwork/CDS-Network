@@ -168,6 +168,29 @@ export function date(value: string | null | undefined): string {
   return p ? `${p.year}-${p.month}-${p.day}` : "-";
 }
 
+type MaybeOne<T> = T | T[] | null | undefined;
+const first = <T,>(v: MaybeOne<T>): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
+
+/**
+ * When the request came in (work order list): the inbound email's received time for an order
+ * made from an email, otherwise when the order was created. A Pacific date, like date().
+ */
+export function dateReceived(row: {
+  created_at: string;
+  work_order_internal: MaybeOne<{ inbound_emails: MaybeOne<{ received_at: string | null }> }>;
+}): string {
+  const email = first(first(row.work_order_internal)?.inbound_emails);
+  return date(email?.received_at ?? row.created_at);
+}
+
+/** Logistics column of the work order list, from the order's fulfillment. */
+export function logisticsLabel(fulfillment: string): string {
+  if (fulfillment === "pickup") return "Local pickup";
+  // Supplier direct orders ship from the parts supplier on a CDS label.
+  if (fulfillment === "shipping" || fulfillment === "supplier_direct") return "Shipping";
+  return "Not set";
+}
+
 /** Longest unbroken run of characters that a table cell keeps on one line. */
 const LONG_WORD = 24;
 

@@ -19,7 +19,17 @@ import {
   type Financials,
 } from "@/components/cds-wo/woFilters";
 import { requireCds } from "@/lib/auth";
-import { money, SHIPMENT_STATUS_LABEL, STATUS_LABEL, woLabel, type WoStatus, wrapCell } from "@/lib/format";
+import {
+  dateReceived,
+  FULFILLMENT_LABEL,
+  logisticsLabel,
+  money,
+  SHIPMENT_STATUS_LABEL,
+  STATUS_LABEL,
+  woLabel,
+  type WoStatus,
+  wrapCell,
+} from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
 type Named = { name: string } | null;
@@ -34,6 +44,15 @@ type WoRow = {
   po_number: string | null;
   customers: Named | Named[];
   affiliates: Shop | Shop[];
+};
+
+type ListRow = WoRow & {
+  created_at: string;
+  fulfillment: string;
+  work_order_internal:
+    | { inbound_emails: { received_at: string | null } | { received_at: string | null }[] | null }
+    | { inbound_emails: { received_at: string | null } | { received_at: string | null }[] | null }[]
+    | null;
 };
 
 type AttentionWo = WoRow & {
@@ -66,6 +85,9 @@ const ATTENTION_SHOWN = 12;
 const WO_COLUMNS =
   "id, wo_number, status, location_label, unit_number, po_number, customers(name), affiliates(display_name)";
 
+/** The table also shows when the request came in and how the part moves. */
+const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at))`;
+
 /** Unit and PO numbers up to this length stay on one line in the table. */
 const ID_NOWRAP = 22;
 
@@ -92,7 +114,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
   if (range.to) invoicedQuery = invoicedQuery.lt("invoiced_at", range.to.toISOString());
 
   // Work order table query (same filters as the CSV export).
-  const list = (await filteredWorkOrders(supabase, filters, WO_COLUMNS)).query.limit(200);
+  const list = (await filteredWorkOrders(supabase, filters, LIST_COLUMNS)).query.limit(200);
 
   // Declined jobs and pending reviews are fetched separately, newest first, so a burst
   // of pending reviews can never push a declined job out of the queue.
@@ -120,7 +142,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
     invoicedQuery,
   ]);
 
-  const rows = (listRes.data ?? []) as unknown as WoRow[];
+  const rows = (listRes.data ?? []) as unknown as ListRow[];
 
   // Financials for the listed orders.
   let finById = new Map<string, Financials>();
@@ -337,11 +359,13 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
             <thead>
               <tr>
                 <th>WO</th>
+                <th>Date received</th>
                 <th>Customer</th>
                 <th>Location</th>
                 <th>Unit</th>
                 <th>PO</th>
                 <th>Affiliate</th>
+                <th>Logistics</th>
                 <th>Status</th>
                 <th className="num">Affiliate Payable</th>
                 <th className="num">Customer Subtotal</th>
@@ -351,7 +375,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="small" style={{ textAlign: "center", padding: 24 }}>
+                  <td colSpan={12} className="small" style={{ textAlign: "center", padding: 24 }}>
                     No work orders match.
                   </td>
                 </tr>
@@ -370,12 +394,16 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                           {woLabel(r.wo_number)}
                         </Link>
                       </td>
+                      <td className="nowrap">{dateReceived(r)}</td>
                       <td className={`${styles.textCol} ${wrapCell(customer) ?? ""}`}>{customer}</td>
                       <td className={`${styles.textCol} ${wrapCell(r.location_label) ?? ""}`}>{r.location_label}</td>
                       <td className={idClass(r.unit_number)}>{r.unit_number}</td>
                       <td className={idClass(r.po_number)}>{r.po_number ?? <span className="small">Missing</span>}</td>
                       <td className={`${styles.textCol} ${wrapCell(shop) ?? ""}`}>
                         {shop ?? <span className="small">Not assigned</span>}
+                      </td>
+                      <td className="nowrap" title={FULFILLMENT_LABEL[r.fulfillment]}>
+                        {logisticsLabel(r.fulfillment)}
                       </td>
                       <td>
                         <span className={`status ${r.status}`} title={shortStatus !== fullStatus ? fullStatus : undefined}>
