@@ -39,6 +39,12 @@ export const LABEL_STATUS_LABEL: Record<string, string> = {
   error: "Error",
 };
 
+/**
+ * Label statuses of a shipment leg that has no label: never made, or voided. Any other status
+ * means a label exists (made in the portal or by hand) or one was being made, so the leg stays.
+ */
+export const REMOVABLE_LABEL_STATUSES = ["needed", "voided"];
+
 export const CUSTOMER_APPROVAL_LABEL: Record<string, string> = {
   not_requested: "Customer approval not requested",
   requested: "Customer approval requested",

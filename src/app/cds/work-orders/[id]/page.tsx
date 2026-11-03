@@ -13,6 +13,7 @@ import {
   LINES_LOCKED_STATUSES,
   one,
   PRICE_SOURCE_LABEL,
+  REMOVABLE_LABEL_STATUSES,
   REQUEST_TYPE_LABEL,
   REVIEW_STATUSES,
   round2,
@@ -53,6 +54,7 @@ import {
   dispatchWorkOrder,
   removeLine,
   removePassThroughLine,
+  removeShipment,
   setStatus,
   updateTax,
   updateWorkOrderFields,
@@ -706,6 +708,17 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                     <div style={{ marginTop: 8 }}>
                       <LabelPanel shipmentId={s.id} woId={wo.id} label={labels.get(s.id) ?? null} configured={canShip} />
                     </div>
+                    {!labels.has(s.id) && !s.tracking_number && REMOVABLE_LABEL_STATUSES.includes(s.label_status) && wo.status !== "invoiced" && (
+                      <div style={{ marginTop: 8 }}>
+                        <ActionForm
+                          action={removeShipment.bind(null, wo.id, s.id)}
+                          submitLabel="Remove"
+                          pendingLabel="..."
+                          buttonClass="remove"
+                          confirmText="Remove this shipment from the work order? Its notes and costs are removed too."
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}

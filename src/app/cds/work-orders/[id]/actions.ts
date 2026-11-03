@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
-import { isUuid, LINES_LOCKED_STATUSES, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
+import { isUuid, LINES_LOCKED_STATUSES, REMOVABLE_LABEL_STATUSES, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
 import { recordSync } from "@/lib/integration-sync";
 import { passThroughInput } from "@/lib/pass-through";
@@ -162,6 +162,55 @@ export async function addShipment(woId: string, _prev: ActionState, formData: Fo
     shop_visible: false,
   });
   return done(woId, "Shipment added.");
+}
+
+/**
+ * Removes a shipment leg added by mistake. Only while it has no active label, no tracking
+ * number and its label status says no label (needed or voided): a leg with any of these is
+ * real or has a label being made (void the label first). Its notes, costs and tracking events
+ * go with it (cascade); voided labels on it too. The delete repeats the checks so a label
+ * recorded meanwhile keeps the leg.
+ */
+export async function removeShipment(woId: string, shipmentId: string): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId) || !isUuid(shipmentId)) return { error: "Shipment not found." };
+  const supabase = await createClient();
+  const [status, shipRes, labelRes] = await Promise.all([
+    currentStatus(supabase, woId),
+    supabase.from("shipments").select("carrier, tracking_number, label_status").eq("id", shipmentId).eq("work_order_id", woId).maybeSingle(),
+    supabase
+      .from("shipment_labels")
+      .select("id", { count: "exact", head: true })
+      .eq("shipment_id", shipmentId)
+      .eq("status", "active"),
+  ]);
+  if (shipRes.error || labelRes.error) return { error: "The shipment could not be read. Try again." };
+  if (!status || !shipRes.data) return { error: "Shipment not found." };
+  if (status === "invoiced") return { error: "Shipments cannot be removed after the order is invoiced." };
+  if (labelRes.count) return { error: "This shipment has a label. Void the label first, then remove the shipment." };
+  if (shipRes.data.tracking_number) return { error: "This shipment has a tracking number, so it cannot be removed." };
+  if (!REMOVABLE_LABEL_STATUSES.includes(shipRes.data.label_status)) {
+    return { error: "This shipment has a label or one is being made. Void the label first, then remove the shipment." };
+  }
+
+  const { data, error } = await supabase
+    .from("shipments")
+    .delete()
+    .eq("id", shipmentId)
+    .eq("work_order_id", woId)
+    .is("tracking_number", null)
+    .in("label_status", REMOVABLE_LABEL_STATUSES)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "The shipment changed meanwhile and was not removed. Reload the page." };
+  await supabase.from("work_order_events").insert({
+    work_order_id: woId,
+    actor_id: profile.id,
+    event_type: "shipment",
+    message: `Shipment removed: ${shipRes.data.carrier ?? "carrier not set"}`,
+    shop_visible: false,
+  });
+  return done(woId, "Shipment removed.");
 }
 
 export async function addLine(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {

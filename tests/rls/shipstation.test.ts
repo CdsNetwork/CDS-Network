@@ -19,6 +19,8 @@ let f: Fixture;
 let cds: Login;
 let shopA: Login;
 let shopB: Login;
+/** Rows deleted by a test whose change log rows afterAll still removes. */
+const removedRowIds: string[] = [];
 
 const LABEL = `SS-${runId}`;
 const REAL_TRACKING = `7946${runId}`;
@@ -104,7 +106,7 @@ afterAll(async () => {
   await step("delete logins", () => deleteLogins());
   await step("delete customers", () => must(admin.from("customers").delete().like("code", suffix)));
   await step("delete shops", () => must(admin.from("affiliates").delete().like("short_code", suffix)));
-  const rowIds = [...labelIds, cds?.id, shopA?.id, shopB?.id].filter((v): v is string => !!v);
+  const rowIds = [...labelIds, ...removedRowIds, cds?.id, shopA?.id, shopB?.id].filter((v): v is string => !!v);
   await step("find shop and customer ids", async () => {
     for (const [table, column] of [
       ["customers", "code"],
@@ -324,5 +326,41 @@ describe("voiding", () => {
     expect(internal.actual_cost).toBeNull();
     const twice = await cds.client.rpc("cds_void_shipment_label", { p_label: label.id, p_message: null });
     expect(twice.error?.message).toMatch(/already voided/);
+  });
+});
+
+describe("removing a leg added by mistake", () => {
+  it("CDS deletes a leg whose label was voided, with its costs, notes and labels; a shop cannot", async () => {
+    const leg = await insertOne("shipments", { work_order_id: f.wo, direction: "cds_to_customer" });
+    await must(admin.from("shipment_internal").insert({ shipment_id: leg.id, notes: "by mistake", quoted_cost: 12 }));
+    const labelId = await must(cds.client.rpc("cds_record_shipment_label", { p_shipment: leg.id, p_label: labelPayload({}) }));
+    await must(cds.client.rpc("cds_void_shipment_label", { p_label: labelId, p_message: null }));
+    removedRowIds.push(leg.id, labelId as string);
+
+    const byShop = await shopA.client.from("shipments").delete().eq("id", leg.id).select("id");
+    expect(byShop.data ?? []).toEqual([]);
+    expect(await must(admin.from("shipments").select("id").eq("id", leg.id))).toHaveLength(1);
+
+    // The app's delete keeps a leg whose label status says a label exists or is being made.
+    const labelled = await insertOne("shipments", { work_order_id: f.wo, direction: "cds_to_customer", label_status: "ready" });
+    removedRowIds.push(labelled.id);
+    const kept = await must(
+      cds.client.from("shipments").delete().eq("id", labelled.id).is("tracking_number", null).in("label_status", ["needed", "voided"]).select("id"),
+    );
+    expect(kept).toEqual([]);
+    await must(admin.from("shipments").delete().eq("id", labelled.id));
+
+    const removed = await must(
+      cds.client.from("shipments").delete().eq("id", leg.id).is("tracking_number", null).in("label_status", ["needed", "voided"]).select("id"),
+    );
+    expect(removed).toHaveLength(1);
+    for (const [table, column, id] of [
+      ["shipments", "id", leg.id],
+      ["shipment_internal", "shipment_id", leg.id],
+      ["shipment_labels", "shipment_id", leg.id],
+      ["shipment_label_costs", "label_id", labelId],
+    ] as const) {
+      expect(await must(admin.from(table).select(column).eq(column, id as string)), table).toEqual([]);
+    }
   });
 });
