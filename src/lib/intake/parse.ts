@@ -9,7 +9,7 @@
 import { INBOX_CUSTOMERS } from "./config";
 import { bodyText, emailAddress, intakeMailbox, quotedSenders } from "./email";
 import { extractDeterministic, findKnownPartNumbers, requestedCleanings, vinCheckDigitOk } from "./extract";
-import { ignoreRule, type IgnoreMatch } from "./ignore";
+import { ignoreRule, portalEmailRule, type IgnoreMatch } from "./ignore";
 import type { LlmExtraction, LlmExtractor } from "./llm";
 import { matchCustomer, matchItem, matchLocation, partKey, type CustomerHint, type ItemInput } from "./match";
 import { detectTemplate, type TemplateResult } from "./templates";
@@ -46,6 +46,8 @@ const label = (confidence: number): ParsedEmail["confidence_label"] => (confiden
 
 export async function parseEmail(email: NormalizedEmail, ref: IntakeReference, options: ParseOptions): Promise<ParsedEmail> {
   const text = bodyText(email);
+  const portal = portalEmailRule(email, text);
+  if (portal) return ignored(email, portal);
   const template = detectTemplate(email, text);
   if (template) return parseTemplate(email, text, template, ref);
   if (!options.forceWorkRequest) {

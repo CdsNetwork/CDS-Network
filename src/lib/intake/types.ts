@@ -123,7 +123,7 @@ export type ItemMatch = {
 export type TemplateName = "ryder" | "first_student_iprocure" | "website_form";
 
 /** Why an email is not a request: replies, invoices, carrier notices, CDS's own mail and so on. */
-export type IgnoreKind = "reply" | "invoice" | "carrier" | "security" | "cds_sent" | "ryder_po" | "forwarding_confirmation" | "thread_reply";
+export type IgnoreKind = "reply" | "invoice" | "carrier" | "security" | "cds_sent" | "ryder_po" | "forwarding_confirmation" | "thread_reply" | "portal_sent";
 
 /**
  * A reply or forward of a request that already has a work order: found by the thread

@@ -6,6 +6,7 @@ import { isUuid, LINES_LOCKED_STATUSES, REMOVABLE_LABEL_STATUSES, REVIEW_STATUSE
 import { requireCds } from "@/lib/auth";
 import { recordSync } from "@/lib/integration-sync";
 import { passThroughInput } from "@/lib/pass-through";
+import { emailCdsAfter } from "@/lib/portal-email-send";
 import { createInvoice, type CreatedInvoice } from "@/lib/qbo/api";
 import { QboError } from "@/lib/qbo/client";
 import { loadInvoice } from "@/lib/qbo/invoice-input";
@@ -58,6 +59,7 @@ export async function dispatchWorkOrder(woId: string, _prev: ActionState, formDa
   const supabase = await createClient();
   const { error } = await supabase.rpc("cds_dispatch_work_order", { p_work_order: woId, p_affiliate: shop });
   if (error) return { error: error.message };
+  emailCdsAfter("sent", woId);
   return done(woId, "Dispatched. The shop can now see this work order.");
 }
 

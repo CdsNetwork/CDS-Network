@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requireShop } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { emailCdsAfter } from "@/lib/portal-email-send";
 import { ATTACHMENT_CATEGORY_LABEL, PICKUP_WINDOWS, SHIP_STATUS_LABEL } from "@/lib/format";
 import type { ActionState } from "@/components/shop/types";
 import { isUuid } from "./data";
@@ -72,6 +73,7 @@ export async function declineJob(workOrderId: string, _prev: ActionState, fd: Fo
   const supabase = await createClient();
   const { error } = await supabase.rpc("shop_decline_work_order", { p_work_order: workOrderId, p_reason: reason });
   if (error) return rpcError(error);
+  emailCdsAfter("declined", workOrderId);
   revalidatePath("/shop");
   // The job goes back to CDS and is no longer visible to this shop.
   redirect("/shop?declined=1");
@@ -241,6 +243,7 @@ export async function completeJob(workOrderId: string, _prev: ActionState, fd: F
   if (!ref) return { error: "Enter your invoice or reference number" };
   const supabase = await createClient();
   const { error } = await supabase.rpc("shop_complete_work_order", { p_work_order: workOrderId, p_invoice_ref: ref });
+  if (!error) emailCdsAfter("finished", workOrderId);
   return done(error);
 }
 

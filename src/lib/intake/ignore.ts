@@ -4,8 +4,9 @@
  * notices, Google security alerts, Ryder PO paperwork, and CDS's own outgoing mail. Checked
  * after the request templates, so a template email is never ignored.
  */
+import { PORTAL_DOMAIN, PORTAL_SUBJECT_PREFIX } from "../portal-email";
 import { CDS_SENDERS } from "./config";
-import { emailAddress, emailDomain } from "./email";
+import { emailAddress, emailDomain, quotedSenders } from "./email";
 import type { IgnoreKind, NormalizedEmail } from "./types";
 
 export type IgnoreMatch = { kind: IgnoreKind; reason: string; poNumber?: string };
@@ -13,6 +14,27 @@ export type IgnoreMatch = { kind: IgnoreKind; reason: string; poNumber?: string 
 const RYDER_PO = /\bPO\s*#?\s*(\d{10})\s+Issued for\b/i;
 
 const domainIs = (domain: string | null, roots: string[]) => !!domain && roots.some((r) => domain === r || domain.endsWith(`.${r}`));
+
+const REPLY_PREFIX = /^(?:\s*(?:re|fwd?|fw)\s*:)+\s*/i;
+const PORTAL_ADDRESS = new RegExp(`[\\w.+-]+@${PORTAL_DOMAIN.replace(/\./g, "\\.")}\\b`, "i");
+
+/**
+ * The portal's own status emails (src/lib/portal-email.ts): sent to dispatch@, which forwards
+ * every email into the intake. Gmail's auto-forwarding keeps the original From, so they arrive
+ * from portal@in.cds.direct. As a backup, a "[Portal]" subject (also as a reply or forward)
+ * with a portal sender quoted in the text is the same email forwarded by hand. Checked before
+ * everything else, even when CDS asks to treat an email as a request: it never makes or links
+ * a work order.
+ */
+export function portalEmailRule(email: Pick<NormalizedEmail, "from" | "subject">, text: string): IgnoreMatch | null {
+  const from = emailAddress(email.from);
+  const reason = "Sent by the portal itself (status email to CDS), not a request.";
+  if (emailDomain(from) === PORTAL_DOMAIN) return { kind: "portal_sent", reason };
+  const subject = email.subject.replace(REPLY_PREFIX, "");
+  if (!subject.startsWith(PORTAL_SUBJECT_PREFIX.trim())) return null;
+  const portalSender = quotedSenders(text).some((a) => emailDomain(a) === PORTAL_DOMAIN) || PORTAL_ADDRESS.test(text);
+  return portalSender ? { kind: "portal_sent", reason: `${reason} Forwarded by ${from ?? "someone"}.` } : null;
+}
 
 export function ignoreRule(email: Pick<NormalizedEmail, "from" | "subject" | "inReplyTo">, text: string): IgnoreMatch | null {
   const subject = email.subject.trim();
