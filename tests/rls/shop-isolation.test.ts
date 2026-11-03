@@ -491,6 +491,19 @@ describe("shop login: writes", () => {
     expect(row).toEqual({ affiliate_id: f.shopA, status: "awaiting_acceptance" });
   });
 
+  it("cannot change the customer or customer location of a work order (CDS does that in Edit order)", async () => {
+    for (const id of [f.woA, f.woAPending]) {
+      const before = await must(admin.from("work_orders").select("customer_id, location_id, location_label").eq("id", id).single());
+      const { data } = await shopA.client
+        .from("work_orders")
+        .update({ customer_id: f.customerY, location_id: f.locationY, location_label: "moved" })
+        .eq("id", id)
+        .select();
+      expect(data ?? []).toEqual([]);
+      expect(await must(admin.from("work_orders").select("customer_id, location_id, location_label").eq("id", id).single())).toEqual(before);
+    }
+  });
+
   it("cannot insert work orders, lines or prices", async () => {
     const wo = await shopA.client.from("work_orders").insert({
       customer_id: f.customerX,

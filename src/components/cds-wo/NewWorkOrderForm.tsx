@@ -1,9 +1,10 @@
 "use client";
 
-import { startTransition, useActionState, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { startTransition, useActionState, useMemo, useState, type FormEvent } from "react";
 import { CATEGORY_LABEL, FULFILLMENT_LABEL, money } from "@/lib/format";
 import { SearchSelect, type SearchOption } from "@/components/SearchSelect";
 import type { ActionState } from "./ActionForm";
+import { LocationPicker } from "./LocationPicker";
 
 export type LocationOption = {
   id: string;
@@ -41,42 +42,6 @@ type Props = {
 
 type Line = { catalog_item_id: string; qty: number };
 
-const MAX_SUGGESTIONS = 80;
-
-function codeNumber(l: LocationOption): number {
-  const m = (l.location_number ?? l.code).match(/\d+/);
-  return m ? Number(m[0]) : Number.MAX_SAFE_INTEGER;
-}
-
-const byNumber = (a: LocationOption, b: LocationOption) => codeNumber(a) - codeNumber(b) || a.code.localeCompare(b.code);
-
-const norm = (v: string | null | undefined) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-
-/** Everything a location can be found by besides its code and name: address, city, state, ZIP. */
-function addressText(l: LocationOption): string {
-  return norm(`${l.address_raw} ${l.city ?? ""} ${l.region ?? ""} ${l.postal_code ?? ""}`);
-}
-
-/**
- * Codes that start with the query first, then code or name containing it, then address,
- * city, state or ZIP matches (every typed word must match); each group sorted by number.
- */
-function matchLocations(all: LocationOption[], query: string): LocationOption[] {
-  const q = norm(query);
-  if (!q) return [...all].sort(byNumber).slice(0, MAX_SUGGESTIONS);
-  const prefix = all.filter((l) => l.code.toLowerCase().startsWith(q) || (l.location_number ?? "").toLowerCase().startsWith(q));
-  const taken = new Set(prefix);
-  const named = all.filter((l) => !taken.has(l) && (l.code.toLowerCase().includes(q) || l.name.toLowerCase().includes(q)));
-  for (const l of named) taken.add(l);
-  const words = q.split(" ");
-  const other = all.filter((l) => {
-    if (taken.has(l)) return false;
-    const text = `${norm(l.code)} ${norm(l.name)} ${addressText(l)}`;
-    return words.every((w) => text.includes(w));
-  });
-  return [...prefix.sort(byNumber), ...named.sort(byNumber), ...other.sort(byNumber)].slice(0, MAX_SUGGESTIONS);
-}
-
 export function NewWorkOrderForm({ action, customers, locations, catalog, overrides }: Props) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, {});
 
@@ -86,14 +51,11 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
   const [siteAddress, setSiteAddress] = useState("");
   const [locQuery, setLocQuery] = useState("");
   const [location, setLocation] = useState<LocationOption | null>(null);
-  const [open, setOpen] = useState(false);
   const [lines, setLines] = useState<Line[]>([]);
   const [pickItem, setPickItem] = useState("");
   const [pickQty, setPickQty] = useState("1");
-  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const customerLocations = useMemo(() => locations.filter((l) => l.customer_id === customerId), [locations, customerId]);
-  const suggestions = useMemo(() => matchLocations(customerLocations, locQuery), [customerLocations, locQuery]);
   const catalogById = useMemo(() => new Map(catalog.map((c) => [c.id, c])), [catalog]);
   const customerOverrides = overrides[customerId] ?? {};
 
@@ -108,7 +70,6 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
     setLocQuery(`${l.code} - ${l.name}`);
     setSiteAddress(l.address_raw);
     if (requestType !== "parts_only") setFulfillment(l.fulfillment);
-    setOpen(false);
   }
 
   function onCustomerChange(id: string) {
@@ -156,28 +117,6 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
   const linesTotal = lines.reduce((sum, l) => sum + (priceFor(l.catalog_item_id).price ?? 0) * l.qty, 0);
   const missingPrice = lines.some((l) => priceFor(l.catalog_item_id).price === null);
 
-  let locationHelper: ReactNode = "Start typing a location number, name, address, city, state or ZIP. Location number matches come first, sorted numerically.";
-  if (!customerId) locationHelper = "Choose a customer first.";
-  else if (location)
-    locationHelper = (
-      <>
-        <b>Auto-routed:</b> {location.shopName ?? "No default shop"} • {FULFILLMENT_LABEL[location.fulfillment]}
-        {location.routing_notes && (
-          <>
-            <br />
-            {location.routing_notes}
-          </>
-        )}
-        {location.dock_note && (
-          <>
-            <br />
-            Dock: {location.dock_note}
-          </>
-        )}
-      </>
-    );
-  else if (locQuery) locationHelper = "Select a suggested location to load shop routing. Unmatched locations are held for review.";
-
   const fulfillmentHelper: Record<string, string> = {
     pickup: "Pickup jobs need a pickup window from the shop when it accepts.",
     shipping: "Shipping labels are added on the work order page. Label buying is Milestone 2.",
@@ -205,72 +144,15 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
               ))}
             </select>
           </div>
-          <div className="field" style={{ position: "relative" }}>
-            <label htmlFor="location_text">
-              Location / Branch <span className="req">*</span>
-            </label>
-            <input
-              id="location_text"
-              name="location_text"
-              className="input"
-              autoComplete="off"
-              placeholder="Type location #, name, city or ZIP..."
-              maxLength={200}
-              disabled={!customerId}
-              required
-              value={locQuery}
-              role="combobox"
-              aria-expanded={open}
-              aria-controls="location-suggestions"
-              onFocus={() => setOpen(true)}
-              onBlur={() => {
-                blurTimer.current = setTimeout(() => setOpen(false), 120);
-              }}
-              onChange={(e) => {
-                const value = e.target.value;
-                setLocQuery(value);
-                setLocation(null);
-                setOpen(true);
-                const exact = matchLocations(customerLocations, value).filter((l) =>
-                  l.code.toLowerCase().startsWith(value.trim().toLowerCase()),
-                );
-                if (value.trim() && exact.length === 1 && exact[0].code.toLowerCase() === value.trim().toLowerCase()) {
-                  chooseLocation(exact[0]);
-                }
-              }}
-            />
-            {open && customerId && (
-              <div className="suggestions" id="location-suggestions" role="listbox">
-                {suggestions.length === 0 ? (
-                  <div className="suggestion small">No matching locations</div>
-                ) : (
-                  suggestions.map((l) => (
-                    <button
-                      type="button"
-                      key={l.id}
-                      role="option"
-                      aria-selected={location?.id === l.id}
-                      className={`suggestion${location?.id === l.id ? " active" : ""}`}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        if (blurTimer.current) clearTimeout(blurTimer.current);
-                        chooseLocation(l);
-                      }}
-                    >
-                      <b>{l.code}</b>
-                      <div className="small">
-                        {l.name} • {l.shopName ?? "No default shop"} • {FULFILLMENT_LABEL[l.fulfillment]}
-                      </div>
-                      {l.address_raw && <div className="small">{l.address_raw}</div>}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-            <div className="small" style={{ marginTop: 5 }}>
-              {locationHelper}
-            </div>
-          </div>
+          <LocationPicker
+            customerId={customerId}
+            locations={customerLocations}
+            location={location}
+            query={locQuery}
+            onQueryChange={setLocQuery}
+            onChoose={chooseLocation}
+            onClear={() => setLocation(null)}
+          />
           <div className="field">
             <label htmlFor="request_type">
               Request Type <span className="req">*</span>

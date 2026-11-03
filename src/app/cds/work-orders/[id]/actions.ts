@@ -85,14 +85,53 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
   const tooLong = limits.find(([value, max]) => value.length > max);
   if (tooLong) return { error: `Text is too long (max ${tooLong[1]} characters)` };
 
+  const customerId = text(formData.get("customer_id"));
+  const locationId = text(formData.get("location_id"));
+  if (!isUuid(customerId)) return { error: "Choose a customer." };
+  if (locationId && !isUuid(locationId)) return { error: "Choose a location from the list, or clear it." };
+
   const supabase = await createClient();
-  const status = await currentStatus(supabase, woId);
-  if (!status) return { error: "Work order not found." };
-  if (!REVIEW_STATUSES.includes(status)) return { error: "Order details can only be edited while the order is in review." };
+  const { data: current, error: readError } = await supabase
+    .from("work_orders")
+    .select("status, customer_id, location_id")
+    .eq("id", woId)
+    .maybeSingle();
+  if (readError) return { error: "The work order could not be read. Try again." };
+  if (!current) return { error: "Work order not found." };
+  if (!REVIEW_STATUSES.includes(current.status)) return { error: "Order details can only be edited while the order is in review." };
+
+  const customerChanged = customerId !== current.customer_id;
+  const locationChanged = (locationId || null) !== current.location_id;
+  if (customerChanged) {
+    const [cust, lines] = await Promise.all([
+      supabase.from("customers").select("id").eq("id", customerId).maybeSingle(),
+      supabase.from("work_order_lines").select("id", { count: "exact", head: true }).eq("work_order_id", woId),
+    ]);
+    if (cust.error || lines.error) return { error: "The work order could not be read. Try again." };
+    if (!cust.data) return { error: "Choose a customer." };
+    // Line prices were fixed for the current customer when the lines were added.
+    if (lines.count) {
+      return { error: "This order has services or parts priced for the current customer. Remove them, change the customer, then add them again." };
+    }
+  }
+  let location: { code: string; name: string; region: string | null; market: string; routing_notes: string | null } | null = null;
+  if (locationId && (locationChanged || customerChanged)) {
+    const { data, error: locError } = await supabase
+      .from("customer_locations")
+      .select("code, name, region, market, routing_notes")
+      .eq("id", locationId)
+      .eq("customer_id", customerId)
+      .maybeSingle();
+    if (locError) return { error: "The location could not be read. Try again." };
+    if (!data) return { error: "That location does not belong to this customer." };
+    location = data;
+  }
 
   const { error } = await supabase
     .from("work_orders")
     .update({
+      customer_id: customerId,
+      location_id: locationId || null,
       unit_number: unit,
       po_number: poNumber || null,
       location_label: label,
@@ -103,13 +142,56 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
     })
     .eq("id", woId);
   if (error) return { error: error.message };
+
+  // What a new order gets from its location (Create Work Order and email intake): the
+  // location's routing notes and the state's starting tax. A tax rate CDS set by hand, or no
+  // tax for an exempt customer (kept by the database), stays.
+  let internalError: string | null = null;
+  if (locationChanged) {
+    const internalUpdate: Record<string, unknown> = { routing_notes: location?.routing_notes ?? null };
+    const { data: internal } = await supabase.from("work_order_internal").select("tax_source").eq("work_order_id", woId).maybeSingle();
+    const taxSource = (internal?.tax_source as string | null | undefined) ?? null;
+    if (taxSource === null || taxSource === "state_fallback") {
+      const { data: rate } = location?.region
+        ? await supabase
+            .from("tax_rates")
+            .select("rate, taxes_parts, taxes_labor, taxes_shipping")
+            .eq("market", location.market)
+            .eq("region", location.region)
+            .is("postal_code", null)
+            .maybeSingle()
+        : { data: null };
+      // Without a state rate: the column defaults, as private.starting_tax gives a new order.
+      Object.assign(
+        internalUpdate,
+        rate
+          ? {
+              tax_rate: rate.rate,
+              tax_parts: rate.taxes_parts,
+              tax_labor: rate.taxes_labor,
+              tax_shipping: rate.taxes_shipping,
+              tax_jurisdiction: location!.region,
+              tax_source: "state_fallback",
+            }
+          : { tax_rate: 0, tax_parts: true, tax_labor: false, tax_shipping: true, tax_jurisdiction: null, tax_source: null },
+      );
+    }
+    const { error: e } = await supabase.from("work_order_internal").update(internalUpdate).eq("work_order_id", woId);
+    if (e) internalError = e.message;
+  }
+
+  const changes = [
+    customerChanged ? "customer changed" : null,
+    locationChanged ? (location ? `customer location set to ${location.code} ${location.name}` : "customer location cleared") : null,
+  ].filter(Boolean);
   await supabase.from("work_order_events").insert({
     work_order_id: woId,
     actor_id: profile.id,
     event_type: "edit",
-    message: "Order details edited by CDS",
+    message: changes.length ? `Order details edited by CDS: ${changes.join(", ")}` : "Order details edited by CDS",
     shop_visible: false,
   });
+  if (internalError) return { error: `Order details saved, but the routing notes and tax were not: ${internalError}` };
   return done(woId, "Order details saved.");
 }
 

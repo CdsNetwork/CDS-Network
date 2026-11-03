@@ -4,6 +4,9 @@ import { notFound } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ActionForm } from "@/components/cds-wo/ActionForm";
 import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
+import type { LocationOption } from "@/components/cds-wo/NewWorkOrderForm";
+import { OrderLocationFields } from "@/components/cds-wo/OrderLocationFields";
+import { loadPickerLocations } from "@/app/cds/work-orders/new/locations";
 import styles from "@/components/cds-wo/cds-wo.module.css";
 import type { SearchOption } from "@/components/SearchSelect";
 import {
@@ -67,6 +70,7 @@ type WorkOrder = {
   wo_number: number;
   status: WoStatus;
   customer_id: string;
+  location_id: string | null;
   location_label: string;
   site_address: string | null;
   request_type: string;
@@ -500,6 +504,37 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const location = one(wo.customer_locations);
   const inReview = REVIEW_STATUSES.includes(wo.status);
   const declined = wo.status === "rejected_by_affiliate";
+
+  // Edit order: the customer and Location / Branch picker of Create Work Order, with the
+  // locations the email intake matched (when it found more than one) listed first.
+  let editCustomers: { id: string; code: string; name: string }[] = [];
+  let editLocations: LocationOption[] = [];
+  let candidateIds: string[] = [];
+  let editLoadError: string | null = null;
+  if (inReview) {
+    const [custRes, locRes, emailRes] = await Promise.all([
+      supabase.from("customers").select("id, code, name").eq("active", true).order("name"),
+      loadPickerLocations(supabase),
+      supabase.from("inbound_emails").select("parsed->location_candidates").eq("work_order_id", id),
+    ]);
+    editLoadError = custRes.error?.message ?? locRes.error?.message ?? null;
+    editCustomers = (custRes.data ?? []) as { id: string; code: string; name: string }[];
+    // The order's own customer stays choosable if it was made inactive.
+    if (customer && !editCustomers.some((c) => c.id === wo.customer_id)) {
+      editCustomers = [...editCustomers, { id: wo.customer_id, code: customer.code, name: customer.name }];
+    }
+    editLocations = locRes.data ?? [];
+    const rows = (emailRes.data ?? []) as { location_candidates: unknown }[];
+    candidateIds = [
+      ...new Set(
+        rows.flatMap((r) =>
+          Array.isArray(r.location_candidates)
+            ? r.location_candidates.map((c: { id?: unknown }) => c?.id).filter((v): v is string => isUuid(v))
+            : [],
+        ),
+      ),
+    ];
+  }
   const linesLocked = LINES_LOCKED_STATUSES.includes(wo.status);
   // Items priced per line (Misc. hardware) come from the shop's invoice, so CDS can add and
   // remove them after the work is completed, until the order is invoiced.
@@ -1176,33 +1211,20 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                     <input id="edit-po" name="po_number" className="input" defaultValue={wo.po_number ?? ""} maxLength={100} />
                   </div>
                 </div>
-                <div className="field">
-                  <label htmlFor="edit-loc">
-                    Location label <span className="req">*</span>
-                  </label>
-                  <input id="edit-loc" name="location_label" className="input" defaultValue={wo.location_label} required maxLength={200} />
-                </div>
-                <div className="field">
-                  <label htmlFor="edit-addr">Site / ship-to address</label>
-                  <input id="edit-addr" name="site_address" className="input" defaultValue={wo.site_address ?? ""} maxLength={500} />
-                </div>
-                <div className="field">
-                  <label htmlFor="edit-type">Request Type</label>
-                  <select id="edit-type" name="request_type" defaultValue={wo.request_type}>
-                    <option value="service">Service / Cleaning</option>
-                    <option value="parts_only">Parts Only</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label htmlFor="edit-ful">Fulfillment</label>
-                  <select id="edit-ful" name="fulfillment" defaultValue={wo.fulfillment}>
-                    {Object.entries(FULFILLMENT_LABEL).map(([v, l]) => (
-                      <option key={v} value={v}>
-                        {l}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {editLoadError && <div className="notice danger">Could not load customers and locations: {editLoadError}</div>}
+                <OrderLocationFields
+                  customers={editCustomers}
+                  locations={editLocations}
+                  candidateIds={candidateIds}
+                  initial={{
+                    customerId: wo.customer_id,
+                    locationId: wo.location_id,
+                    locationLabel: wo.location_label,
+                    siteAddress: wo.site_address ?? "",
+                    requestType: wo.request_type,
+                    fulfillment: wo.fulfillment,
+                  }}
+                />
                 <div className="field">
                   <label htmlFor="edit-work">
                     Requested work <span className="req">*</span>
