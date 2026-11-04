@@ -61,6 +61,26 @@ export const LINES_LOCKED_STATUSES = ["completed", "delivered", "ready_to_invoic
 /** Statuses in which CDS may still edit the order fields and dispatch. */
 export const REVIEW_STATUSES = ["pending_review", "rejected_by_affiliate"];
 
+/**
+ * Shop preselected in the dispatch Shop box: the shop the order is with, else the location's
+ * default shop. After a decline the declining shop is never preselected, so the location
+ * default is offered unless it is that same shop, in which case nothing is.
+ */
+export function dispatchShopDefault({
+  status,
+  affiliateId,
+  locationDefault,
+}: {
+  status: string;
+  affiliateId: string | null;
+  locationDefault: string | null;
+}): string {
+  if (status === "rejected_by_affiliate") {
+    return locationDefault && locationDefault !== affiliateId ? locationDefault : "";
+  }
+  return affiliateId ?? locationDefault ?? "";
+}
+
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }

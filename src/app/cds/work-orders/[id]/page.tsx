@@ -11,6 +11,7 @@ import styles from "@/components/cds-wo/cds-wo.module.css";
 import type { SearchOption } from "@/components/SearchSelect";
 import {
   CUSTOMER_APPROVAL_LABEL,
+  dispatchShopDefault,
   isUuid,
   LABEL_STATUS_LABEL,
   LINES_LOCKED_STATUSES,
@@ -571,14 +572,18 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     rate,
   );
   const compName = new Map(components.map((c) => [c.id, `${c.component_type} #${c.seq}`]));
-  const defaultShop = location?.default_affiliate_id ?? wo.affiliate_id ?? "";
-
-  // Dispatch picker: the location's default shop first, then the rest by name.
   const locationDefault = location?.default_affiliate_id ?? null;
+  const defaultShop = dispatchShopDefault({ status: wo.status, affiliateId: wo.affiliate_id, locationDefault });
+
+  // Dispatch picker: the shop the order is with first (unless it declined), then the
+  // location's default shop, then the rest by name.
+  const currentShop = !declined ? wo.affiliate_id : null;
+  const shopRank = (id: string) => (currentShop && id === currentShop ? 0 : id === locationDefault ? 1 : 2);
   const shopOptions: SearchOption[] = [...shops]
-    .sort((a, b) => Number(b.id === locationDefault) - Number(a.id === locationDefault))
+    .sort((a, b) => shopRank(a.id) - shopRank(b.id))
     .map((s) => {
       const marks = [
+        currentShop && s.id === currentShop ? "(current shop)" : "",
         s.id === locationDefault ? "(location default)" : "",
         declined && s.id === wo.affiliate_id ? "(declined)" : "",
         // Demo shops carry "(demo)" in their name on staging; mark any other "demo" shop too.
