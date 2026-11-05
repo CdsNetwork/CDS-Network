@@ -208,8 +208,24 @@ function nameScore(description: string, item: CatalogRef): { recall: number; sco
   return { recall, score: recall + 0.1 * (used / have.size) };
 }
 
-/** One requested service or part matched to a catalog item, or left unmatched for CDS. */
-export function matchItem(input: ItemInput, customerId: string | null, fullCatalog: CatalogRef[], aliases: AliasRef[]): ItemMatch {
+/**
+ * A kit (CDS-KIT-X12-4, "... (kit)"). Its oe_cross lists the parts inside it, so a part number
+ * found there names one piece of the kit, never the kit itself.
+ */
+export const isKitItem = (c: Pick<CatalogRef, "sku" | "name">) => /^CDS-KIT-/i.test(c.sku.trim()) || /\(kit\)\s*$/i.test(c.name);
+
+/**
+ * One requested service or part matched to a catalog item, or left unmatched for CDS.
+ * `kitByOe` is only for a line that asks for a kit (the Ryder "Clamps and Gaskets" line): its
+ * Part # may then pick the kit through the kit's OE cross reference.
+ */
+export function matchItem(
+  input: ItemInput,
+  customerId: string | null,
+  fullCatalog: CatalogRef[],
+  aliases: AliasRef[],
+  { kitByOe = false }: { kitByOe?: boolean } = {},
+): ItemMatch {
   const catalog = matchableCatalog(fullCatalog);
   const qty = input.qty && input.qty > 0 && input.qty < 1000 ? input.qty : 1;
   const base = { description: input.description, part_number: input.partNumber, qty, source: input.source };
@@ -232,7 +248,7 @@ export function matchItem(input: ItemInput, customerId: string | null, fullCatal
     }
     const bySku = catalog.find((c) => partKey(c.sku) === key);
     if (bySku) return hit(bySku, "sku", 0.95);
-    const byOe = catalog.find((c) => (c.oe_cross ?? "").split(/[,;\/\s]+/).some((oe) => oe && partKey(oe) === key));
+    const byOe = catalog.find((c) => (kitByOe || !isKitItem(c)) && (c.oe_cross ?? "").split(/[,;\/\s]+/).some((oe) => oe && partKey(oe) === key));
     if (byOe) return hit(byOe, "oe_cross", 0.85);
   }
 
@@ -240,7 +256,8 @@ export function matchItem(input: ItemInput, customerId: string | null, fullCatal
   const text = `${input.description} ${input.component ?? ""}`;
   const component = input.component && input.component !== "other" ? input.component : null;
   const isService = SERVICE_WORDS.test(input.description) || (!!component && !key);
-  const pool = catalog.filter((c) => (isService ? c.category === "service" : c.category !== "service"));
+  // A part number not in the catalog is left for CDS, never guessed as a kit by its name.
+  const pool = catalog.filter((c) => (isService ? c.category === "service" : c.category !== "service") && !(key && isKitItem(c)));
   let best: { item: CatalogRef; recall: number; score: number } | null = null;
   let tie = false;
   for (const item of pool) {

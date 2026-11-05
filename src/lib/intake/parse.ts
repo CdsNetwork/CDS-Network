@@ -375,7 +375,7 @@ async function parseTemplate(email: NormalizedEmail, text: string, t: TemplateRe
     let m: ItemMatch;
     if (it.kit) {
       // The kit depends on the engine: only a Part # that names a kit picks one.
-      const byPart = it.partNumber ? matchItem({ ...input, component: null }, customerId, catalog, ref.aliases) : null;
+      const byPart = it.partNumber ? matchItem({ ...input, component: null }, customerId, catalog, ref.aliases, { kitByOe: true }) : null;
       const item = byPart?.catalog_item_id ? catalog.find((c) => c.id === byPart.catalog_item_id) : null;
       if (!byPart || !item || !isKit(item) || byPart.via === "name") {
         unchosenKits.push(it.description);
