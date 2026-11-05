@@ -1183,7 +1183,12 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </p>
               <p className="small">The affiliate cannot see this work order until CDS resolves the exception and dispatches it.</p>
               {lines.length === 0 && <div className="notice warning">Add at least one service or part before dispatch.</div>}
-              <ActionForm action={dispatchWorkOrder.bind(null, wo.id)} submitLabel="Approve & Dispatch to Affiliate" pendingLabel="Dispatching...">
+              <ActionForm
+                action={dispatchWorkOrder.bind(null, wo.id)}
+                saveFirst={{ formId: "edit-order-form", action: updateWorkOrderFields.bind(null, wo.id) }}
+                submitLabel="Approve & Dispatch to Affiliate"
+                pendingLabel="Dispatching..."
+              >
                 <div className="field">
                   <label htmlFor="dispatch-shop">Shop</label>
                   <FormSearchSelect
@@ -1203,7 +1208,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
           {inReview && (
             <section className="section">
               <h3>Edit order</h3>
-              <ActionForm action={updateWorkOrderFields.bind(null, wo.id)} submitLabel="Save Changes">
+              <ActionForm id="edit-order-form" action={updateWorkOrderFields.bind(null, wo.id)} submitLabel="Save Changes">
                 <div className="grid2" style={{ gap: 10 }}>
                   <div className="field">
                     <label htmlFor="edit-unit">
