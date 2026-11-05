@@ -132,7 +132,7 @@ export function LabelPanel({ shipmentId, woId, label, configured }: { shipmentId
         <div style={{ marginTop: 8 }}>
           {rates.testLabels && (
             <div className="notice warning" style={{ margin: "6px 0" }}>
-              Test mode: labels are not shippable and cost nothing. FedEx and UPS refuse test labels; USPS accepts them.
+              Test mode: labels are not shippable and cost nothing. FedEx refuses test labels; UPS (WWEX) and USPS accept them.
             </div>
           )}
           <div className="small">

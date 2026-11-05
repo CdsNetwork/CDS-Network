@@ -292,7 +292,7 @@ export type LabelChoice = { carrierId: string; serviceCode: string; rateId: stri
 export type LabelResult = { ok: true; message: string } | { ok: false; error: string };
 
 const TEST_HINT =
-  " FedEx and UPS do not accept test labels. To try the flow, turn on USPS under Shipping settings; real labels need SHIPSTATION_TEST_LABELS=false.";
+  " FedEx refuses test labels; UPS (WWEX) and USPS accept them. To try the flow, use UPS (WWEX) or USPS (turn one on under Shipping settings); real labels need SHIPSTATION_TEST_LABELS=false.";
 
 export async function createLabelForShipment(db: Db, shipmentId: string, choice: LabelChoice): Promise<LabelResult> {
   const config = shipStationConfig();

@@ -54,7 +54,7 @@ export async function ShippingSettings() {
         {!config
           ? "ShipStation is not configured on this server (SHIPSTATION_API_KEY)."
           : config.testLabels
-            ? "Test labels are on (SHIPSTATION_TEST_LABELS): labels are not shippable and cost nothing. FedEx and UPS refuse test labels; USPS accepts them."
+            ? "Test labels are on (SHIPSTATION_TEST_LABELS): labels are not shippable and cost nothing. FedEx refuses test labels; UPS (WWEX) and USPS accept them."
             : "Real labels: every label created is charged to the carrier account."}
       </div>
 
