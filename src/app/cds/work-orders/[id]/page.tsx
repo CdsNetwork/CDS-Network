@@ -42,6 +42,7 @@ import {
   type WoStatus,
   wrapCell,
 } from "@/lib/format";
+import { htmlToText } from "@/lib/intake/email";
 import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -251,6 +252,57 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
  * Who approved the order. The name is stored with the approval, so it stays when that
  * login is deleted later (approved_by then becomes null).
  */
+type InboundEmail = {
+  id: string;
+  from_header: string | null;
+  from_address: string | null;
+  to_addresses: string[] | null;
+  subject: string | null;
+  received_at: string;
+  body_text: string | null;
+  body_html: string | null;
+  attachments: unknown;
+};
+
+const EMAIL_COLUMNS = "id, from_header, from_address, to_addresses, subject, received_at, body_text, body_html, attachments";
+
+/** File names from the stored attachments list ({ filename } objects). */
+function attachmentNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((a: { filename?: unknown } | null) => (typeof a?.filename === "string" ? a.filename.trim() : ""))
+    .filter(Boolean);
+}
+
+/**
+ * The email an order was made from, CDS only (inbound_emails has no shop policy). Shown as
+ * plain text: the HTML part is converted to text and never rendered.
+ */
+function OriginalEmail({ email }: { email: InboundEmail }) {
+  const body = email.body_text?.trim() ? email.body_text.replace(/\r\n?/g, "\n") : htmlToText(email.body_html ?? "");
+  const files = attachmentNames(email.attachments);
+  return (
+    <details className="summarybox" style={{ gridColumn: "1 / -1" }}>
+      <summary className="link">
+        Original email: {email.subject || "(no subject)"} <span className="small">{dateTime(email.received_at)}</span>
+      </summary>
+      <div className="grid2" style={{ marginTop: 10, gap: 12 }}>
+        <Fact label="From">{email.from_header || email.from_address}</Fact>
+        <Fact label="To">{(email.to_addresses ?? []).join(", ")}</Fact>
+        <Fact label="Received">{dateTime(email.received_at)}</Fact>
+        <Fact label="Subject">{email.subject}</Fact>
+      </div>
+      <pre
+        className="small"
+        style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 400, overflowY: "auto", margin: "10px 0 0", fontFamily: "inherit", color: "inherit" }}
+      >
+        {body || "No text in this email."}
+      </pre>
+      {files.length > 0 && <div className="small" style={{ marginTop: 8 }}>Attachments: {files.join(", ")}</div>}
+    </details>
+  );
+}
+
 function approvedLabel(internal: Internal | null, currentName: string | null): string {
   if (!internal?.approved_at) return "Not approved yet";
   const when = dateTime(internal.approved_at);
@@ -405,7 +457,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   if (!woData) notFound();
   const wo = woData as unknown as WorkOrder;
 
-  const [internalRes, finRes, linesRes, compRes, authRes, attRes, shipRes, eventRes, shopsRes, catalogRes, locationCounts, billingRes] =
+  const [internalRes, finRes, linesRes, compRes, authRes, attRes, shipRes, eventRes, shopsRes, catalogRes, locationCounts, billingRes, emailsRes] =
     await Promise.all([
       supabase
         .from("work_order_internal")
@@ -451,6 +503,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase.from("catalog_items").select("id, sku, name, category, oe_cross, price_per_line").eq("active", true).order("sku"),
       loadLocationCounts(supabase),
       supabase.from("customer_billing").select("tax_exempt").eq("customer_id", wo.customer_id).maybeSingle(),
+      supabase.from("inbound_emails").select(EMAIL_COLUMNS).eq("work_order_id", id).order("received_at", { ascending: false }),
     ]);
 
   // QuickBooks: only for orders that are ready to invoice or invoiced.
@@ -472,6 +525,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const requests = (authRes.data ?? []) as unknown as AuthRequest[];
   const attachments = (attRes.data ?? []) as Attachment[];
   const shipments = (shipRes.data ?? []) as unknown as Shipment[];
+  const emails = (emailsRes.data ?? []) as InboundEmail[];
   const labels = shipments.length ? await activeLabels(supabase, { workOrderId: id }, true) : new Map();
   const canShip = shipStationConfigured();
   const events = (eventRes.data ?? []) as WoEvent[];
@@ -698,6 +752,14 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </Fact>
               <Fact label="Routing notes">{internal?.routing_notes}</Fact>
               <Fact label="Internal notes">{internal?.internal_notes}</Fact>
+              {emails.map((e) => (
+                <OriginalEmail key={e.id} email={e} />
+              ))}
+              {emailsRes.error && (
+                <div className="small" style={{ gridColumn: "1 / -1" }}>
+                  The original email could not be loaded. Reload the page.
+                </div>
+              )}
               <Fact label="Created">
                 {dateTime(wo.created_at)} ({internal?.source === "manual" ? "manual" : internal?.source})
               </Fact>
