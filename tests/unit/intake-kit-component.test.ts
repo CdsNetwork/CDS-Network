@@ -63,3 +63,39 @@ describe("kit components in the OE cross reference", () => {
     if (d.ok) expect(d.params.p_internal_notes).toMatch(/Not matched to the catalog: .*CDS-CL-1060AM/);
   });
 });
+
+/**
+ * After the kit was excluded, the name fallback guessed the same clamp line as a NOx sensor
+ * ("SENSOR, OXIDE, NITROGEN (US SEE NX0141 / CAN SEE NOXCXX003)"): First Student descriptions
+ * share words like "CAN SEE" and their item numbers do not always fit the description. A line
+ * whose part number is not in the catalog is left for CDS; it is never guessed by name.
+ */
+describe("unknown part number", () => {
+  const NOX: CatalogRef = {
+    id: "9a9a9a9a-0000-4000-8000-00000000c002",
+    sku: "ENV-NOX-1611",
+    name: "SENSOR, OXIDE, NITROGEN   (US SEE NX0141 / CAN SEE NOXCXX003)",
+    category: "part",
+    oe_cross: "Supplied by Enviromotive as ENV-NOX-1611 | OE 2872946 / 4326874 | FS 2520639C1 / NOXCXX003",
+  };
+  const FILTER: CatalogRef = {
+    id: "9a9a9a9a-0000-4000-8000-00000000c003",
+    sku: "CDS-DPF-GESI0101",
+    name: "FILTER, PARTICULATE, EXHAUST, DIESEL    SEE DC1-BB515",
+    category: "part",
+    oe_cross: null,
+  };
+  const cat2 = [...catalog, KIT, NOX, FILTER];
+  const mm = (description: string, partNumber: string) =>
+    matchItem({ description, partNumber, qty: 4, component: null, source: "template" }, FIRST_STUDENT, cat2, aliases);
+
+  it("is not guessed as another part by words in the description", () => {
+    expect(mm("CLAMP, V-BAND (CAN SEE ENVCL1060AM)", "CDS-CL-1060AM")).toMatchObject({ catalog_item_id: null, via: "none", part_number: "CDS-CL-1060AM" });
+    expect(mm("FILTER, PARTICULATE, EXHAUST, DIESEL SEE DC1-BB515", "CDS-G-1057AM")).toMatchObject({ catalog_item_id: null, via: "none" });
+  });
+
+  it("still matches a known part number", () => {
+    expect(mm("anything", "ENV-NOX-1611")).toMatchObject({ catalog_item_id: NOX.id, via: "sku" });
+    expect(mm("anything", "2520639C1")).toMatchObject({ catalog_item_id: NOX.id, via: "oe_cross" });
+  });
+});

@@ -250,14 +250,16 @@ export function matchItem(
     if (bySku) return hit(bySku, "sku", 0.95);
     const byOe = catalog.find((c) => (kitByOe || !isKitItem(c)) && (c.oe_cross ?? "").split(/[,;\/\s]+/).some((oe) => oe && partKey(oe) === key));
     if (byOe) return hit(byOe, "oe_cross", 0.85);
+    // A part number not in the catalog is left for CDS, never guessed by its description:
+    // customer item numbers do not always fit their descriptions.
+    return { ...base, catalog_item_id: null, sku: null, name: null, via: "none", confidence: 0 };
   }
 
   // A cleaning request for a component ("DPF clean") goes to the service for that component.
   const text = `${input.description} ${input.component ?? ""}`;
   const component = input.component && input.component !== "other" ? input.component : null;
-  const isService = SERVICE_WORDS.test(input.description) || (!!component && !key);
-  // A part number not in the catalog is left for CDS, never guessed as a kit by its name.
-  const pool = catalog.filter((c) => (isService ? c.category === "service" : c.category !== "service") && !(key && isKitItem(c)));
+  const isService = SERVICE_WORDS.test(input.description) || !!component;
+  const pool = catalog.filter((c) => (isService ? c.category === "service" : c.category !== "service"));
   let best: { item: CatalogRef; recall: number; score: number } | null = null;
   let tie = false;
   for (const item of pool) {
