@@ -8,6 +8,11 @@ export type TemplateItem = {
   description: string;
   /** A CDS SKU or customer item number written on the request. */
   partNumber: string | null;
+  /**
+   * Another number for the same line, tried when `partNumber` is not in the catalog (First
+   * Student's own Item Number next to CDS's Supplier Item Number).
+   */
+  altPartNumber?: string | null;
   /** The CDS service this line names (Ryder service list), matched by SKU first. */
   sku?: string | null;
   qty: number;

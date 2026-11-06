@@ -392,6 +392,12 @@ async function parseTemplate(email: NormalizedEmail, text: string, t: TemplateRe
       m = { description: it.description, part_number: null, qty: it.qty, catalog_item_id: c.id, sku: c.sku, name: c.name, via: "sku", source: "template", confidence: TEMPLATE_CONFIDENCE };
     } else {
       m = matchItem(input, customerId, catalog, ref.aliases);
+      // The line's other number (First Student's Item Number) when the first is not in the
+      // catalog; with neither, the line keeps the first number for CDS.
+      if (!m.catalog_item_id && it.altPartNumber) {
+        const alt = matchItem({ ...input, partNumber: it.altPartNumber }, customerId, catalog, ref.aliases);
+        if (alt.catalog_item_id) m = alt;
+      }
     }
     items.push({
       ...m,

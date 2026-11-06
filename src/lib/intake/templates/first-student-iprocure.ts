@@ -1,7 +1,9 @@
 /**
  * First Student purchase orders from Infor iProcure ("New Purchase Order FSTL... from First
- * Student Company"). Used for parts orders and for cleanings. Item numbers are CDS SKUs or
- * First Student's own item numbers (customer aliases); the PO carries its own price.
+ * Student Company"). Used for parts orders and for cleanings. A line carries First Student's
+ * own "Item Number" (a customer alias) and CDS's "Supplier Item Number" (a CDS SKU). The part
+ * is assigned from the Supplier Item Number when there is one, with the Item Number tried
+ * after it; the PO carries its own price.
  */
 import { amount, countLabels, isoDate, present, readLabels, type TemplateItem, type TemplateResult } from "./common";
 
@@ -30,13 +32,15 @@ export function parseFirstStudentIprocure(text: string): TemplateResult {
   const items: TemplateItem[] = [];
   for (const block of parts.slice(1)) {
     const l = readLabels(block, LINE);
-    const partNumber = l["Item Number"] ?? l["Supplier Item Number"];
+    const partNumber = l["Supplier Item Number"] ?? l["Item Number"];
+    const altPartNumber = l["Supplier Item Number"] && l["Item Number"] !== l["Supplier Item Number"] ? l["Item Number"] : null;
     if (!partNumber && !l.Description) continue;
     const qty = amount(l["Quantity Requested"] ?? l.Quantity);
     const taxable = l.Taxable === null ? null : /^(1|y|yes|true)$/i.test(l.Taxable);
     items.push({
       description: l.Description ?? partNumber ?? "",
       partNumber,
+      altPartNumber,
       qty: qty && qty > 0 && qty < 1000 ? Math.round(qty) : 1,
       component: null,
       service: false,
