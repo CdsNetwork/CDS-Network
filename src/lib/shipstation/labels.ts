@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { recordSync } from "@/lib/integration-sync";
 import { shipStationRequest, ShipStationError } from "./client";
 import { shipStationConfig } from "./config";
+import { packageForShipment, type ShipmentPackage } from "./package";
 import {
   buildLabelRequest,
   buildRatesRequest,
@@ -11,7 +12,6 @@ import {
   mapRates,
   ratesFailureMessage,
   toShipAddress,
-  type PackageInput,
   type PortalAddress,
   type Rate,
   type ShipAddress,
@@ -74,17 +74,11 @@ type Context = {
   workOrderId: string;
   woNumber: number;
   direction: string;
-  pkg: PackageInput;
+  pkg: ShipmentPackage;
   from: { address: ShipAddress; summary: string };
   to: { address: ShipAddress; summary: string };
   carriers: CarrierRow[];
   hasActiveLabel: boolean;
-};
-
-const num = (v: number | string | null | undefined): number | null => {
-  if (v === null || v === undefined || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
 };
 
 function summary(a: ShipAddress): string {
@@ -192,12 +186,8 @@ async function loadContext(db: Db, shipmentId: string): Promise<{ ok: true; ctx:
   }
   if (!from.ok || !to.ok) return { ok: false, error: "Address problem." };
 
-  const pkg: PackageInput = {
-    weightLb: num(sh.weight_lb) ?? num(s?.default_weight_lb) ?? 0,
-    lengthIn: num(sh.length_in) ?? num(s?.default_length_in),
-    widthIn: num(sh.width_in) ?? num(s?.default_width_in),
-    heightIn: num(sh.height_in) ?? num(s?.default_height_in),
-  };
+  // The package saved on the shipment (from the rates box or the Shipping form), else the default.
+  const pkg: ShipmentPackage = packageForShipment(sh, s);
 
   return {
     ok: true,
@@ -245,7 +235,7 @@ async function logSync(db: Db, entity: string, shipmentId: string, status: strin
 }
 
 export type RatesResult =
-  | { ok: true; rates: (Rate & { carrierName: string })[]; problems: string[]; testLabels: boolean; from: string; to: string; weightLb: number }
+  | { ok: true; rates: (Rate & { carrierName: string })[]; problems: string[]; testLabels: boolean; from: string; to: string; pkg: ShipmentPackage }
   | { ok: false; error: string };
 
 export async function ratesForShipment(db: Db, shipmentId: string): Promise<RatesResult> {
@@ -274,7 +264,7 @@ export async function ratesForShipment(db: Db, shipmentId: string): Promise<Rate
       testLabels: config.testLabels,
       from: ctx.from.summary,
       to: ctx.to.summary,
-      weightLb: ctx.pkg.weightLb,
+      pkg: ctx.pkg,
     };
   } catch (e) {
     await logSync(db, "rates", shipmentId, "error", null, failure(e));

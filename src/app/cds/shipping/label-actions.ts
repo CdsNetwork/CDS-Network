@@ -10,6 +10,7 @@ import {
   type LabelResult,
   type RatesResult,
 } from "@/lib/shipstation/labels";
+import { packageFromForm, type PackageForm } from "@/lib/shipstation/package";
 import { createClient } from "@/lib/supabase/server";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -19,11 +20,41 @@ function refresh(woId: string) {
   if (UUID.test(woId)) revalidatePath(`/cds/work-orders/${woId}`);
 }
 
-/** Live rates for a shipment leg from the carriers CDS turned on. CDS only. */
-export async function getShipmentRates(shipmentId: string): Promise<RatesResult> {
+/**
+ * Live rates for a shipment leg from the carriers CDS turned on, for the package typed in the
+ * rates box. The package is saved on the shipment first, so the label is bought for the same
+ * package. CDS only.
+ */
+export async function getShipmentRates(shipmentId: string, form: PackageForm): Promise<RatesResult> {
   await requireCds();
   if (!UUID.test(shipmentId)) return { ok: false, error: "Shipment not found." };
-  return ratesForShipment(await createClient(), shipmentId);
+  const parsed = packageFromForm({
+    weightLb: String(form?.weightLb ?? ""),
+    lengthIn: String(form?.lengthIn ?? ""),
+    widthIn: String(form?.widthIn ?? ""),
+    heightIn: String(form?.heightIn ?? ""),
+  });
+  if (!parsed.ok) return parsed;
+  const { pkg } = parsed;
+
+  const supabase = await createClient();
+  const { count, error: labelError } = await supabase
+    .from("shipment_labels")
+    .select("id", { count: "exact", head: true })
+    .eq("shipment_id", shipmentId)
+    .eq("status", "active");
+  if (labelError) return { ok: false, error: "The shipment could not be read. Try again." };
+  if ((count ?? 0) > 0) return { ok: false, error: "This shipment already has a label. Void it before getting new rates." };
+
+  const { data: saved, error } = await supabase
+    .from("shipments")
+    .update({ weight_lb: pkg.weightLb, length_in: pkg.lengthIn, width_in: pkg.widthIn, height_in: pkg.heightIn })
+    .eq("id", shipmentId)
+    .select("id")
+    .maybeSingle();
+  if (error) return { ok: false, error: "Could not save the package weight and size. Try again." };
+  if (!saved) return { ok: false, error: "Shipment not found." };
+  return ratesForShipment(supabase, shipmentId);
 }
 
 /** Creates the label for the chosen rate (a test label while SHIPSTATION_TEST_LABELS is on). CDS only. */

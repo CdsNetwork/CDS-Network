@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LabelView } from "@/components/shipping/LabelPanel";
 import { shipStationConfig } from "./config";
+import type { DefaultPackage } from "./package";
 
 type Row = {
   id: string;
@@ -51,4 +52,17 @@ export async function activeLabels(
     });
   }
   return out;
+}
+
+/**
+ * The Shipping settings default package (CDS pages only), to prefill the rates box when a
+ * shipment has no saved weight. Null when it cannot be read; the rates box then starts empty
+ * for those shipments.
+ */
+export async function defaultPackage(db: SupabaseClient): Promise<DefaultPackage | null> {
+  const { data, error } = await db
+    .from("shipping_settings")
+    .select("default_weight_lb, default_length_in, default_width_in, default_height_in")
+    .maybeSingle();
+  return error ? null : ((data as DefaultPackage | null) ?? null);
 }

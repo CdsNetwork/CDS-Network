@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { createShipmentLabel, getShipmentRates, voidShipmentLabel } from "@/app/cds/shipping/label-actions";
 import type { RatesResult } from "@/lib/shipstation/labels";
+import { packageFormValues, packageSummary, type PackageForm, type ShipmentPackage } from "@/lib/shipstation/package";
 import { voidLabelConfirm } from "./confirm";
 import { TestBadge } from "./TestBadge";
 
@@ -19,13 +20,43 @@ export type LabelView = {
 
 type Rates = Extract<RatesResult, { ok: true }>;
 
+const EMPTY_PACKAGE: PackageForm = { weightLb: "", lengthIn: "", widthIn: "", heightIn: "" };
+
+const SIDES: [keyof PackageForm, string][] = [
+  ["lengthIn", "Length"],
+  ["widthIn", "Width"],
+  ["heightIn", "Height"],
+];
+
 const money = (n: number, currency = "USD") => new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n);
 
 /**
  * CDS: get live rates for a shipment leg, pick a service, create the label (a test label
- * while SHIPSTATION_TEST_LABELS is on), download or void it.
+ * while SHIPSTATION_TEST_LABELS is on), download or void it. pkg is the package to prefill:
+ * the one saved on the shipment, else the Shipping settings default. Get rates saves the
+ * package typed here on the shipment, and the label is bought for it.
  */
-export function LabelPanel({ shipmentId, woId, label, configured }: { shipmentId: string; woId: string; label: LabelView | null; configured: boolean }) {
+export function LabelPanel({
+  shipmentId,
+  woId,
+  label,
+  configured,
+  pkg,
+}: {
+  shipmentId: string;
+  woId: string;
+  label: LabelView | null;
+  configured: boolean;
+  pkg?: ShipmentPackage | null;
+}) {
+  const [form, setForm] = useState<PackageForm>(() => (pkg ? packageFormValues(pkg) : EMPTY_PACKAGE));
+  // The saved package changed on the server (for example in the Shipping form): show it.
+  const pkgKey = pkg ? packageSummary(pkg) : "";
+  const [shownPkg, setShownPkg] = useState(pkgKey);
+  if (shownPkg !== pkgKey) {
+    setShownPkg(pkgKey);
+    setForm(pkg ? packageFormValues(pkg) : EMPTY_PACKAGE);
+  }
   const [rates, setRates] = useState<Rates | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,10 +107,27 @@ export function LabelPanel({ shipmentId, woId, label, configured }: { shipmentId
   }
 
   const chosen = rates?.rates.find((r) => r.rateId === picked) ?? null;
+  // Rates are for the package they were quoted with: a change needs new rates.
+  const edit = (key: keyof PackageForm, value: string) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    setRates(null);
+    setPicked(null);
+  };
+  const sizeInput = { className: "input", type: "number", min: "0", step: "0.1", disabled: pending, style: { width: 64, padding: "5px 6px" } } as const;
 
   return (
     <div>
-      <div className="row" style={{ gap: 8 }}>
+      <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <label className="small row" style={{ gap: 4, alignItems: "center", flexWrap: "nowrap" }}>
+          Weight (lb)
+          <input {...sizeInput} value={form.weightLb} onChange={(e) => edit("weightLb", e.target.value)} />
+        </label>
+        <span className="small row" style={{ gap: 4, alignItems: "center", flexWrap: "nowrap" }}>
+          Box (in)
+          {SIDES.map(([key, name]) => (
+            <input key={key} {...sizeInput} aria-label={`${name} (in)`} placeholder={name} value={form[key]} onChange={(e) => edit(key, e.target.value)} />
+          ))}
+        </span>
         <button
           className="btn btn-secondary btn-small"
           type="button"
@@ -89,7 +137,7 @@ export function LabelPanel({ shipmentId, woId, label, configured }: { shipmentId
             setMessage(null);
             setPicked(null);
             start(async () => {
-              const r = await getShipmentRates(shipmentId);
+              const r = await getShipmentRates(shipmentId, form);
               if (r.ok) setRates(r);
               else {
                 setRates(null);
@@ -140,7 +188,7 @@ export function LabelPanel({ shipmentId, woId, label, configured }: { shipmentId
             <br />
             To {rates.to}
             <br />
-            {rates.weightLb} lb
+            Package {packageSummary(rates.pkg)}
           </div>
           {rates.rates.length === 0 ? (
             <p className="small">No rates for this shipment.</p>

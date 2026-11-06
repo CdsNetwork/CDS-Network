@@ -3,7 +3,8 @@ import { SearchSelect } from "@/components/SearchSelect";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
 import { LabelPanel } from "@/components/shipping/LabelPanel";
 import { ShippingSettings } from "@/components/shipping/ShippingSettings";
-import { activeLabels, shipStationConfigured } from "@/lib/shipstation/views";
+import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/shipstation/views";
+import { packageForShipment } from "@/lib/shipstation/package";
 import { one } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { DIRECTION_LABEL, SHIPMENT_STATUS_LABEL, dateTime, money, shipmentEta, woLabel, wrapCell } from "@/lib/format";
@@ -81,8 +82,11 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
   const shipments = [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id));
   const openWos = (woRes.data ?? []) as unknown as OpenWo[];
   const editing = typeof edit === "string" ? shipments.find((s) => s.id === edit) : undefined;
-  const labels = await activeLabels(supabase, { shipmentIds: shipments.map((s) => s.id) }, true);
   const canShip = shipStationConfigured();
+  const [labels, packageDefaults] = await Promise.all([
+    activeLabels(supabase, { shipmentIds: shipments.map((s) => s.id) }, true),
+    canShip ? defaultPackage(supabase) : null,
+  ]);
 
   const exceptions = shipments.filter((s) => OPEN_LABEL.includes(s.label_status)).length;
   const inTransit = shipments.filter((s) => IN_TRANSIT.includes(s.status)).length;
@@ -231,7 +235,13 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
                     </span>
                   </td>
                   <td style={{ minWidth: 260 }}>
-                    <LabelPanel shipmentId={s.id} woId={s.work_order_id} label={labels.get(s.id) ?? null} configured={canShip} />
+                    <LabelPanel
+                      shipmentId={s.id}
+                      woId={s.work_order_id}
+                      label={labels.get(s.id) ?? null}
+                      configured={canShip}
+                      pkg={packageForShipment(s, packageDefaults)}
+                    />
                   </td>
                   <td style={{ minWidth: 200 }}>
                     <span className={STATUS_TAG[s.status] ?? "tag"}>{SHIPMENT_STATUS_LABEL[s.status] ?? s.status}</span>

@@ -47,8 +47,9 @@ import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { LabelPanel } from "@/components/shipping/LabelPanel";
-import { activeLabels, shipStationConfigured } from "@/lib/shipstation/views";
+import { LabelPanel, type LabelView } from "@/components/shipping/LabelPanel";
+import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/shipstation/views";
+import { packageForShipment } from "@/lib/shipstation/package";
 import { NEW_SHIPMENT_STATUS } from "@/app/cds/shipping/options";
 import {
   addLine,
@@ -194,6 +195,10 @@ type Shipment = {
   eta_text: string | null;
   delivered_at: string | null;
   created_at: string;
+  weight_lb: number | string | null;
+  length_in: number | string | null;
+  width_in: number | string | null;
+  height_in: number | string | null;
   shipment_internal: MaybeOne<{ notes: string | null; quoted_cost: number | null; actual_cost: number | null }>;
 };
 
@@ -490,7 +495,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase
         .from("shipments")
         .select(
-          "id, direction, carrier, service_level, tracking_number, label_status, status, eta_text, delivered_at, created_at, shipment_internal(notes, quoted_cost, actual_cost)",
+          "id, direction, carrier, service_level, tracking_number, label_status, status, eta_text, delivered_at, created_at, weight_lb, length_in, width_in, height_in, shipment_internal(notes, quoted_cost, actual_cost)",
         )
         .eq("work_order_id", id)
         .order("created_at"),
@@ -526,8 +531,10 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const attachments = (attRes.data ?? []) as Attachment[];
   const shipments = (shipRes.data ?? []) as unknown as Shipment[];
   const emails = (emailsRes.data ?? []) as InboundEmail[];
-  const labels = shipments.length ? await activeLabels(supabase, { workOrderId: id }, true) : new Map();
   const canShip = shipStationConfigured();
+  const [labels, packageDefaults] = shipments.length
+    ? await Promise.all([activeLabels(supabase, { workOrderId: id }, true), canShip ? defaultPackage(supabase) : null])
+    : [new Map<string, LabelView>(), null];
   const events = (eventRes.data ?? []) as WoEvent[];
   const shops = (shopsRes.data ?? []) as ShopRow[];
   const catalog = (catalogRes.data ?? []) as {
@@ -808,7 +815,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       {si?.notes ? ` • ${si.notes}` : ""}
                     </div>
                     <div style={{ marginTop: 8 }}>
-                      <LabelPanel shipmentId={s.id} woId={wo.id} label={labels.get(s.id) ?? null} configured={canShip} />
+                      <LabelPanel
+                        shipmentId={s.id}
+                        woId={wo.id}
+                        label={labels.get(s.id) ?? null}
+                        configured={canShip}
+                        pkg={packageForShipment(s, packageDefaults)}
+                      />
                     </div>
                     {!labels.has(s.id) && !s.tracking_number && REMOVABLE_LABEL_STATUSES.includes(s.label_status) && wo.status !== "invoiced" && (
                       <div style={{ marginTop: 8 }}>
