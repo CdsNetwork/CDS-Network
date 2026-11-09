@@ -43,6 +43,8 @@ import {
   wrapCell,
 } from "@/lib/format";
 import { htmlToText } from "@/lib/intake/email";
+import { NOTE_MAX_LENGTH, type NoteView } from "@/lib/notes";
+import { NotesList } from "@/components/WorkOrderNotes";
 import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -56,7 +58,9 @@ import {
   addPassThroughLine,
   addShipment,
   createQuickBooksInvoice,
+  addNote,
   decideAuthorization,
+  deleteNote,
   dispatchWorkOrder,
   removeLine,
   removePassThroughLine,
@@ -462,7 +466,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   if (!woData) notFound();
   const wo = woData as unknown as WorkOrder;
 
-  const [internalRes, finRes, linesRes, compRes, authRes, attRes, shipRes, eventRes, shopsRes, catalogRes, locationCounts, billingRes, emailsRes] =
+  const [internalRes, finRes, linesRes, compRes, authRes, attRes, shipRes, eventRes, shopsRes, catalogRes, locationCounts, billingRes, emailsRes, notesRes] =
     await Promise.all([
       supabase
         .from("work_order_internal")
@@ -509,6 +513,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       loadLocationCounts(supabase),
       supabase.from("customer_billing").select("tax_exempt").eq("customer_id", wo.customer_id).maybeSingle(),
       supabase.from("inbound_emails").select(EMAIL_COLUMNS).eq("work_order_id", id).order("received_at", { ascending: false }),
+      supabase.from("work_order_notes").select("id, author_name, created_at, body").eq("work_order_id", id).order("created_at"),
     ]);
 
   // QuickBooks: only for orders that are ready to invoice or invoiced.
@@ -531,6 +536,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const attachments = (attRes.data ?? []) as Attachment[];
   const shipments = (shipRes.data ?? []) as unknown as Shipment[];
   const emails = (emailsRes.data ?? []) as InboundEmail[];
+  const notes = (notesRes.data ?? []) as NoteView[];
   const canShip = shipStationConfigured();
   const [labels, packageDefaults] = shipments.length
     ? await Promise.all([activeLabels(supabase, { workOrderId: id }, true), canShip ? defaultPackage(supabase) : null])
@@ -1222,6 +1228,32 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </div>
             )}
             <p className="small">Links expire after 10 minutes. Reload the page for fresh links.</p>
+          </section>
+
+          <section className="section" id="notes">
+            <h3>Notes (shop can see)</h3>
+            <p className="small">
+              Shared with the assigned shop: they see these notes and can add their own. For CDS-only notes use Internal notes.
+            </p>
+            {notesRes.error && <div className="notice danger">Notes could not be loaded. Reload the page.</div>}
+            <NotesList
+              notes={notes}
+              actions={(n) => (
+                <ActionForm
+                  action={deleteNote.bind(null, wo.id, n.id)}
+                  submitLabel="Delete"
+                  pendingLabel="..."
+                  buttonClass="remove"
+                  confirmText="Delete this note? The shop will no longer see it."
+                />
+              )}
+            />
+            <ActionForm action={addNote.bind(null, wo.id)} submitLabel="Add note" pendingLabel="Adding..." resetOnSuccess>
+              <div className="field" style={{ marginTop: 10 }}>
+                <label htmlFor="note-body">New note (the shop sees it)</label>
+                <textarea id="note-body" name="body" rows={3} maxLength={NOTE_MAX_LENGTH} required />
+              </div>
+            </ActionForm>
           </section>
 
           <section className="section">

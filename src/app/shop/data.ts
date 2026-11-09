@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { CATEGORY_LABEL, money } from "@/lib/format";
 import { pacificToday } from "@/lib/dates";
 import { fetchAllSettled } from "@/lib/supabase/fetch-all";
+import type { NoteView } from "@/lib/notes";
 import {
   TAB_STATUSES,
   type AttachmentView,
@@ -120,6 +121,8 @@ export type JobDetailData = {
   authRequests: AuthRequestRow[];
   attachments: AttachmentView[];
   shipments: ShipmentRow[];
+  /** Notes shared with CDS, oldest first (RLS: only this shop's time on the job). */
+  notes: NoteView[];
   /** Parts the shop may add, with its own pay rate in the hint. */
   partOptions: CatalogOption[];
   /** Whole active catalog for extra work requests, with the request kind. */
@@ -145,7 +148,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
   const job: JobRow = { ...w, customer_name: w.customers?.name ?? "" };
   delete (job as Partial<typeof w>).customers;
 
-  const [lines, components, auths, files, ships] = await Promise.all([
+  const [lines, components, auths, files, ships, notes] = await Promise.all([
     supabase
       .from("work_order_lines")
       .select("id, qty, shop_unit_rate, origin, description, created_at, catalog_items(sku, name)")
@@ -174,6 +177,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
       .select("id, direction, carrier, tracking_number, status, created_at")
       .eq("work_order_id", id)
       .order("created_at"),
+    supabase.from("work_order_notes").select("id, author_name, created_at, body").eq("work_order_id", id).order("created_at"),
   ]);
 
   const lineRows: LineRow[] = (lines.data ?? []).map((r) => {
@@ -271,6 +275,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     authRequests: authRows,
     attachments,
     shipments,
+    notes: (notes.data ?? []) as NoteView[],
     partOptions,
     authOptions,
   };

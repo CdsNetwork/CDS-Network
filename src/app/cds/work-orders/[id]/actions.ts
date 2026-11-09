@@ -5,6 +5,7 @@ import type { ActionState } from "@/components/cds-wo/ActionForm";
 import { isUuid, LINES_LOCKED_STATUSES, REMOVABLE_LABEL_STATUSES, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
 import { recordSync } from "@/lib/integration-sync";
+import { noteBody } from "@/lib/notes";
 import { passThroughInput } from "@/lib/pass-through";
 import { emailCdsAfter } from "@/lib/portal-email-send";
 import { createInvoice, type CreatedInvoice } from "@/lib/qbo/api";
@@ -351,6 +352,35 @@ export async function removeLine(woId: string, lineId: string): Promise<ActionSt
     shop_visible: !REVIEW_STATUSES.includes(status),
   });
   return done(woId, "Line removed.");
+}
+
+/** A note the assigned shop sees too (work_order_notes); not the CDS-only internal notes. */
+export async function addNote(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const note = noteBody(formData.get("body"));
+  if ("error" in note) return { error: note.error };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("work_order_notes")
+    .insert({ work_order_id: woId, author_id: profile.id, body: note.body });
+  if (error) return { error: error.message };
+  return done(woId, "Note added.");
+}
+
+export async function deleteNote(woId: string, noteId: string): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId) || !isUuid(noteId)) return { error: "Note not found." };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("work_order_notes")
+    .delete()
+    .eq("id", noteId)
+    .eq("work_order_id", woId)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Note not found." };
+  return done(woId, "Note deleted.");
 }
 
 /** Misc. hardware and other items priced per line: the amount from the shop's invoice, billed as is. */

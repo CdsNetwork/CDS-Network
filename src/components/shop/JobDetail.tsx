@@ -16,6 +16,7 @@ import {
 import {
   acceptJob,
   addComponent,
+  addNote,
   addPart,
   completeJob,
   declineJob,
@@ -34,6 +35,8 @@ import { AuthRequestForm } from "./AuthRequestForm";
 import { ComponentCard } from "./ComponentCard";
 import { DeclineJob } from "./DeclineJob";
 import { TestBadge } from "@/components/shipping/TestBadge";
+import { NotesList } from "@/components/WorkOrderNotes";
+import { NOTE_MAX_LENGTH } from "@/lib/notes";
 import styles from "./shop.module.css";
 import { EDITABLE_STATUSES, componentLabel, type ComponentRow, type LineRow } from "./types";
 
@@ -53,7 +56,7 @@ const AUTH_STATUS_LABEL: Record<string, string> = {
 const qtyText = (n: number) => String(n);
 
 export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: string }) {
-  const { job, lines, components, authRequests, attachments, shipments } = data;
+  const { job, lines, components, authRequests, attachments, shipments, notes } = data;
   const id = job.id;
   const editable = EDITABLE_STATUSES.includes(job.status);
   const awaiting = job.status === "awaiting_acceptance";
@@ -220,6 +223,19 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
           {missingRate && <p className="small">Some items have no rate yet. CDS will confirm them.</p>}
         </section>
       </div>
+
+      {/* ------------------------------------------------ notes */}
+      <section className="section" id="notes">
+        <h3>Notes</h3>
+        <p className="small">Notes between your shop and CDS for this job. CDS sees everything you add here.</p>
+        <NotesList notes={notes} />
+        <ActionForm action={addNote.bind(null, id)} submitLabel="Add note" pendingLabel="Adding..." resetOnSuccess>
+          <div className="field" style={{ marginTop: 10 }}>
+            <label htmlFor="note-body">New note</label>
+            <textarea id="note-body" name="body" rows={3} required maxLength={NOTE_MAX_LENGTH} />
+          </div>
+        </ActionForm>
+      </section>
 
       {/* ------------------------------------------------ services and parts */}
       <section className="section">

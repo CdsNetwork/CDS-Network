@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { emailCdsAfter } from "@/lib/portal-email-send";
 import { ATTACHMENT_CATEGORY_LABEL, PICKUP_WINDOWS, SHIP_STATUS_LABEL } from "@/lib/format";
+import { noteBody } from "@/lib/notes";
 import type { ActionState } from "@/components/shop/types";
 import { isUuid } from "./data";
 
@@ -96,6 +97,21 @@ export async function setShipStatus(workOrderId: string, _prev: ActionState, fd:
   if (!(status in SHIP_STATUS_LABEL)) return { error: "Choose a shipping status." };
   const supabase = await createClient();
   const { error } = await supabase.rpc("shop_set_ship_status", { p_work_order: workOrderId, p_status: status });
+  return done(error);
+}
+
+// ---------------------------------------------------------------- notes
+
+/** Adds a note CDS sees too. RLS checks the job is this shop's and the author is this login. */
+export async function addNote(workOrderId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
+  const bad = await guard(workOrderId);
+  if (bad) return bad;
+  const note = noteBody(fd.get("body"));
+  if ("error" in note) return { error: note.error };
+  const supabase = await createClient();
+  const { error } = await supabase.from("work_order_notes").insert({ work_order_id: workOrderId, body: note.body });
+  // 42501: not this shop's job (any more), the policy refused the row.
+  if (error?.code === "42501") return { error: "This job is not available. It may have been reassigned by CDS." };
   return done(error);
 }
 
