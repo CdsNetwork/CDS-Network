@@ -375,6 +375,19 @@ export async function removeLine(woId: string, lineId: string): Promise<ActionSt
   return done(woId, "Line removed.");
 }
 
+/**
+ * CDS opened the work order: clears its "New from shop" flag (20261111040000_shop_updates.sql).
+ * Called from the browser once the page is shown (MarkSeen), never while rendering, so a link
+ * prefetch does not clear it. Nothing to revalidate: the page itself does not show the flag.
+ */
+export async function markWorkOrderSeen(woId: string): Promise<void> {
+  await requireCds();
+  if (!isUuid(woId)) return;
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("cds_mark_work_order_seen", { p_work_order: woId });
+  if (error) console.error(`New from shop flag not cleared for work order ${woId}: ${error.message}`);
+}
+
 /** A note the assigned shop sees too (work_order_notes); not the CDS-only internal notes. */
 export async function addNote(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
   const profile = await requireCds();

@@ -1,7 +1,9 @@
 /**
  * Status emails to CDS's dispatch inbox (CDS, 2026-11-04): when a work order is sent to a
  * shop, declined by a shop, or finished by a shop (Complete Work), the portal emails
- * dispatch@cds.direct. CDS only: shops get no email from the portal.
+ * dispatch@cds.direct. CDS only: shops get no email from the portal. A shop marking a component
+ * failed or condemned also emails dispatch@ (Ashley, 2026-11-11), once per failure
+ * (component_failures, 20261111040000_shop_updates.sql).
  *
  * Sent through Resend (POST https://api.resend.com/emails) from CDS Portal
  * <portal@in.cds.direct>; in.cds.direct is verified in Resend for sending. Every subject starts
@@ -21,7 +23,7 @@
  */
 import { dateTime } from "@/lib/format";
 
-export type PortalEvent = "sent" | "declined" | "finished";
+export type PortalEvent = "sent" | "declined" | "finished" | "failed";
 
 export const PORTAL_FROM = "CDS Portal <portal@in.cds.direct>";
 /** The portal's own sending domain: mail from it is never a request. */
@@ -44,12 +46,17 @@ export type PortalEmailDetails = {
   declineReason: string | null;
   /** The shop's invoice or reference number given on Complete Work. */
   shopReference: string | null;
+  /** Failure emails only: the component ("DPF, part 2871891, serial SN-4471"), its result and the shop's reason. */
+  component?: string | null;
+  result?: string | null;
+  failureNote?: string | null;
 };
 
 const VERB: Record<PortalEvent, { subject: string; sentence: string }> = {
   sent: { subject: "sent to", sentence: "was sent to" },
   declined: { subject: "declined by", sentence: "was declined by" },
   finished: { subject: "finished by", sentence: "was finished by" },
+  failed: { subject: "marked failed by", sentence: "was marked failed by" },
 };
 
 const escapeHtml = (s: string) =>
@@ -62,8 +69,13 @@ export function workOrderUrl(workOrderId: string): string {
 export function buildPortalEmail(event: PortalEvent, d: PortalEmailDetails): { subject: string; text: string; html: string } {
   const shop = d.shop?.trim() || "a shop";
   const wo = `WO ${d.woNumber}`;
-  const subject = `${PORTAL_SUBJECT_PREFIX}${wo} ${VERB[event].subject} ${shop}`;
-  const headline = `${wo} ${VERB[event].sentence} ${shop}.`;
+  const failed = event === "failed";
+  const result = d.result?.trim() || "Failed";
+  const componentType = d.component?.split(",")[0]?.trim() || "Component";
+  const subject = failed
+    ? `${PORTAL_SUBJECT_PREFIX}${wo} ${componentType} marked ${result} by ${shop}`
+    : `${PORTAL_SUBJECT_PREFIX}${wo} ${VERB[event].subject} ${shop}`;
+  const headline = failed ? `A component on ${wo} was marked ${result} by ${shop}.` : `${wo} ${VERB[event].sentence} ${shop}.`;
   const rows: [string, string | null][] = [
     ["Work order", wo],
     ["Customer", d.customer],
@@ -74,6 +86,9 @@ export function buildPortalEmail(event: PortalEvent, d: PortalEmailDetails): { s
     ["When", dateTime(d.at)],
     ["Decline reason", event === "declined" ? d.declineReason : null],
     ["Shop invoice / reference", event === "finished" ? d.shopReference : null],
+    ["Component", failed ? (d.component ?? null) : null],
+    ["Result", failed ? result : null],
+    ["Reason", failed ? (d.failureNote ?? null) : null],
   ];
   const shown = rows.filter((r): r is [string, string] => !!r[1]?.trim());
   const url = workOrderUrl(d.workOrderId);
@@ -109,9 +124,14 @@ export function portalEmailConfig(env: Record<string, string | undefined> = proc
 export type PortalEmailStore = {
   /**
    * The work order and its latest status change of this kind, with the change's key (the same
-   * for a repeated or double clicked change), or null when either is not found.
+   * for a repeated or double clicked change), or null when either is not found. For "failed",
+   * componentId names the component and the change is its latest failure.
    */
-  details(event: PortalEvent, workOrderId: string): Promise<(PortalEmailDetails & { key: string }) | null>;
+  details(
+    event: PortalEvent,
+    workOrderId: string,
+    componentId?: string,
+  ): Promise<(PortalEmailDetails & { key: string }) | null>;
   /** Claims the key for this work order; null when it was claimed before (already emailed). */
   claim(event: PortalEvent, workOrderId: string, key: string): Promise<{ rowId: number } | null>;
   finish(rowId: number, status: "ok" | "skipped" | "error", note: string | null): Promise<void>;
@@ -158,7 +178,13 @@ async function sendWithResend(
 export async function notifyWorkOrderEvent(
   event: PortalEvent,
   workOrderId: string,
-  deps: { store: PortalEmailStore; env?: Record<string, string | undefined>; fetchImpl?: typeof fetch },
+  deps: {
+    store: PortalEmailStore;
+    env?: Record<string, string | undefined>;
+    fetchImpl?: typeof fetch;
+    /** "failed" only: the component the shop marked failed or condemned. */
+    componentId?: string;
+  },
 ): Promise<NotifyResult> {
   const fail = (message: string): NotifyResult => {
     console.error(`Portal email (${event}, work order ${workOrderId}): ${message}`);
@@ -166,7 +192,9 @@ export async function notifyWorkOrderEvent(
   };
   let rowId: number | null = null;
   try {
-    const found = await deps.store.details(event, workOrderId);
+    const found = deps.componentId
+      ? await deps.store.details(event, workOrderId, deps.componentId)
+      : await deps.store.details(event, workOrderId);
     if (!found) return fail("work order or its status change not found; nothing sent");
     const { key, ...details } = found;
 
