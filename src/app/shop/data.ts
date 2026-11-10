@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { CATEGORY_LABEL, money } from "@/lib/format";
 import { pacificToday } from "@/lib/dates";
 import { fetchAllSettled } from "@/lib/supabase/fetch-all";
+import { pickShopRatesByItem } from "@/lib/shop-rates";
 import type { NoteView } from "@/lib/notes";
 import {
   TAB_STATUSES,
@@ -139,14 +140,17 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     .from("work_orders")
     .select(
       "id, wo_number, status, market, fulfillment, location_label, site_address, unit_number, po_number, " +
-        "requested_work, pickup_window, shop_ship_status, affiliate_invoice_ref, completed_at, customers(name)",
+        "requested_work, pickup_window, shop_ship_status, affiliate_invoice_ref, completed_at, customer_id, affiliate_id, customers(name)",
     )
     .eq("id", id)
     .maybeSingle();
   if (!wo) return null;
-  const w = wo as unknown as Omit<JobRow, "customer_name"> & { customers: Named };
+  const w = wo as unknown as Omit<JobRow, "customer_name"> & { customers: Named; customer_id: string; affiliate_id: string | null };
   const job: JobRow = { ...w, customer_name: w.customers?.name ?? "" };
   delete (job as Partial<typeof w>).customers;
+  // Only to pick the shop's rate for this order's customer; not part of JobRow.
+  delete (job as Partial<typeof w>).customer_id;
+  delete (job as Partial<typeof w>).affiliate_id;
 
   const [lines, components, auths, files, ships, notes] = await Promise.all([
     supabase
@@ -265,7 +269,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
   let partOptions: CatalogOption[] = [];
   let authOptions: JobDetailData["authOptions"] = [];
   if (editable(job)) {
-    ({ partOptions, authOptions } = await loadCatalogOptions(job.market));
+    ({ partOptions, authOptions } = await loadCatalogOptions(job.market, w.affiliate_id, w.customer_id));
   }
 
   return {
@@ -281,18 +285,18 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
   };
 }
 
-async function loadCatalogOptions(market: string) {
+async function loadCatalogOptions(market: string, shop: string | null, customer: string) {
   const supabase = await createClient();
   const today = pacificToday();
 
   const [items, rates] = await Promise.all([
     supabase.from("catalog_items").select("id, sku, name, category, oe_cross, shop_selectable").eq("active", true).order("sku"),
-    // RLS returns the default rows plus this shop's own rows only.
-    // Up to two rows per catalog item: paged so a larger catalog never passes the 1000 row cap.
+    // RLS returns the default rows plus this shop's own rows only (each with or without a
+    // customer). Paged so a larger catalog never passes the 1000 row cap.
     fetchAllSettled((from, to) =>
       supabase
         .from("shop_rates")
-        .select("catalog_item_id, affiliate_id, amount, effective_from, effective_to")
+        .select("catalog_item_id, affiliate_id, customer_id, amount, effective_from, effective_to")
         .eq("market", market)
         .lte("effective_from", today)
         .or(`effective_to.is.null,effective_to.gt.${today}`)
@@ -301,14 +305,8 @@ async function loadCatalogOptions(market: string) {
     ),
   ]);
 
-  // Same rule as the database: the shop's own rate first, else the default; latest start date.
-  const best = new Map<string, { own: boolean; from: string; amount: number | null }>();
-  for (const r of rates.data ?? []) {
-    const own = r.affiliate_id !== null;
-    const cur = best.get(r.catalog_item_id);
-    const better = !cur || (own && !cur.own) || (own === cur.own && r.effective_from > cur.from);
-    if (better) best.set(r.catalog_item_id, { own, from: r.effective_from, amount: num(r.amount) });
-  }
+  // Same rule as the database: the most specific rate for this shop and this order's customer.
+  const best = pickShopRatesByItem(rates.data ?? [], shop, customer);
 
   const all = items.data ?? [];
   // Only shop-safe text: SKU, name, category, OE cross reference and the shop's own rate.
@@ -321,7 +319,7 @@ async function loadCatalogOptions(market: string) {
   const partOptions: CatalogOption[] = all
     .filter((i) => i.shop_selectable && i.category !== "service")
     .map((i) => {
-      const amount = best.get(i.id)?.amount ?? null;
+      const amount = num(best.get(i.id)?.amount ?? null);
       const o = base(i);
       const rate = amount === null ? "Rate set by CDS" : `Your rate ${money(amount)}`;
       return { ...o, hint: `${o.category} • ${rate}` };

@@ -7,12 +7,14 @@ import { OverrideInput } from "@/components/cds-admin/PriceWarning";
 import { one, today } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { CATEGORY_LABEL, date, money } from "@/lib/format";
+import { pickShopRatesByItem } from "@/lib/shop-rates";
 import { createClient } from "@/lib/supabase/server";
 import { setOverride } from "./actions";
 
 type Customer = { id: string; code: string; name: string };
 type Item = { id: string; sku: string; category: string; name: string; oe_cross: string | null };
 type PriceRow = { id: string; catalog_item_id: string; amount: string; effective_from: string };
+type RateRow = PriceRow & { customer_id: string | null; affiliate_id: string | null };
 type AuditRow = { row_id: string; at: string; actor_name: string | null; profiles: { full_name: string } | { full_name: string }[] | null };
 
 export default async function PricingPage({ searchParams }: PageProps<"/cds/pricing">) {
@@ -36,7 +38,7 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
       .order("effective_from", { ascending: true }),
     supabase
       .from("shop_rates")
-      .select("id, catalog_item_id, amount, effective_from")
+      .select("id, catalog_item_id, customer_id, affiliate_id, amount, effective_from")
       .is("affiliate_id", null)
       .eq("market", "US")
       .lte("effective_from", day)
@@ -46,11 +48,11 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
   const customers = (custData ?? []) as Customer[];
   const items = (itemData ?? []) as Item[];
   const sells = new Map(((sellData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
-  // Default shop rate (what CDS pays a shop without its own rate).
-  const rates = new Map(((rateData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
-
   const customerId = typeof sp.customer === "string" && customers.some((c) => c.id === sp.customer) ? sp.customer : customers[0]?.id;
   const customer = customers.find((c) => c.id === customerId);
+  // What CDS pays a shop without its own rate on this customer's orders: the customer's
+  // shop rate if there is one, else the default.
+  const rates = pickShopRatesByItem((rateData ?? []) as RateRow[], null, customer?.id ?? null);
 
   let overrides = new Map<string, PriceRow>();
   const lastChange = new Map<string, { at: string; by: string | null }>();
@@ -181,7 +183,8 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
                   const fleet = sells.get(i.id)?.amount ?? null;
                   const override = overrides.get(i.id);
                   const effective = override?.amount ?? fleet;
-                  const rate = rates.get(i.id)?.amount ?? null;
+                  const rateRow = rates.get(i.id);
+                  const rate = rateRow?.amount ?? null;
                   const change = override ? lastChange.get(override.id) : undefined;
                   return (
                     <tr key={i.id}>
@@ -195,6 +198,7 @@ export default async function PricingPage({ searchParams }: PageProps<"/cds/pric
                       </td>
                       <td className="num">
                         <span className="money">{money(rate)}</span>
+                        {rateRow?.customer_id && <div className="small">{customer.name} rate</div>}
                       </td>
                       <td className="num">
                         <span className="money">{money(fleet)}</span>

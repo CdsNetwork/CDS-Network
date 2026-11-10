@@ -60,3 +60,35 @@ export async function saveCatalogItem(id: string | null, _prev: ActionState, for
   }
   return { ok: true, message: id ? "Item saved." : `${item.sku} added.` };
 }
+
+/**
+ * Sets or clears the Shop Rate of an item for one customer (any shop), from today. With no
+ * customer chosen ("All customers") it sets the default Shop Rate, like the item form.
+ * `customerId` is bound for a row's Clear button; the add form sends `customer`.
+ */
+export async function setCustomerShopRate(
+  itemId: string,
+  customerId: string | null,
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await requireCds();
+  const clear = text(formData, "intent") === "clear";
+  const customer = customerId ?? optionalText(formData, "customer");
+  const amount = clear ? null : optionalAmount(formData, "amount");
+  if (Number.isNaN(amount)) return { error: "Enter a rate of zero or more." };
+  if (!clear && amount === null) return { error: "Enter a rate." };
+  if (clear && !customer) return { error: "Choose a customer." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("cds_set_price", {
+    p_kind: "shop_rate",
+    p_catalog_item: itemId,
+    p_customer: customer,
+    p_amount: amount,
+  });
+  if (error) return { error: dbMessage(error, "Could not save the rate.") };
+  revalidatePath("/cds/catalog");
+  revalidatePath("/cds/pricing");
+  return { ok: true, message: clear ? "Customer rate removed." : "Rate saved." };
+}

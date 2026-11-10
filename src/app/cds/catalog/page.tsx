@@ -7,7 +7,7 @@ import { today } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { CATEGORY_LABEL, money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
-import { saveCatalogItem } from "./actions";
+import { saveCatalogItem, setCustomerShopRate } from "./actions";
 
 type Item = {
   id: string;
@@ -20,6 +20,8 @@ type Item = {
   active: boolean;
 };
 type PriceRow = { catalog_item_id: string; amount: string | null; effective_from: string };
+type CustomerRateRow = PriceRow & { customer_id: string };
+type Customer = { id: string; code: string; name: string };
 
 const TAX_CLASS_LABEL: Record<string, string> = { parts: "Parts", labor: "Labor", shipping: "Shipping", exempt: "Exempt" };
 
@@ -34,12 +36,13 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
   const supabase = await createClient();
   const day = today();
   const current = `effective_to.is.null,effective_to.gt.${day}`;
-  const [{ data: itemData, error }, { data: rateData }, { data: sellData }] = await Promise.all([
+  const [{ data: itemData, error }, { data: rateData }, { data: sellData }, { data: customerRateData }, { data: custData }] = await Promise.all([
     supabase.from("catalog_items").select("id, sku, category, name, oe_cross, tax_class, shop_selectable, active").order("sku"),
     supabase
       .from("shop_rates")
       .select("catalog_item_id, amount, effective_from")
       .is("affiliate_id", null)
+      .is("customer_id", null)
       .eq("market", "US")
       .lte("effective_from", day)
       .or(current)
@@ -51,11 +54,31 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
       .lte("effective_from", day)
       .or(current)
       .order("effective_from", { ascending: true }),
+    // Shop rates for one customer (any shop), e.g. GESi filters on First Student orders.
+    supabase
+      .from("shop_rates")
+      .select("catalog_item_id, customer_id, amount, effective_from")
+      .is("affiliate_id", null)
+      .not("customer_id", "is", null)
+      .eq("market", "US")
+      .lte("effective_from", day)
+      .or(current)
+      .order("effective_from", { ascending: true }),
+    supabase.from("customers").select("id, code, name").eq("active", true).order("name"),
   ]);
   const items = (itemData ?? []) as Item[];
   // Ascending order: the latest row in effect wins.
   const rates = new Map(((rateData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
   const sells = new Map(((sellData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
+  const customers = (custData ?? []) as Customer[];
+  const customerName = new Map(customers.map((c) => [c.id, c.name]));
+  // Per item, the latest row in effect per customer.
+  const customerRates = new Map<string, Map<string, CustomerRateRow>>();
+  for (const r of (customerRateData ?? []) as CustomerRateRow[]) {
+    const byCustomer = customerRates.get(r.catalog_item_id) ?? new Map<string, CustomerRateRow>();
+    byCustomer.set(r.customer_id, r);
+    customerRates.set(r.catalog_item_id, byCustomer);
+  }
 
   const isBelow = (id: string) => belowShopRate(rates.get(id)?.amount, sells.get(id)?.amount);
   const belowCount = items.filter((i) => isBelow(i.id)).length;
@@ -116,6 +139,13 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
           <ActionForm key={editing.id} action={saveCatalogItem.bind(null, editing.id)} submitLabel="Save item">
             <ItemFields item={editing} rate={rates.get(editing.id)?.amount ?? null} sell={sells.get(editing.id)?.amount ?? null} />
           </ActionForm>
+          <CustomerShopRates
+            item={editing}
+            defaultRate={rates.get(editing.id)?.amount ?? null}
+            rows={[...(customerRates.get(editing.id)?.values() ?? [])]}
+            customers={customers}
+            customerName={customerName}
+          />
         </div>
       )}
 
@@ -201,6 +231,11 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
                   </td>
                   <td className="num">
                     <span className="money">{money(rate)}</span>
+                    {(customerRates.get(i.id)?.size ?? 0) > 0 && (
+                      <div className="small">
+                        + {customerRates.get(i.id)!.size} customer {customerRates.get(i.id)!.size === 1 ? "rate" : "rates"}
+                      </div>
+                    )}
                   </td>
                   <td className="num">
                     <span className="money">{money(sell)}</span>
@@ -232,7 +267,8 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
       </div>
       <p className="small">
         Shop Rate is the default amount CDS pays a shop (for parts the network figure, for services the affiliate figure).
-        Per-shop rates are not shown here.
+        A rate for one customer (Edit the item) applies on that customer&apos;s work orders instead. Per-shop rates are not
+        shown here.
       </p>
     </>
   );
@@ -304,5 +340,104 @@ function ItemFields({ item, rate, sell }: { item?: Item; rate?: string | null; s
         </p>
       )}
     </>
+  );
+}
+
+/** Shop rates for one customer (any shop): listed with the customer, set or cleared per row. */
+function CustomerShopRates({
+  item,
+  defaultRate,
+  rows,
+  customers,
+  customerName,
+}: {
+  item: Item;
+  defaultRate: string | null;
+  rows: CustomerRateRow[];
+  customers: Customer[];
+  customerName: Map<string, string>;
+}) {
+  const sorted = [...rows].sort((a, b) =>
+    (customerName.get(a.customer_id) ?? "").localeCompare(customerName.get(b.customer_id) ?? ""),
+  );
+  return (
+    <div style={{ marginTop: 18 }}>
+      <h3>Shop Rate by customer</h3>
+      <p className="small" style={{ marginTop: 0 }}>
+        What CDS pays the shop for {item.sku} on one customer&apos;s work orders. Applies from today to new lines; existing
+        work orders keep their rates.
+      </p>
+      <div className="tablewrap" style={{ boxShadow: "none" }}>
+        <table>
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th className="num">Shop Rate</th>
+              <th>Since</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>All customers</td>
+              <td className="num">
+                <span className="money">{money(defaultRate)}</span>
+              </td>
+              <td className="small">Set above</td>
+              <td></td>
+            </tr>
+            {sorted.map((r) => (
+              <tr key={r.customer_id}>
+                <td>
+                  <b>{customerName.get(r.customer_id) ?? "Inactive customer"}</b>
+                </td>
+                <td className="num">
+                  <span className="money">{money(r.amount)}</span>
+                </td>
+                <td className="small">{r.effective_from}</td>
+                <td>
+                  <ActionForm
+                    action={setCustomerShopRate.bind(null, item.id, r.customer_id)}
+                    confirmText={`Remove the ${customerName.get(r.customer_id) ?? "customer"} shop rate for ${item.sku}? That customer's new lines then use the rate for all customers.`}
+                  >
+                    <button className="btn btn-danger btn-small" type="submit" name="intent" value="clear">
+                      Clear
+                    </button>
+                  </ActionForm>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <ActionForm key={`${item.id}-${rows.length}`} action={setCustomerShopRate.bind(null, item.id, null)} submitLabel="Save rate" resetOnSuccess>
+        <div className="grid3" style={{ alignItems: "end" }}>
+          <div className="field">
+            <label htmlFor={`rate-customer-${item.id}`}>Customer</label>
+            <select id={`rate-customer-${item.id}`} name="customer" defaultValue="">
+              <option value="">All customers</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.code})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor={`rate-amount-${item.id}`}>Shop Rate (USD)</label>
+            <input
+              className="input"
+              id={`rate-amount-${item.id}`}
+              name="amount"
+              type="number"
+              min="0"
+              step="0.01"
+              required
+              placeholder="What CDS pays the shop"
+            />
+          </div>
+        </div>
+      </ActionForm>
+    </div>
   );
 }
