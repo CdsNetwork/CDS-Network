@@ -34,7 +34,8 @@ import {
 import { createClient } from "@/lib/supabase/server";
 
 type Named = { name: string } | null;
-type Shop = { display_name: string } | null;
+/** is_in_house: CDS's own shop, whose total is CDS cost rather than an affiliate payable. */
+type Shop = { display_name: string; is_in_house?: boolean } | null;
 
 type WoRow = {
   id: string;
@@ -84,7 +85,7 @@ type AttentionItem = {
 const ATTENTION_SHOWN = 12;
 
 const WO_COLUMNS =
-  "id, wo_number, status, location_label, unit_number, po_number, customers(name), affiliates(display_name)";
+  "id, wo_number, status, location_label, unit_number, po_number, customers(name), affiliates(display_name, is_in_house)";
 
 /** The table also shows when the request came in and how the part moves. */
 const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at))`;
@@ -405,6 +406,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   const tbd = f?.supplier_cost_tbd;
                   const customer = one(r.customers)?.name ?? "-";
                   const shop = one(r.affiliates)?.display_name ?? null;
+                  const inHouse = Boolean(one(r.affiliates)?.is_in_house);
                   const fullStatus = STATUS_LABEL[r.status] ?? r.status;
                   const shortStatus = TABLE_STATUS_LABEL[r.status] ?? fullStatus;
                   return (
@@ -430,7 +432,10 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                           {shortStatus}
                         </span>
                       </td>
-                      <td className="num money">{tbd ? "TBD" : money(f?.shop_subtotal)}</td>
+                      <td className="num money">
+                        {tbd ? "TBD" : money(f?.shop_subtotal)}
+                        {inHouse && <div className="small">CDS cost</div>}
+                      </td>
                       <td className="num money">{money(f?.customer_subtotal)}</td>
                       <td className="num money">{tbd ? "TBD" : money(f?.margin)}</td>
                     </tr>

@@ -1,6 +1,7 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useRef, type FormEvent, type ReactNode } from "react";
+import { startTransition, useActionState, useContext, useEffect, useRef, type FormEvent, type ReactNode } from "react";
+import { ActionMessageContext } from "./ActionMessageGroup";
 import { formChanged, runWithPendingEdits } from "./pending-edits";
 
 export type ActionState = { error?: string; ok?: string; at?: number };
@@ -42,6 +43,8 @@ type Props = {
 /**
  * A form bound to a server action that shows the action's error or success message.
  * Submits by hand so a failed save keeps what the user typed.
+ * Inside an ActionMessageGroup the group shows the message instead, so a form that goes
+ * away with its result (a delete) still gets its message seen.
  */
 export function ActionForm({
   action,
@@ -57,21 +60,27 @@ export function ActionForm({
   inline = false,
   resetOnSuccess = false,
 }: Props) {
+  const group = useContext(ActionMessageContext);
   const pendingRef = useRef<{ form: HTMLFormElement; data: FormData } | null>(null);
   const [state, formAction, pending] = useActionState<ActionState, FormData>(async (prev, formData) => {
     const edits = pendingRef.current;
     pendingRef.current = null;
-    if (!saveFirst || !edits) return action(prev, formData);
-    // Both callbacks return ActionState, so the result is one too.
-    return (await runWithPendingEdits({
-      pending: edits.data,
-      save: async (data) => {
-        const saved = await saveFirst.action({}, data);
-        if (!saved.error) savedSnapshots.set(edits.form, data);
-        return saved;
-      },
-      run: () => action(prev, formData),
-    })) as ActionState;
+    const result =
+      !saveFirst || !edits
+        ? await action(prev, formData)
+        : // Both callbacks return ActionState, so the result is one too.
+          ((await runWithPendingEdits({
+            pending: edits.data,
+            save: async (data) => {
+              const saved = await saveFirst.action({}, data);
+              if (!saved.error) savedSnapshots.set(edits.form, data);
+              return saved;
+            },
+            run: () => action(prev, formData),
+          })) as ActionState);
+    // Reported here, not in an effect: a delete form unmounts with its note before an effect could run.
+    group?.report(result);
+    return result;
   }, {});
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -112,12 +121,12 @@ export function ActionForm({
           {button}
         </>
       )}
-      {state.error && (
+      {!group && state.error && (
         <p className="error" role="alert">
           {state.error}
         </p>
       )}
-      {state.ok && !state.error && (
+      {!group && state.ok && !state.error && (
         <p className="small" role="status">
           {state.ok}
         </p>

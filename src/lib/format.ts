@@ -224,3 +224,11 @@ export function shipmentEta(s: { eta_text: string | null; status: string; label_
   if (s.label_status === "voided" && s.status === "label_needed") return null;
   return eta;
 }
+
+/**
+ * What the shop total of a work order is called: CDS's in-house shop is not an affiliate CDS
+ * pays, so its total is what CDS itself paid.
+ */
+export function shopPayableLabel(inHouse: boolean): string {
+  return inHouse ? "CDS cost (in-house)" : "Affiliate payable";
+}

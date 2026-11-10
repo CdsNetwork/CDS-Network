@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ActionForm } from "@/components/cds-wo/ActionForm";
+import { ActionMessageGroup } from "@/components/cds-wo/ActionMessageGroup";
 import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
 import type { LocationOption } from "@/components/cds-wo/NewWorkOrderForm";
 import { OrderLocationFields } from "@/components/cds-wo/OrderLocationFields";
@@ -37,6 +38,7 @@ import {
   SHIP_STATUS_LABEL,
   SHIPMENT_STATUS_LABEL,
   shipmentEta,
+  shopPayableLabel,
   STATUS_LABEL,
   woLabel,
   type WoStatus,
@@ -740,7 +742,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
           </div>
         </div>
         <div className="card">
-          <div className="small">AFFILIATE PAYABLE</div>
+          <div className="small">{shopPayableLabel(inHouse).toUpperCase()}</div>
           <div className="bigAmount">{tbd ? "TBD" : money(fin?.shop_subtotal ?? shopTotal)}</div>
         </div>
         <div className="card">
@@ -1339,26 +1341,28 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
             <h3>Internal notes</h3>
             <p className="small">Only CDS staff see these notes. Shops never do.</p>
             {internalNotesRes.error && <div className="notice danger">Internal notes could not be loaded. Reload the page.</div>}
-            <NotesList
-              notes={internalNotes}
-              actions={(n) =>
-                n.id === ORDER_CREATED_NOTE_ID ? null : (
-                  <ActionForm
-                    action={deleteInternalNote.bind(null, wo.id, n.id)}
-                    submitLabel="Delete"
-                    pendingLabel="..."
-                    buttonClass="remove"
-                    confirmText="Delete this internal note?"
-                  />
-                )
-              }
-            />
-            <ActionForm action={addInternalNote.bind(null, wo.id)} submitLabel="Add internal note" pendingLabel="Adding..." resetOnSuccess>
-              <div className="field" style={{ marginTop: 10 }}>
-                <label htmlFor="internal-note-body">New internal note (CDS only)</label>
-                <textarea id="internal-note-body" name="body" rows={3} maxLength={NOTE_MAX_LENGTH} required />
-              </div>
-            </ActionForm>
+            <ActionMessageGroup>
+              <NotesList
+                notes={internalNotes}
+                actions={(n) =>
+                  n.id === ORDER_CREATED_NOTE_ID ? null : (
+                    <ActionForm
+                      action={deleteInternalNote.bind(null, wo.id, n.id)}
+                      submitLabel="Delete"
+                      pendingLabel="..."
+                      buttonClass="remove"
+                      confirmText="Delete this internal note?"
+                    />
+                  )
+                }
+              />
+              <ActionForm action={addInternalNote.bind(null, wo.id)} submitLabel="Add internal note" pendingLabel="Adding..." resetOnSuccess>
+                <div className="field" style={{ marginTop: 10 }}>
+                  <label htmlFor="internal-note-body">New internal note (CDS only)</label>
+                  <textarea id="internal-note-body" name="body" rows={3} maxLength={NOTE_MAX_LENGTH} required />
+                </div>
+              </ActionForm>
+            </ActionMessageGroup>
           </section>
 
           <section className="section" id="notes">
@@ -1367,24 +1371,26 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               Shared with the assigned shop: they see these notes and can add their own. For CDS-only notes use Internal notes.
             </p>
             {notesRes.error && <div className="notice danger">Notes could not be loaded. Reload the page.</div>}
-            <NotesList
-              notes={notes}
-              actions={(n) => (
-                <ActionForm
-                  action={deleteNote.bind(null, wo.id, n.id)}
-                  submitLabel="Delete"
-                  pendingLabel="..."
-                  buttonClass="remove"
-                  confirmText="Delete this note? The shop will no longer see it."
-                />
-              )}
-            />
-            <ActionForm action={addNote.bind(null, wo.id)} submitLabel="Add note" pendingLabel="Adding..." resetOnSuccess>
-              <div className="field" style={{ marginTop: 10 }}>
-                <label htmlFor="note-body">New note (the shop sees it)</label>
-                <textarea id="note-body" name="body" rows={3} maxLength={NOTE_MAX_LENGTH} required />
-              </div>
-            </ActionForm>
+            <ActionMessageGroup>
+              <NotesList
+                notes={notes}
+                actions={(n) => (
+                  <ActionForm
+                    action={deleteNote.bind(null, wo.id, n.id)}
+                    submitLabel="Delete"
+                    pendingLabel="..."
+                    buttonClass="remove"
+                    confirmText="Delete this note? The shop will no longer see it."
+                  />
+                )}
+              />
+              <ActionForm action={addNote.bind(null, wo.id)} submitLabel="Add note" pendingLabel="Adding..." resetOnSuccess>
+                <div className="field" style={{ marginTop: 10 }}>
+                  <label htmlFor="note-body">New note (the shop sees it)</label>
+                  <textarea id="note-body" name="body" rows={3} maxLength={NOTE_MAX_LENGTH} required />
+                </div>
+              </ActionForm>
+            </ActionMessageGroup>
           </section>
 
           <section className="section">
@@ -1551,7 +1557,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 <b className="money">{money(invoiceTotal)}</b>
               </div>
               <div className="summaryrow">
-                <span>{inHouse ? "CDS cost (in-house)" : "Affiliate payable"}</span>
+                <span>{shopPayableLabel(inHouse)}</span>
                 <b className="money">{tbd ? "TBD" : money(fin?.shop_subtotal ?? shopTotal)}</b>
               </div>
               <div className="summaryrow">
