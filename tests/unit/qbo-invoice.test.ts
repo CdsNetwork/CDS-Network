@@ -310,18 +310,18 @@ describe("measurement lines", () => {
 
   it("describes a DPF with every measurement and the result", () => {
     expect(measurementDescription(dpf)).toBe(
-      "Manufacturer: Cummins / Part Number: A029Y916 / Serial Number: SN-1 / Pressure before: 12.5 / Pressure after: 1.25 / Weight before: 15250 g / Weight after: 14800.5 g / Weight removed: 449.5 g / Result: Cleaned Successfully",
+      "Manufacturer: Cummins\nPart Number: A029Y916\nSerial Number: SN-1\nPressure before: 12.5\nPressure after: 1.25\nWeight before: 15250 g\nWeight after: 14800.5 g\nWeight removed: 449.5 g\nResult: Cleaned Successfully",
     );
   });
 
   it("leaves out empty fields", () => {
-    expect(measurementDescription({ ...doc, result: null })).toBe("Manufacturer: Detroit / Serial Number: SN-2");
+    expect(measurementDescription({ ...doc, result: null })).toBe("Manufacturer: Detroit\nSerial Number: SN-2");
   });
 
   it("describes an EGR with manufacturer, part, serial and Pass or Fail only", () => {
-    expect(measurementDescription(egr)).toBe("Manufacturer: Volvo / Part Number: EGR-9 / Serial Number: SN-3 / Result: Fail");
+    expect(measurementDescription(egr)).toBe("Manufacturer: Volvo\nPart Number: EGR-9\nSerial Number: SN-3\nResult: Fail");
     expect(measurementDescription({ ...egr, result: "passed", dpBefore: 5 })).toBe(
-      "Manufacturer: Volvo / Part Number: EGR-9 / Serial Number: SN-3 / Result: Pass",
+      "Manufacturer: Volvo\nPart Number: EGR-9\nSerial Number: SN-3\nResult: Pass",
     );
   });
 
@@ -354,7 +354,7 @@ describe("measurement lines", () => {
       expect(l.SalesItemLineDetail.Qty).toBe(1);
       expect(l.SalesItemLineDetail.TaxCodeRef.value).toBe("NON");
     }
-    expect(extra[2].Description).toBe("Manufacturer: Volvo / Part Number: EGR-9 / Serial Number: SN-3 / Result: Fail");
+    expect(extra[2].Description).toBe("Manufacturer: Volvo\nPart Number: EGR-9\nSerial Number: SN-3\nResult: Fail");
   });
 
   it("skips a component type without a measurement item and warns, without blocking the invoice", () => {

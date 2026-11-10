@@ -9,9 +9,10 @@ import { recordSync } from "@/lib/integration-sync";
 import { noteBody } from "@/lib/notes";
 import { passThroughInput } from "@/lib/pass-through";
 import { emailCdsAfter } from "@/lib/portal-email-send";
-import { createInvoice, type CreatedInvoice } from "@/lib/qbo/api";
+import { createInvoice, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
 import { QboError } from "@/lib/qbo/client";
 import { loadInvoice } from "@/lib/qbo/invoice-input";
+import { cachedSubCustomer, resolveInvoiceQbo, saveSubCustomer, type ResolvedInvoice } from "@/lib/qbo/invoice-qbo";
 import { createdNote, type PendingQbInvoice } from "@/lib/qbo/pending";
 import { qboApi } from "@/lib/qbo/tokens";
 import { createClient } from "@/lib/supabase/server";
@@ -723,16 +724,26 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   if (countError) return { error: "The QuickBooks history of this order could not be read. Try again." };
   const requestId = count ? `${woId}-r${count}` : woId;
 
+  // The site's sub-customer and the custom fields are looked up in QuickBooks now (see
+  // @/lib/qbo/invoice-qbo); what is not found is left out with a note, never an error.
+  const parentId = payload.CustomerRef.value;
+  const cachedSub = await cachedSubCustomer(supabase, invoice.target.locationId, parentId);
+  const send = async (api: Awaited<ReturnType<typeof qboApi>>) => {
+    const r = await resolveInvoiceQbo(qboLookups(api), payload, invoice.target, cachedSub);
+    return { resolved: r, created: await createInvoice(api, r.payload, requestId) };
+  };
+
   let created: CreatedInvoice;
+  let resolved: ResolvedInvoice;
   try {
     let api = await qboApi();
     try {
-      created = await createInvoice(api, payload, requestId);
+      ({ created, resolved } = await send(api));
     } catch (e) {
       if (!(e instanceof QboError && e.unauthorized)) throw e;
       // The access token was revoked or expired early: refresh once and send the same request.
       api = await qboApi({ forceRefresh: true });
-      created = await createInvoice(api, payload, requestId);
+      ({ created, resolved } = await send(api));
     }
   } catch (e) {
     const qbo = e instanceof QboError ? e : null;
@@ -749,7 +760,12 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
 
   // Recorded before the work order is marked, so a failed update leaves the invoice findable
   // (see @/lib/qbo/pending) and the next click records it instead of sending a new one.
-  await logSync(supabase, woId, "ok", created.Id, createdNote(created.DocNumber));
+  const billed = resolved.subCustomer ? [`Billed to ${resolved.subCustomer.name}.`] : [];
+  const notes = [...billed, ...resolved.notes];
+  await logSync(supabase, woId, "ok", created.Id, createdNote(created.DocNumber, notes));
+  if (resolved.subCustomer && resolved.subCustomer.id !== cachedSub) {
+    await saveSubCustomer(supabase, invoice.target.locationId, parentId, resolved.subCustomer);
+  }
   const { error } = await supabase.rpc("cds_mark_invoiced", {
     p_work_order: woId,
     p_qb_invoice_id: created.Id,
@@ -761,7 +777,10 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
       error: `QuickBooks invoice ${created.DocNumber ?? created.Id} was created, but the work order could not be updated (${error.message}). Click again to finish; no second invoice is created.`,
     };
   }
-  return done(woId, `QuickBooks invoice ${created.DocNumber ?? created.Id} created. The work order is now Invoiced.`);
+  return done(
+    woId,
+    [`QuickBooks invoice ${created.DocNumber ?? created.Id} created. The work order is now Invoiced.`, ...notes].join(" "),
+  );
 }
 
 /**
