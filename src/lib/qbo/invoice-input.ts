@@ -17,6 +17,8 @@ import {
   type MeasurementMappings,
   type TaxClass,
 } from "./invoice";
+import { itemDescriptionKey, type InvoiceTarget } from "./invoice-qbo";
+import { locationSiteNumber } from "./sub-customer";
 import { pendingQbInvoice, type InvoiceSyncRow, type PendingQbInvoice } from "./pending";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -29,6 +31,8 @@ export type InvoiceState = {
   invoicedAt: string | null;
   /** Created in QuickBooks but not recorded on the work order yet (see ./pending). */
   pendingQb: PendingQbInvoice | null;
+  /** What the invoice-time QuickBooks lookups need (sub-customer, custom fields). */
+  target: InvoiceTarget;
   result: BuildResult;
 };
 
@@ -40,7 +44,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
   const { data: woData, error } = await supabase
     .from("work_orders")
     .select(
-      "id, wo_number, status, market, customer_id, location_label, po_number, unit_number, customers(name), customer_locations(code, name, address_line1, city, region, postal_code, country)",
+      "id, wo_number, status, market, customer_id, location_label, po_number, unit_number, customers(name), customer_locations(id, code, location_number, name, address_line1, city, region, postal_code, country)",
     )
     .eq("id", woId)
     .maybeSingle();
@@ -57,7 +61,9 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     unit_number: string | null;
     customers: MaybeOne<{ name: string }>;
     customer_locations: MaybeOne<{
+      id: string;
       code: string;
+      location_number: string | null;
       name: string;
       address_line1: string | null;
       city: string | null;
@@ -122,7 +128,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
   }[];
   const itemIds = [...new Set(rawLines.map((l) => l.catalog_item_id))];
 
-  const [itemMapRes, aliasRes] = itemIds.length
+  const [itemMapRes, aliasRes, descriptionRes] = itemIds.length
     ? await Promise.all([
         // Every row for these items: this customer's, the ones for all customers, and (only
         // to explain a missing link) other customers'.
@@ -132,10 +138,17 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
           .select("catalog_item_id, customer_part_number, customer_description")
           .eq("customer_id", wo.customer_id)
           .in("catalog_item_id", itemIds),
+        // The invoice text per QuickBooks item (a handful of rows).
+        supabase.from("qbo_item_descriptions").select("qbo_item_name, description"),
       ])
-    : [{ data: [], error: null }, { data: [], error: null }];
+    : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
   if (itemMapRes.error) throw new Error(`Could not read the item mappings: ${itemMapRes.error.message}`);
   if (aliasRes.error) throw new Error(`Could not read the customer part numbers: ${aliasRes.error.message}`);
+  if (descriptionRes.error) throw new Error(`Could not read the QuickBooks item descriptions: ${descriptionRes.error.message}`);
+  const descriptions = new Map<string, string>();
+  for (const d of (descriptionRes.data ?? []) as { qbo_item_name: string; description: string }[]) {
+    descriptions.set(itemDescriptionKey(d.qbo_item_name), d.description);
+  }
 
   const itemMap: ItemMappings = { customer: {}, default: {}, otherCustomers: {} };
   for (const m of (itemMapRes.data ?? []) as {
@@ -144,7 +157,11 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     qbo_item_id: string;
     qbo_item_name: string;
   }[]) {
-    const mapping: ItemMapping = { qboItemId: m.qbo_item_id, qboItemName: m.qbo_item_name };
+    const mapping: ItemMapping = {
+      qboItemId: m.qbo_item_id,
+      qboItemName: m.qbo_item_name,
+      invoiceDescription: descriptions.get(itemDescriptionKey(m.qbo_item_name)) ?? null,
+    };
     if (m.customer_id === null) itemMap.default[m.catalog_item_id] = mapping;
     else if (m.customer_id === wo.customer_id) itemMap.customer[m.catalog_item_id] = mapping;
     else itemMap.otherCustomers![m.catalog_item_id] = true;
@@ -242,6 +259,14 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     qbInvoiceNumber: internal?.qb_invoice_number ?? null,
     invoicedAt: internal?.invoiced_at ?? null,
     pendingQb: internal?.qb_invoice_id ? null : pendingQbInvoice((syncRes.data ?? []) as InvoiceSyncRow[]),
+    target: {
+      locationId: loc?.id ?? null,
+      siteNumber: loc ? locationSiteNumber(loc.location_number, loc.code) : null,
+      locationName: loc?.name ?? null,
+      city: loc?.city ?? null,
+      poNumber: wo.po_number,
+      unitNumber: wo.unit_number,
+    },
     result: buildInvoicePayload(workOrder, lines, customerMap, itemMap, aliases, location, components, measurementMap),
   };
 }

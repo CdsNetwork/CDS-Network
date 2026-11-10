@@ -173,6 +173,19 @@ describe("QuickBooks mappings and customer part numbers", () => {
     }
   });
 
+  it("the sub-customers per location and the item invoice texts are CDS only", async () => {
+    for (const table of ["qbo_location_customer_map", "qbo_item_descriptions"]) {
+      for (const client of [shop.client, anon()]) {
+        const { data, error } = await client.from(table).select("*").limit(5);
+        expect(error ? [] : data, table).toEqual([]);
+      }
+    }
+    const shopWrite = await shop.client.from("qbo_item_descriptions").insert({ qbo_item_name: `Shop ${runId}`, description: "x" });
+    expect(shopWrite.error).not.toBeNull();
+    const seeded = await must(cds.client.from("qbo_item_descriptions").select("description").eq("qbo_item_name", "EVACUFLUSH AND BAKE DPF - RYDER"));
+    expect(seeded[0]?.description).toMatch(/^Place Diesel Particulate Filter \(DPF\) in EvacuBlast cabinet/);
+  });
+
   it("CDS reads and edits them, and edits are in the change log", async () => {
     for (const table of MAP_TABLES) {
       const rows = await must(cds.client.from(table).select("id").in("id", f.mapIds));

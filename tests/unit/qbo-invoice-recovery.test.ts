@@ -11,7 +11,11 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ requireCds: vi.fn(async () => ({ id: "u1", kind: "cds" })) }));
 
 const createInvoice = vi.fn();
-vi.mock("@/lib/qbo/api", () => ({ createInvoice }));
+vi.mock("@/lib/qbo/api", () => ({ createInvoice, qboLookups: vi.fn(() => ({})) }));
+type Resolved = { payload: unknown; notes: string[]; subCustomer: { id: string; name: string } | null };
+const resolveInvoiceQbo = vi.fn(async (_l: unknown, p: unknown): Promise<Resolved> => ({ payload: p, notes: [], subCustomer: null }));
+const saveSubCustomer = vi.fn(async () => {});
+vi.mock("@/lib/qbo/invoice-qbo", () => ({ resolveInvoiceQbo, cachedSubCustomer: vi.fn(async () => null), saveSubCustomer }));
 vi.mock("@/lib/qbo/tokens", () => ({ qboApi: vi.fn(async () => ({ realmId: "1" })) }));
 const loadInvoice = vi.fn();
 vi.mock("@/lib/qbo/invoice-input", () => ({ loadInvoice }));
@@ -43,13 +47,14 @@ const { createQuickBooksInvoice } = await import("@/app/cds/work-orders/[id]/act
 const { pendingQbInvoice, createdNote } = await import("@/lib/qbo/pending");
 
 const WO = "11111111-1111-4111-8111-111111111111";
-const payload = { Line: [] };
+const payload = { Line: [], CustomerRef: { value: "58", name: "Ryder Fleet Services" } };
 const invoiceState = (over: Record<string, unknown> = {}) => ({
   status: "ready_to_invoice",
   qbInvoiceId: null,
   qbInvoiceNumber: null,
   invoicedAt: null,
   pendingQb: null,
+  target: { locationId: null, siteNumber: null, locationName: null, city: null, poNumber: null, unitNumber: null },
   result: { ok: true, payload, warnings: [] },
   ...over,
 });
@@ -125,6 +130,31 @@ describe("createQuickBooksInvoice when the portal update fails", () => {
     expect(createInvoice).not.toHaveBeenCalled();
     expect(rpc).not.toHaveBeenCalled();
     expect((res as { error: string }).error).toMatch(/QuickBooks invoice 1043 was created.*not recorded/);
+  });
+});
+
+describe("createQuickBooksInvoice with the QuickBooks lookups", () => {
+  it("sends the invoice for the sub-customer, remembers it, and reports the fallbacks in the message and the sync row", async () => {
+    loadInvoice.mockResolvedValue(invoiceState());
+    const resolvedPayload = { Line: [], CustomerRef: { value: "301" } };
+    resolveInvoiceQbo.mockResolvedValueOnce({
+      payload: resolvedPayload,
+      notes: ['QuickBooks has no invoice custom field named "PO Number", so it is not filled.'],
+      subCustomer: { id: "301", name: "Ryder Fleet Services:RYDER - 297-COLORADO SPRINGS CO" },
+    });
+    createInvoice.mockResolvedValue({ Id: "145", DocNumber: "1043" });
+    rpc.mockResolvedValue({ error: null });
+
+    const res = await createQuickBooksInvoice(WO);
+
+    expect(createInvoice).toHaveBeenCalledWith(expect.anything(), resolvedPayload, WO);
+    expect(saveSubCustomer).toHaveBeenCalled();
+    expect(inserts[0]).toMatchObject({ status: "ok", external_id: "145" });
+    expect(String(inserts[0].error)).toMatch(/1043.*297-COLORADO SPRINGS CO.*PO Number/);
+    const ok = (res as { ok: string }).ok;
+    expect(ok).toMatch(/QuickBooks invoice 1043 created/);
+    expect(ok).toMatch(/Billed to Ryder Fleet Services:RYDER - 297-COLORADO SPRINGS CO/);
+    expect(ok).toMatch(/PO Number/);
   });
 });
 

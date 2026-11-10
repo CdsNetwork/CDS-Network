@@ -1,4 +1,6 @@
 import { isTaxable, type TaxClass } from "@/lib/tax";
+import type { QboCustomField } from "./custom-fields";
+import type { QboAddress } from "./sub-customer";
 
 /**
  * Builds the QuickBooks Online Invoice for a work order. Pure: no database, no network.
@@ -60,7 +62,12 @@ export type InvoiceLine = {
 export type CustomerAlias = { partNumber: string; description?: string | null };
 
 export type CustomerMapping = { qboCustomerId: string; qboDisplayName: string };
-export type ItemMapping = { qboItemId: string; qboItemName: string };
+export type ItemMapping = {
+  qboItemId: string;
+  qboItemName: string;
+  /** qbo_item_descriptions: the invoice text for this QuickBooks item, used instead of our item name. */
+  invoiceDescription?: string | null;
+};
 
 /** The QuickBooks items for the catalog items on one work order, by catalog item id. */
 export type ItemMappings = {
@@ -115,6 +122,10 @@ export type QboInvoiceLine = {
 
 export type QboInvoicePayload = {
   CustomerRef: Ref;
+  /** Set when the invoice goes to a sub-customer: the parent's billing address (see ./invoice-qbo). */
+  BillAddr?: QboAddress;
+  /** "Fleet Number" and "PO Number" (see ./custom-fields). */
+  CustomField?: QboCustomField[];
   ShipAddr: { Line1: string; City: string; CountrySubDivisionCode: string; PostalCode: string; Country: "US" };
   Line: QboInvoiceLine[];
   PrivateNote: string;
@@ -161,8 +172,9 @@ function reading(n: number | null | undefined): string | null {
 
 /**
  * The description of a component's measurement line, for example
- * "Manufacturer: X / Part Number: Y / ... / Result: Cleaned Successfully". Empty fields are
- * left out; EGR coolers have no measurements, only Pass or Fail.
+ * "Manufacturer: X\nPart Number: Y\n...\nResult: Cleaned Successfully", one reading per line
+ * (QuickBooks keeps the line breaks). Empty fields are left out; EGR coolers have no
+ * measurements, only Pass or Fail.
  */
 export function measurementDescription(c: InvoiceComponent): string {
   const egr = c.componentType === "EGR";
@@ -190,17 +202,22 @@ export function measurementDescription(c: InvoiceComponent): string {
   const text = fields
     .filter((f): f is [string, string] => !!f[1])
     .map(([label, value]) => `${label}: ${value}`)
-    .join(" / ");
+    .join("\n");
   return clip(text || `${c.componentType} #${c.seq}`, DESCRIPTION_MAX);
 }
 
 /**
- * The invoice line description: our item name (or the customer's own description), the
- * text entered on the line, and the customer's part number in front when there is one.
+ * The invoice line description: the customer's own description (with its part number), else
+ * the invoice text of the QuickBooks item (qbo_item_descriptions), else our item name; then
+ * the text entered on the line, and the customer's part number in front when there is one.
  */
-export function lineDescription(line: Pick<InvoiceLine, "name" | "description">, alias?: CustomerAlias): string {
+export function lineDescription(
+  line: Pick<InvoiceLine, "name" | "description">,
+  alias?: CustomerAlias,
+  itemDescription?: string | null,
+): string {
   const partNumber = alias?.partNumber?.trim();
-  const name = (partNumber && alias?.description?.trim()) || line.name;
+  const name = (partNumber && alias?.description?.trim()) || itemDescription?.trim() || line.name;
   const text = [name, line.description?.trim()].filter(Boolean).join(" - ");
   return clip(partNumber ? `Part # ${partNumber} - ${text}` : text, DESCRIPTION_MAX);
 }
@@ -288,7 +305,7 @@ export function buildInvoicePayload(
     qboLines.push({
       DetailType: "SalesItemLineDetail",
       Amount: cents(l.qty * unitPrice),
-      Description: lineDescription(l, aliases[l.catalogItemId]),
+      Description: lineDescription(l, aliases[l.catalogItemId], item.invoiceDescription),
       SalesItemLineDetail: {
         ItemRef: { value: item.qboItemId, name: item.qboItemName },
         Qty: l.qty,
@@ -331,8 +348,9 @@ export function buildInvoicePayload(
 
   const po = workOrder.poNumber?.trim();
   const unit = workOrder.unitNumber?.trim();
-  // Custom fields need per-company setup, so the PO goes in the internal note (always) and
-  // in the message on the invoice the customer sees.
+  // The PO goes in the internal note (always) and in the message on the invoice the customer
+  // sees. The "Fleet Number" and "PO Number" custom fields are added when the invoice is
+  // sent, once QuickBooks has told us their DefinitionIds (./invoice-qbo).
   const memo = [po && `PO ${po}`, unit && `Unit ${unit}`].filter(Boolean).join(" | ");
   return {
     ok: true,

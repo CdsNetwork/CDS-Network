@@ -245,6 +245,14 @@
     "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
+  "table public.qbo_item_descriptions": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.qbo_location_customer_map": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
   "table public.sell_prices": {
     "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"

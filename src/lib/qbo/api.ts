@@ -1,6 +1,8 @@
 import "server-only";
 import { qboRequest, type QboApi } from "./client";
 import type { QboInvoicePayload } from "./invoice";
+import type { QboLookups } from "./invoice-qbo";
+import type { QboCustomerRecord } from "./sub-customer";
 
 /**
  * The QuickBooks calls the portal makes. Entity shapes (only the fields used here):
@@ -56,6 +58,51 @@ export async function automatedSalesTax(api: QboApi): Promise<boolean | null> {
   const res = await qboRequest<{ Preferences?: { TaxPrefs?: { PartnerTaxEnabled?: boolean } } }>(api, "GET", "preferences");
   const v = res.Preferences?.TaxPrefs?.PartnerTaxEnabled;
   return typeof v === "boolean" ? v : null;
+}
+
+/** A string literal for a QuickBooks query: quotes and backslashes escaped with a backslash. */
+export function qboQuoted(value: string): string {
+  return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
+export async function getCustomer(api: QboApi, id: string): Promise<QboCustomerRecord | null> {
+  const res = await qboRequest<{ Customer?: QboCustomerRecord }>(api, "GET", `customer/${encodeURIComponent(id)}`);
+  return res.Customer ?? null;
+}
+
+/** Active customers under a parent (direct or deeper; the caller checks ParentRef). */
+export function listSubCustomers(api: QboApi, parentFqn: string): Promise<QboCustomerRecord[]> {
+  return queryAll<QboCustomerRecord>(api, "Customer", `FullyQualifiedName LIKE ${qboQuoted(`${parentFqn}:%`)} AND Active = true`);
+}
+
+/** Preferences.SalesFormsPrefs: the classic sales form custom fields (see ./custom-fields). */
+export async function salesFormsPrefs(api: QboApi): Promise<{ CustomField?: unknown[] } | null> {
+  const res = await qboRequest<{ Preferences?: { SalesFormsPrefs?: { CustomField?: unknown[] } } }>(api, "GET", "preferences");
+  return res.Preferences?.SalesFormsPrefs ?? null;
+}
+
+/**
+ * The newest invoices with every custom field (include=enhancedAllCustomFields), to learn
+ * the DefinitionIds of custom fields that are not in Preferences.
+ */
+export async function recentInvoiceCustomFields(api: QboApi): Promise<{ CustomField?: { DefinitionId?: string; Name?: string }[] }[]> {
+  const res = await qboRequest<{ QueryResponse?: { Invoice?: { CustomField?: { DefinitionId?: string; Name?: string }[] }[] } }>(
+    api,
+    "GET",
+    "query",
+    { query: { query: "select * from Invoice orderby MetaData.CreateTime desc maxresults 50", include: "enhancedAllCustomFields" } },
+  );
+  return res.QueryResponse?.Invoice ?? [];
+}
+
+/** The QuickBooks calls the invoice-time lookups use (./invoice-qbo). */
+export function qboLookups(api: QboApi): QboLookups {
+  return {
+    getCustomer: (id) => getCustomer(api, id),
+    listSubCustomers: (fqn) => listSubCustomers(api, fqn),
+    salesFormsPrefs: () => salesFormsPrefs(api),
+    recentInvoiceCustomFields: () => recentInvoiceCustomFields(api),
+  };
 }
 
 export type CreatedInvoice = { Id: string; DocNumber?: string; TotalAmt?: number };

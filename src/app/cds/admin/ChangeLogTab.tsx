@@ -33,6 +33,8 @@ const TABLE_LABEL: Record<string, string> = {
   qbo_customer_map: "QuickBooks customer link",
   qbo_item_map: "QuickBooks item link",
   qbo_measurement_map: "QuickBooks measurement item",
+  qbo_location_customer_map: "QuickBooks sub-customer for a location",
+  qbo_item_descriptions: "QuickBooks item invoice text",
   customer_item_aliases: "Customer part number",
 };
 
