@@ -20,6 +20,7 @@ import {
   type Financials,
 } from "@/components/cds-wo/woFilters";
 import { requireCds } from "@/lib/auth";
+import { deletedMessage } from "@/lib/work-order-delete";
 import {
   dateReceived,
   FULFILLMENT_LABEL,
@@ -100,6 +101,7 @@ function idClass(value: string | null): string {
 export default async function DashboardPage({ searchParams }: PageProps<"/cds">) {
   await requireCds();
   const sp = await searchParams;
+  const deleted = deletedMessage(sp);
   const filters = parseFilters(sp);
   const { q, status: statusParam, shop: shopParam } = filters;
   const period = parsePeriod(sp.period);
@@ -246,6 +248,11 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
         <span className="small">The period applies to the Invoiced count; everything else is current.</span>
       </div>
 
+      {deleted && (
+        <div className="notice" role="status">
+          {deleted.text}
+        </div>
+      )}
       {loadError && <div className="notice danger">Could not load work orders: {loadError}</div>}
 
       <div className="cards">

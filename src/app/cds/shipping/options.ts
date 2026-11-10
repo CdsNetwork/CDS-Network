@@ -24,6 +24,11 @@ export const PACKAGE_TYPES: { value: string; label: string }[] = [
 
 export const SERVICE_LEVELS = ["UPS Ground", "UPS 2nd Day Air", "UPS Next Day Air", "FedEx Ground", "FedEx 2Day", "FedEx Express Saver", "Freight", "Other"];
 
+/** The label statuses CDS can set, on the Shipping page and in the work order's shipment box. */
+export function isLabelStatus(value: string): boolean {
+  return LABEL_STATUSES.some((s) => s.value === value);
+}
+
 export function labelStatusLabel(value: string): string {
   return LABEL_STATUSES.find((s) => s.value === value)?.label ?? value;
 }

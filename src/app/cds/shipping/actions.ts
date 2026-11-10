@@ -5,7 +5,7 @@ import type { ActionState } from "@/components/cds-admin/ActionForm";
 import { dbMessage, optionalAmount, optionalText, text } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { DIRECTIONS, LABEL_STATUSES, PACKAGE_TYPES, SHIPMENT_STATUSES } from "./options";
+import { DIRECTIONS, isLabelStatus, PACKAGE_TYPES, SHIPMENT_STATUSES } from "./options";
 
 type Parsed = { error: string } | { shipment: Record<string, unknown>; internal: Record<string, unknown> };
 
@@ -17,7 +17,7 @@ function parse(formData: FormData): Parsed {
   const packageType = optionalText(formData, "package_type");
   if (!DIRECTIONS.includes(direction)) return { error: "Choose a shipment direction." };
   if (carrier && !["UPS", "FedEx", "USPS", "Other"].includes(carrier)) return { error: "Choose UPS, FedEx, USPS or Other." };
-  if (!LABEL_STATUSES.some((s) => s.value === labelStatus)) return { error: "Choose a label status." };
+  if (!isLabelStatus(labelStatus)) return { error: "Choose a label status." };
   if (!SHIPMENT_STATUSES.includes(status)) return { error: "Choose a shipment status." };
   if (packageType && !PACKAGE_TYPES.some((p) => p.value === packageType)) return { error: "Choose a package type." };
 
@@ -113,4 +113,29 @@ export async function setShipmentStatus(id: string, _prev: ActionState, formData
   if (error) return { error: dbMessage(error) };
   revalidatePath("/cds/shipping");
   return { ok: true, message: "Saved." };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Quick label status change, from the shipment box on the work order page. Same rule as the
+ * edit form above: only the label statuses the Shipping page offers.
+ */
+export async function setShipmentLabelStatus(id: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  if (!UUID.test(id)) return { error: "Shipment not found." };
+  const labelStatus = text(formData, "label_status");
+  if (!isLabelStatus(labelStatus)) return { error: "Choose a label status." };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("shipments")
+    .update({ label_status: labelStatus })
+    .eq("id", id)
+    .select("id, work_order_id");
+  if (error) return { error: dbMessage(error) };
+  const row = data?.[0] as { work_order_id: string } | undefined;
+  if (!row) return { error: "Shipment not found." };
+  revalidatePath("/cds/shipping");
+  revalidatePath(`/cds/work-orders/${row.work_order_id}`);
+  return { ok: true, message: "Label status saved." };
 }

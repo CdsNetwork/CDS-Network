@@ -21,6 +21,10 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
+  "function public.cds_delete_work_order(uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
   "function public.cds_dispatch_work_order(uuid,uuid)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"

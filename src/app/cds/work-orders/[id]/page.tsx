@@ -52,12 +52,15 @@ import { cdsCanDelete, uploaderLabel } from "@/lib/attachments";
 import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { deleteConfirmText } from "@/lib/work-order-delete";
 import { createClient } from "@/lib/supabase/server";
 import { LabelPanel, type LabelView } from "@/components/shipping/LabelPanel";
 import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/shipstation/views";
 import { labelShop, labelShopMismatch, missingLegEnds, shopEnd } from "@/lib/shipstation/ends";
 import { packageForShipment } from "@/lib/shipstation/package";
-import { NEW_SHIPMENT_STATUS } from "@/app/cds/shipping/options";
+import { LABEL_STATUSES, NEW_SHIPMENT_STATUS } from "@/app/cds/shipping/options";
+import { setShipmentLabelStatus } from "@/app/cds/shipping/actions";
+import { ActionForm as ShippingActionForm } from "@/components/cds-admin/ActionForm";
 import {
   addLine,
   addPassThroughLine,
@@ -67,6 +70,7 @@ import {
   addNote,
   decideAuthorization,
   deleteCdsAttachment,
+  deleteWorkOrder,
   deleteInternalNote,
   deleteNote,
   dispatchWorkOrder,
@@ -135,6 +139,8 @@ type Internal = {
   tax_source: string | null;
   ready_to_invoice_at: string | null;
   invoiced_at: string | null;
+  qb_invoice_id: string | null;
+  qb_invoice_number: string | null;
   profiles: MaybeOne<{ full_name: string }>;
 };
 
@@ -485,7 +491,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase
         .from("work_order_internal")
         .select(
-          "source, review_reason, routing_notes, internal_notes, order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, profiles(full_name)",
+          "source, review_reason, routing_notes, internal_notes, order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, qb_invoice_id, qb_invoice_number, profiles(full_name)",
         )
         .eq("work_order_id", id)
         .maybeSingle(),
@@ -717,6 +723,14 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   };
   const negativeLines = lines.filter(isNegative);
 
+  // A QuickBooks invoice stays in QuickBooks when the order is deleted: say so before deleting.
+  const pendingQb = invoice?.pendingQb ?? null;
+  const qbInvoice = internal?.qb_invoice_id
+    ? { id: internal.qb_invoice_id, number: internal.qb_invoice_number }
+    : pendingQb
+      ? { id: pendingQb.id, number: pendingQb.number }
+      : null;
+
   return (
     <>
       <div className="row between">
@@ -848,6 +862,32 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       {s.service_level ? ` • ${s.service_level}` : ""} • Label: {LABEL_STATUS_LABEL[s.label_status] ?? s.label_status}
                       {shipmentEta(s) ? ` • ETA ${shipmentEta(s)}` : ""}
                       {s.delivered_at ? ` • Delivered ${dateTime(s.delivered_at)}` : ""}
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      {/* The Shipping page's label status action and rule. */}
+                      <ShippingActionForm
+                        key={`${s.id}-${s.label_status}`}
+                        action={setShipmentLabelStatus.bind(null, s.id)}
+                        submitLabel="Set"
+                        submitClassName="btn btn-secondary btn-small"
+                        inline
+                      >
+                        <label className="small" htmlFor={`label-status-${s.id}`} style={{ fontWeight: 750 }}>
+                          Label status
+                        </label>
+                        <select
+                          id={`label-status-${s.id}`}
+                          name="label_status"
+                          defaultValue={s.label_status}
+                          style={{ padding: "5px 6px", fontSize: 12, width: "auto" }}
+                        >
+                          {LABEL_STATUSES.map((l) => (
+                            <option key={l.value} value={l.value}>
+                              {l.label}
+                            </option>
+                          ))}
+                        </select>
+                      </ShippingActionForm>
                     </div>
                     <div style={{ fontSize: 18, fontWeight: 850, color: "var(--blue)", margin: "6px 0" }}>
                       Tracking # {s.tracking_number ?? "Pending"}
@@ -1413,6 +1453,20 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 ))}
               </div>
             )}
+          </section>
+          <section className="section" id="delete-work-order">
+            <h3>Delete work order</h3>
+            <p className="small">
+              Deletes this order and everything on it: lines, shipments, labels, notes, files and history. Use it for test orders
+              or orders entered twice. It does not change QuickBooks{qbInvoice ? "; void the invoice in QuickBooks" : ""}.
+            </p>
+            <ActionForm
+              action={deleteWorkOrder.bind(null, wo.id)}
+              submitLabel={`Delete ${woLabel(wo.wo_number)}`}
+              pendingLabel="Deleting..."
+              buttonClass="btn btn-secondary"
+              confirmText={deleteConfirmText({ woNumber: wo.wo_number, qbInvoice })}
+            />
           </section>
         </div>
 

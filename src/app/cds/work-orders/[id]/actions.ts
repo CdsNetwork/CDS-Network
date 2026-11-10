@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
 import { isUuid, LINES_LOCKED_STATUSES, REMOVABLE_LABEL_STATUSES, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
@@ -27,6 +28,7 @@ import {
   type UploadMeta,
 } from "@/lib/attachments";
 import { discardUnrecorded, signedUploadTarget, storedObject } from "@/lib/attachment-storage";
+import { deletedHref, storagePathsToRemove } from "@/lib/work-order-delete";
 
 const REQUEST_TYPES = ["service", "parts_only"];
 const FULFILLMENT = ["pickup", "shipping", "supplier_direct", "unspecified"];
@@ -772,4 +774,46 @@ async function recordPendingInvoice(supabase: Supabase, woId: string, status: st
     };
   }
   return done(woId, `QuickBooks invoice ${name} (created earlier) is now recorded. The work order is now Invoiced.`);
+}
+
+type DeletedWorkOrder = {
+  wo_number: number;
+  qb_invoice_id: string | null;
+  qb_invoice_number: string | null;
+  storage_paths: string[] | null;
+};
+
+/**
+ * Deletes the work order and everything on it (public.cds_delete_work_order), then its stored
+ * files, and goes back to the work order list with a message. QuickBooks is not touched.
+ */
+export async function deleteWorkOrder(woId: string): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("cds_delete_work_order", { p_work_order: woId });
+  if (error) return { error: error.message };
+  const deleted = data as DeletedWorkOrder;
+
+  // The rows are gone first, so a failed removal leaves only unreachable objects.
+  try {
+    const bucket = supabase.storage.from(ATTACHMENT_BUCKET);
+    const listed: string[] = [];
+    for (const folder of [woId, `${woId}/labels`]) {
+      const { data: objects } = await bucket.list(folder, { limit: 1000 });
+      for (const o of objects ?? []) if (o.id && o.name !== "labels") listed.push(`${folder}/${o.name}`);
+    }
+    const paths = storagePathsToRemove(woId, deleted.storage_paths ?? [], listed);
+    if (paths.length) {
+      const { error: removeError } = await bucket.remove(paths);
+      if (removeError) console.error(`Work order ${woId} deleted, files not removed: ${removeError.message}`);
+    }
+  } catch (e) {
+    console.error(`Work order ${woId} deleted, files not removed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  revalidatePath("/cds");
+  revalidatePath("/cds/shipping");
+  revalidatePath("/cds/intake");
+  redirect(deletedHref(deleted.wo_number, deleted.qb_invoice_number ?? deleted.qb_invoice_id));
 }
