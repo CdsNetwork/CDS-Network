@@ -30,6 +30,7 @@ import {
   setShipStatus,
 } from "@/app/shop/actions";
 import type { JobDetailData } from "@/app/shop/data";
+import { deductionLabel, shopPayable } from "@/lib/shop-deductions";
 import { ActionButton, ActionForm } from "./ActionForm";
 import { AddPartForm } from "./AddPartForm";
 import { AttachmentForm } from "./AttachmentForm";
@@ -58,7 +59,7 @@ const AUTH_STATUS_LABEL: Record<string, string> = {
 const qtyText = (n: number) => String(n);
 
 export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: string }) {
-  const { job, lines, components, authRequests, attachments, shipments, notes } = data;
+  const { job, lines, components, authRequests, attachments, shipments, notes, deductions } = data;
   const id = job.id;
   const editable = EDITABLE_STATUSES.includes(job.status);
   const awaiting = job.status === "awaiting_acceptance";
@@ -67,7 +68,7 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
   const canUpload = editable || job.status === "completed";
   const canShipStatus = isShipping && ["accepted", "in_process", "completed"].includes(job.status);
 
-  const settlement = lines.reduce((sum, l) => sum + (l.shop_unit_rate ?? 0) * l.qty, 0);
+  const settlement = shopPayable(lines, deductions);
   const missingRate = lines.some((l) => l.shop_unit_rate === null);
   const photoCount = (componentId: string) => attachments.filter((a) => a.component_id === componentId).length;
   const componentOptions = components.map((c) => ({ id: c.id, label: componentLabel(c) }));
@@ -269,6 +270,23 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
                   className="remove"
                 />
               )}
+            </div>
+          </div>
+        ))}
+        {deductions.map((d) => (
+          <div key={d.kind} className={styles.lineRow}>
+            <div style={{ minWidth: 0 }}>
+              <strong>Shipping deduction</strong>
+              <div>{deductionLabel(d)}</div>
+              <div className="small">Automatic on shipped orders</div>
+            </div>
+            <div className={styles.lineMoney}>
+              <div>
+                <div className="small">
+                  {qtyText(d.filters)} x {money(d.unit_amount)}
+                </div>
+                <div className="money">{money(d.amount)}</div>
+              </div>
             </div>
           </div>
         ))}
@@ -476,7 +494,7 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
             <div className="small" style={{ fontWeight: 800, letterSpacing: "0.05em" }}>
               CURRENT SETTLEMENT TOTAL
             </div>
-            <div className="small">From the CDS affiliate rates for the services and parts above.</div>
+            <div className="small">From the CDS affiliate rates for the services and parts above, less any deductions.</div>
           </div>
           <div className="amount money">{money(settlement)}</div>
         </div>

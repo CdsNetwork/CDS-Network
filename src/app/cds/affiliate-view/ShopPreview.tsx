@@ -19,6 +19,7 @@ import {
   type WoStatus,
 } from "@/lib/format";
 import type { createClient } from "@/lib/supabase/server";
+import { SHOP_DEDUCTION_COLUMNS, deductionLabel, shopPayable, toShopDeductions, type ShopDeduction } from "@/lib/shop-deductions";
 
 // Read-only copy of the shop job screen for CDS. The CDS client can read everything, so
 // every query below selects only the columns the shop portal itself reads
@@ -110,6 +111,7 @@ export type PreviewData = {
   files: (PreviewFile & { url: string | null })[];
   shipments: PreviewShipment[];
   events: PreviewEvent[];
+  deductions: ShopDeduction[];
 };
 
 /** The job as the given shop sees it, or null when the shop cannot see it. */
@@ -128,7 +130,7 @@ export async function loadPreview(supabase: Supabase, shopId: string, woId: stri
   const job = wo as unknown as Job;
   const ownOrNone = `affiliate_id.is.null,affiliate_id.eq.${shopId}`;
 
-  const [lines, components, requests, files, shipments, events] = await Promise.all([
+  const [lines, components, requests, files, shipments, events, deductions] = await Promise.all([
     supabase
       .from("work_order_lines")
       .select("id, qty, shop_unit_rate, origin, description, catalog_items(sku, name)")
@@ -168,6 +170,7 @@ export async function loadPreview(supabase: Supabase, shopId: string, woId: stri
       .eq("shop_visible", true)
       .eq("affiliate_id", shopId)
       .order("at"),
+    supabase.from("work_order_shop_deductions").select(SHOP_DEDUCTION_COLUMNS).eq("work_order_id", woId),
   ]);
 
   const fileRows = (files.data ?? []) as PreviewFile[];
@@ -192,6 +195,7 @@ export async function loadPreview(supabase: Supabase, shopId: string, woId: stri
     files: fileRows.map((f) => ({ ...f, url: urls.get(f.storage_path) ?? null })),
     shipments: (shipments.data ?? []) as PreviewShipment[],
     events: (events.data ?? []) as PreviewEvent[],
+    deductions: toShopDeductions(deductions.data as Record<string, unknown>[] | null),
   };
 }
 
@@ -205,11 +209,11 @@ function Fact({ label, value }: { label: string; value: string | null | undefine
 }
 
 export function ShopPreview({ data }: { data: PreviewData }) {
-  const { job, lines, components, requests, files, shipments, events } = data;
+  const { job, lines, components, requests, files, shipments, events, deductions } = data;
   const customer = one(job.customers)?.name ?? "";
   const isPickup = job.fulfillment === "pickup";
   const isShipping = job.fulfillment === "shipping";
-  const settlement = lines.reduce((sum, l) => sum + (l.shop_unit_rate ?? 0) * l.qty, 0);
+  const settlement = shopPayable(lines, deductions);
   const componentName = new Map(components.map((c) => [c.id, `${c.component_type} #${c.seq}`]));
 
   return (
@@ -313,6 +317,21 @@ export function ShopPreview({ data }: { data: PreviewData }) {
             </div>
           );
         })}
+        {deductions.map((d) => (
+          <div key={d.kind} className={styles.lineRow}>
+            <div style={{ minWidth: 0 }}>
+              <strong>Shipping deduction</strong>
+              <div>{deductionLabel(d)}</div>
+              <div className="small">Automatic on shipped orders</div>
+            </div>
+            <div className={styles.lineMoney}>
+              <div className="small">
+                {d.filters} x {money(d.unit_amount)}
+              </div>
+              <div className="money">{money(d.amount)}</div>
+            </div>
+          </div>
+        ))}
       </section>
 
       <section className="section">

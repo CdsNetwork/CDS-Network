@@ -1,4 +1,5 @@
 import "server-only";
+import { SHOP_DEDUCTION_COLUMNS, toShopDeductions, type ShopDeduction } from "@/lib/shop-deductions";
 import { createClient } from "@/lib/supabase/server";
 import { CATEGORY_LABEL, money } from "@/lib/format";
 import { pacificToday } from "@/lib/dates";
@@ -132,6 +133,8 @@ export type JobDetailData = {
   inHouse: boolean;
   /** An in-house parts-only order (CDS sells the part): completes without components. */
   partsSale: boolean;
+  /** Automatic deductions on the shop's bill (shipped orders: $15 per filter). */
+  deductions: ShopDeduction[];
 };
 
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -162,7 +165,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
   delete (job as Partial<typeof w>).affiliate_id;
   delete (job as Partial<typeof w>).request_type;
 
-  const [lines, components, auths, files, ships, notes] = await Promise.all([
+  const [lines, components, auths, files, ships, notes, deductions] = await Promise.all([
     supabase
       .from("work_order_lines")
       .select("id, qty, shop_unit_rate, origin, description, created_at, catalog_items(sku, name)")
@@ -192,6 +195,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
       .eq("work_order_id", id)
       .order("created_at"),
     supabase.from("work_order_notes").select("id, author_name, created_at, body").eq("work_order_id", id).order("created_at"),
+    supabase.from("work_order_shop_deductions").select(SHOP_DEDUCTION_COLUMNS).eq("work_order_id", id),
   ]);
 
   const lineRows: LineRow[] = (lines.data ?? []).map((r) => {
@@ -301,6 +305,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     authOptions,
     inHouse,
     partsSale: inHouse && w.request_type === "parts_only",
+    deductions: toShopDeductions(deductions.data as Record<string, unknown>[] | null),
   };
 }
 

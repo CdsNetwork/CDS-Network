@@ -164,7 +164,33 @@ export async function loadBackupOrders(db: SupabaseClient, since: string | null)
       rows.push(...((data ?? []) as unknown as Row[]));
     }
   }
-  return rows.map(toBackupOrder);
+  const deductions = await deductionsFor(db, since === null ? null : rows.map((r) => r.id));
+  return rows.map((r) => ({ ...toBackupOrder(r), shopDeductions: deductions.get(r.id) ?? 0 }));
+}
+
+/** Deduction totals per work order (view work_order_shop_deductions); all orders when `ids` is null. */
+async function deductionsFor(db: SupabaseClient, ids: string[] | null): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const add = (rows: { work_order_id: string; amount: number | string }[]) => {
+    for (const r of rows) out.set(r.work_order_id, (out.get(r.work_order_id) ?? 0) + Number(r.amount));
+  };
+  if (ids === null) {
+    add(
+      await fetchAll<{ work_order_id: string; amount: number }>((from, to) =>
+        db.from("work_order_shop_deductions").select("work_order_id, amount").order("work_order_id").range(from, to) as never,
+      ),
+    );
+    return out;
+  }
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const { data, error } = await db
+      .from("work_order_shop_deductions")
+      .select("work_order_id, amount")
+      .in("work_order_id", ids.slice(i, i + IN_CHUNK));
+    if (error) throw new Error(error.message);
+    add((data ?? []) as { work_order_id: string; amount: number }[]);
+  }
+  return out;
 }
 
 /** Watermark and last full run, from the integration_sync rows of earlier successful runs. */
