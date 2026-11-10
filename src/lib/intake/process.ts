@@ -132,6 +132,18 @@ export async function processEmail(
         await store.saveResult(id, { status: "ignored", parsed, error: null, attempts });
         return outcome("ignored", null, reason);
       }
+      // No order found for it: it still becomes a draft, but it may not be a new job (the order
+      // may have been removed), so it is never high confidence.
+      parsed = {
+        ...parsed,
+        reply_without_order: true,
+        confidence: Math.min(parsed.confidence, 0.45),
+        confidence_label: "low",
+        warnings: [
+          ...parsed.warnings,
+          "Reply to an earlier email, not a new request on its own: check it is a new job before dispatch.",
+        ],
+      };
     }
     const decision = buildDraftParams(id, row.email, parsed);
     // Store what was read first, so it is kept even if creating the order fails.

@@ -51,6 +51,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { LabelPanel, type LabelView } from "@/components/shipping/LabelPanel";
 import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/shipstation/views";
+import { missingLegEnds } from "@/lib/shipstation/ends";
 import { packageForShipment } from "@/lib/shipstation/package";
 import { NEW_SHIPMENT_STATUS } from "@/app/cds/shipping/options";
 import {
@@ -820,6 +821,11 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       Quoted {money(si?.quoted_cost)} • Actual {money(si?.actual_cost)}
                       {si?.notes ? ` • ${si.notes}` : ""}
                     </div>
+                    {canShip && !labels.has(s.id) && missingLegEnds(s.direction, { affiliateId: wo.affiliate_id, locationId: wo.location_id }).map((p) => (
+                      <div key={p} className="notice warning">
+                        {p}. Rates and labels need its address.
+                      </div>
+                    ))}
                     <div style={{ marginTop: 8 }}>
                       <LabelPanel
                         shipmentId={s.id}

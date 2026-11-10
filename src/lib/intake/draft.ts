@@ -53,6 +53,7 @@ export function buildDraftParams(emailId: string, email: NormalizedEmail, parsed
   if (!lines.size) missing.push("services or parts");
   const reason = [
     `From email (${parsed.confidence_label} confidence): check before dispatch`,
+    parsed.reply_without_order ? "reply to an earlier email, check it is a new job" : null,
     missing.length ? `missing ${missing.join(", ")}` : null,
   ]
     .filter(Boolean)

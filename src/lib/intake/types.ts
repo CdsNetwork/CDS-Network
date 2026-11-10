@@ -168,6 +168,8 @@ export type ParsedEmail = {
   po_reference?: { po_number: string; work_order_id: string | null; wo_number: number | null } | null;
   /** A reply or forward linked to the work order its request already has: no new draft. */
   thread_reference?: ThreadReference | null;
+  /** A reply or forward with no work order found for it: made a draft, marked low confidence. */
+  reply_without_order?: boolean;
   original_sender: string | null;
   llm: { used: boolean; model: string | null; error: string | null };
   fields: {

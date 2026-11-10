@@ -192,6 +192,26 @@ describe("replies and forwards on a request that already has a work order", () =
     expect(old.drafts).toHaveLength(2);
   });
 
+  // Reported by CDS 2026-11-10: replies to Ryder requests whose order was gone (cleared at go
+  // live) became drafts at 97% "high" confidence, which reads as safe to dispatch.
+  it("marks a draft made from an unmatched reply as low confidence and says it is a reply", async () => {
+    const { store, drafts, rows } = memoryStore();
+    const out = await ingestEmail(store, reply({ inReplyTo: "<not-stored@ryder.example>" }), { source: "webhook", llm: null });
+    expect(out.status).toBe("converted");
+    const row = rows.get(out.id)!;
+    expect(row.parsed?.confidence).toBeLessThan(0.5);
+    expect(row.parsed?.confidence_label).toBe("low");
+    expect(row.parsed?.warnings.join(" ")).toMatch(/reply to an earlier email/i);
+    expect(drafts[0].p_review_reason).toMatch(/low confidence/);
+    expect(drafts[0].p_review_reason).toMatch(/reply to an earlier email/i);
+  });
+
+  it("keeps the confidence of a new request (not a reply)", async () => {
+    const { store, rows } = memoryStore();
+    const out = await ingestEmail(store, request, { source: "webhook", llm: null });
+    expect(rows.get(out.id)?.parsed?.confidence_label).toBe("high");
+  });
+
   it("makes the draft anyway when CDS forces it", async () => {
     const { store, drafts } = memoryStore();
     await ingestEmail(store, request, { source: "webhook", llm: null });

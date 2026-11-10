@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { recordSync } from "@/lib/integration-sync";
 import { shipStationRequest, ShipStationError } from "./client";
 import { shipStationConfig } from "./config";
+import { ENDS, NO_LOCATION_PROBLEM, NO_SHOP_PROBLEM } from "./ends";
 import { packageForShipment, type ShipmentPackage } from "./package";
 import {
   buildLabelRequest,
@@ -85,15 +86,6 @@ function summary(a: ShipAddress): string {
   return [a.company_name ?? a.name, a.address_line1, `${a.city_locality} ${a.state_province} ${a.postal_code}`].join(", ");
 }
 
-/** Which end of each leg is which (see the 20261018000000 migration header). */
-const ENDS: Record<string, [from: "location" | "shop" | "cds", to: "location" | "shop" | "cds"]> = {
-  customer_to_affiliate: ["location", "shop"],
-  affiliate_to_customer: ["shop", "location"],
-  supplier_to_customer: ["shop", "location"],
-  cds_to_customer: ["cds", "location"],
-  customer_to_cds: ["location", "cds"],
-};
-
 async function loadContext(db: Db, shipmentId: string): Promise<{ ok: true; ctx: Context } | { ok: false; error: string }> {
   const { data: sh, error } = await db
     .from("shipments")
@@ -139,7 +131,7 @@ async function loadContext(db: Db, shipmentId: string): Promise<{ ok: true; ctx:
   const party = (end: "location" | "shop" | "cds"): { ok: true; address: ShipAddress } | { ok: false; problem: string } => {
     if (end === "location") {
       const l = loc.data as LocationRow | null;
-      if (!l) return { ok: false, problem: "The work order has no customer location on file" };
+      if (!l) return { ok: false, problem: NO_LOCATION_PROBLEM };
       const input: PortalAddress = {
         name: "Receiving",
         company: [customer, l.name].filter(Boolean).join(" ") || wo.location_label,
@@ -154,7 +146,7 @@ async function loadContext(db: Db, shipmentId: string): Promise<{ ok: true; ctx:
     }
     if (end === "shop") {
       const a = shop.data as ShopRow | null;
-      if (!a) return { ok: false, problem: "The work order has no shop" };
+      if (!a) return { ok: false, problem: NO_SHOP_PROBLEM };
       return toShipAddress(
         { name: "Service Department", company: a.display_name, phone: cdsPhone, line1: a.address_line1, city: a.city, region: a.region, postalCode: a.postal_code, country: a.country },
         "Shop",

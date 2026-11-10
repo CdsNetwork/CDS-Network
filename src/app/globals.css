@@ -94,17 +94,19 @@ th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: l
 th { background: #f8fafb; color: #5e6a72; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; position: sticky; top: 0; }
 td.num, th.num { text-align: right; }
 
+/* One color per status, so each reads apart at a glance. */
 .status { display: inline-block; padding: 5px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; }
 .status.pending_review { background: #fff4d6; color: #7a5200; }
 .status.awaiting_acceptance { background: #eef2ff; color: #3f51b5; }
 .status.accepted { background: #e8f3ff; color: #1466b8; }
-.status.picked_up { background: #fff6df; color: #9a6700; }
+.status.picked_up { background: #dcfce7; color: #166534; }
 .status.in_process { background: #fff0e0; color: #a04b00; }
-.status.completed { background: #e8f7ee; color: #18794e; }
-.status.delivered { background: #edf5e1; color: #4c7c0f; }
-.status.ready_to_invoice { background: #e7f7f7; color: #006d75; }
+.status.completed { background: #ccfbf1; color: #0f766e; }
+.status.delivered { background: #e0f2fe; color: #075985; }
+.status.ready_to_invoice { background: #fce7f3; color: #9d174d; }
 .status.invoiced { background: #f1ecff; color: #6941c6; }
-.status.cancelled, .status.rejected_by_affiliate { background: #f2f4f5; color: #52606a; }
+.status.cancelled { background: #fee4e2; color: #b42318; }
+.status.rejected_by_affiliate { background: #ffe4e6; color: #9f1239; }
 
 .link { color: var(--blue); cursor: pointer; font-weight: 700; }
 .money { font-variant-numeric: tabular-nums; font-weight: 700; }
