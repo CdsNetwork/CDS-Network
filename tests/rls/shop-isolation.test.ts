@@ -749,7 +749,7 @@ describe("CDS login", () => {
     expect(await visibleWorkOrders(cds.client)).toEqual([f.woA, f.woAPending, f.woB].sort());
   });
 
-  it("sees margin as customer price minus shop rate, before tax, minus shipping", async () => {
+  it("sees margin as customer price minus shop rate and shop deductions, before tax, minus shipping", async () => {
     const rows = await must(
       cds.client
         .from("work_order_financials")
@@ -762,10 +762,11 @@ describe("CDS login", () => {
         [r.customer_subtotal, r.shop_subtotal, r.shipping_cost, r.margin_before_shipping, r.margin].map(Number),
       ]),
     );
-    // A: customer X override 280 + 2 x 12 = 304; shop 200 + 2 x 10 = 220; shipping 40.
-    expect(byId[f.woA]).toEqual([304, 220, 40, 84, 44]);
-    // B: fleet 300 + 12 = 312; shop B's own rate 210 + 10 = 220; shipping 40.
-    expect(byId[f.woB]).toEqual([312, 220, 40, 92, 52]);
+    // A: customer X override 280 + 2 x 12 = 304; shop 200 + 2 x 10 = 220, less the $15 shipping
+    // deduction for its one filter (shipped order) = 205; shipping 40.
+    expect(byId[f.woA]).toEqual([304, 205, 40, 99, 59]);
+    // B: fleet 300 + 12 = 312; shop B's own rate 210 + 10 = 220, less $15 for its one filter = 205; shipping 40.
+    expect(byId[f.woB]).toEqual([312, 205, 40, 107, 67]);
   });
 
   it("keeps prices snapshotted on existing lines when the price list changes", async () => {

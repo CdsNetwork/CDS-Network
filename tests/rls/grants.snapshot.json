@@ -352,5 +352,17 @@
   "view public.work_order_shop_deductions": {
     "authenticated": "MAINTAIN,SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "function public.cds_mark_work_order_seen(uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "table public.component_failures": {
+    "authenticated": "SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.work_order_shop_activity": {
+    "authenticated": "SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   }
 }
