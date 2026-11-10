@@ -388,6 +388,14 @@ export async function voidLabel(db: Db, labelId: string): Promise<LabelResult> {
   if (error) return { ok: false, error: "The label could not be read. Try again." };
   if (!l) return { ok: false, error: "Label not found." };
   if (l.status !== "active") return { ok: false, error: "This label is already voided." };
+  // The carrier would still come for it (the database refuses this too).
+  const { count: pickups, error: pickupError } = await db
+    .from("shipment_pickups")
+    .select("id", { count: "exact", head: true })
+    .eq("label_id", l.id)
+    .eq("status", "scheduled");
+  if (pickupError) return { ok: false, error: "The label could not be read. Try again." };
+  if ((pickups ?? 0) > 0) return { ok: false, error: "This label has a carrier pickup booked. Cancel the pickup before voiding the label." };
 
   let message = "Test label voided in the portal (ShipStation does not keep test labels).";
   if (!l.is_test) {

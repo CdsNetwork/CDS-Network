@@ -1,8 +1,10 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LabelView } from "@/components/shipping/LabelPanel";
+import type { PickupView } from "@/components/shipping/PickupPanel";
 import { shipStationConfig } from "./config";
 import type { DefaultPackage } from "./package";
+import { pickupRefusal } from "./pickup-requests";
 
 type Row = {
   id: string;
@@ -22,7 +24,8 @@ export function shipStationConfigured(): boolean {
 
 /**
  * The label in use on each shipment leg, by shipment id. `withCost` (CDS pages only) adds
- * what the label cost; shops cannot read shipment_label_costs at all.
+ * what the label cost and its carrier pickup; shops cannot read shipment_label_costs or
+ * shipment_pickups at all.
  */
 export async function activeLabels(
   db: SupabaseClient,
@@ -38,6 +41,27 @@ export async function activeLabels(
   const results = await Promise.all(
     groups.map((ids) => ("workOrderId" in by ? select().eq("work_order_id", by.workOrderId) : select().in("shipment_id", ids))),
   );
+  // CDS pages: the carrier pickup booked for each label (shops cannot read shipment_pickups).
+  const pickups = new Map<string, PickupView>();
+  const config = withCost ? shipStationConfig() : null;
+  if (withCost) {
+    const labelIds = results.flatMap((res) => (res.data ?? []) as unknown as Row[]).map((r) => r.id);
+    const chunks: string[][] = [];
+    for (let i = 0; i < labelIds.length; i += 100) chunks.push(labelIds.slice(i, i + 100));
+    const found = await Promise.all(
+      chunks.map((ids) =>
+        db
+          .from("shipment_pickups")
+          .select("id, label_id, confirmation_number, carrier, window_start, window_end, time_zone, notes")
+          .eq("status", "scheduled")
+          .in("label_id", ids),
+      ),
+    );
+    for (const p of found.flatMap((res) => res.data ?? []) as (PickupView & { label_id: string })[]) {
+      const { label_id, ...view } = p;
+      pickups.set(label_id, view);
+    }
+  }
   const out = new Map<string, LabelView>();
   for (const r of results.flatMap((res) => res.data ?? []) as unknown as Row[]) {
     const c = Array.isArray(r.shipment_label_costs) ? r.shipment_label_costs[0] : r.shipment_label_costs;
@@ -49,6 +73,7 @@ export async function activeLabels(
       tracking_url: r.tracking_url,
       is_test: r.is_test,
       cost: withCost && c ? Math.round((Number(c.label_cost) + Number(c.insurance_cost)) * 100) / 100 : null,
+      ...(withCost ? { pickup: pickups.get(r.id) ?? null, pickupRefusal: pickupRefusal(r, config?.testLabels ?? false) } : {}),
     });
   }
   return out;

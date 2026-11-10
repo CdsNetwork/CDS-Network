@@ -9,6 +9,10 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
+  "function public.cds_cancel_shipment_pickup(uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
   "function public.cds_create_work_order(uuid,uuid,text,text,public.request_type,public.fulfillment_method,text,text,text,text,jsonb)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
@@ -26,6 +30,10 @@
     "service_role": "EXECUTE"
   },
   "function public.cds_record_shipment_label(uuid,jsonb)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_record_shipment_pickup(uuid,jsonb)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
@@ -250,6 +258,10 @@
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "table public.shipment_labels": {
+    "authenticated": "MAINTAIN,SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shipment_pickups": {
     "authenticated": "MAINTAIN,SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },

@@ -11,6 +11,8 @@ import {
   type RatesResult,
 } from "@/lib/shipstation/labels";
 import { packageFromForm, type PackageForm } from "@/lib/shipstation/package";
+import type { PickupForm } from "@/lib/shipstation/pickup-requests";
+import { cancelPickup, schedulePickupForLabel, type PickupResult } from "@/lib/shipstation/pickups";
 import { createClient } from "@/lib/supabase/server";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -82,6 +84,29 @@ export async function voidShipmentLabel(labelId: string, woId: string): Promise<
   await requireCds();
   if (!UUID.test(labelId)) return { ok: false, error: "Label not found." };
   const result = await voidLabel(await createClient(), labelId);
+  refresh(woId);
+  return result;
+}
+
+/** Books a carrier pickup for a real label in use (never for a test label). CDS only. */
+export async function scheduleLabelPickup(labelId: string, woId: string, form: PickupForm): Promise<PickupResult> {
+  await requireCds();
+  if (!UUID.test(labelId)) return { ok: false, error: "Label not found." };
+  const result = await schedulePickupForLabel(await createClient(), labelId, {
+    date: String(form?.date ?? "").slice(0, 20),
+    readyTime: String(form?.readyTime ?? "").slice(0, 10),
+    closeTime: String(form?.closeTime ?? "").slice(0, 10),
+    notes: String(form?.notes ?? "").slice(0, 1000),
+  });
+  refresh(woId);
+  return result;
+}
+
+/** Cancels a carrier pickup in ShipStation and in the portal. CDS only. */
+export async function cancelLabelPickup(pickupId: string, woId: string): Promise<PickupResult> {
+  await requireCds();
+  if (!UUID.test(pickupId)) return { ok: false, error: "Pickup not found." };
+  const result = await cancelPickup(await createClient(), pickupId);
   refresh(woId);
   return result;
 }

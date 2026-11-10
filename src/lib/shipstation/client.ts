@@ -57,7 +57,7 @@ async function readJson(res: Response): Promise<unknown> {
 /** One API call. `path` is relative to /v2/, for example "rates" or "labels/se-1/void". */
 export async function shipStationRequest<T>(
   apiKey: string,
-  method: "GET" | "POST" | "PUT",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   options: { body?: unknown; fetchImpl?: typeof fetch; timeoutMs?: number } = {},
 ): Promise<T> {

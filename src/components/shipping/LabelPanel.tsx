@@ -5,6 +5,7 @@ import { createShipmentLabel, getShipmentRates, voidShipmentLabel } from "@/app/
 import type { RatesResult } from "@/lib/shipstation/labels";
 import { packageFormValues, packageSummary, type PackageForm, type ShipmentPackage } from "@/lib/shipstation/package";
 import { voidLabelConfirm } from "./confirm";
+import { PickupPanel, type PickupView } from "./PickupPanel";
 import { TestBadge } from "./TestBadge";
 
 export type LabelView = {
@@ -16,6 +17,10 @@ export type LabelView = {
   is_test: boolean;
   /** CDS only. */
   cost: number | null;
+  /** CDS only: the carrier pickup booked for this label. */
+  pickup?: PickupView | null;
+  /** CDS only: why no pickup can be booked (test labels), or null. */
+  pickupRefusal?: string | null;
 };
 
 type Rates = Extract<RatesResult, { ok: true }>;
@@ -87,7 +92,8 @@ export function LabelPanel({
         <button
           className="btn btn-danger btn-small"
           type="button"
-          disabled={pending}
+          disabled={pending || !!label.pickup}
+          title={label.pickup ? "Cancel the carrier pickup before voiding the label." : undefined}
           onClick={() => {
             if (!window.confirm(voidLabelConfirm(label))) return;
             setError(null);
@@ -102,6 +108,11 @@ export function LabelPanel({
         </button>
         {error && <p className="error" role="alert">{error}</p>}
         {message && <p className="small" role="status">{message}</p>}
+        {label.pickup !== undefined && (
+          <div style={{ flexBasis: "100%" }}>
+            <PickupPanel labelId={label.id} woId={woId} pickup={label.pickup} refusal={label.pickupRefusal ?? null} />
+          </div>
+        )}
       </div>
     );
   }
