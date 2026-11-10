@@ -53,6 +53,7 @@ import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { SHOP_DEDUCTION_COLUMNS, deductionLabel, shopPayable, toShopDeductions } from "@/lib/shop-deductions";
 import { LabelPanel, type LabelView } from "@/components/shipping/LabelPanel";
 import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/shipstation/views";
 import { labelShop, labelShopMismatch, missingLegEnds, shopEnd } from "@/lib/shipstation/ends";
@@ -539,6 +540,14 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         .order("created_at"),
     ]);
 
+  // Automatic deductions on the shop's bill (shipped orders: $15 per filter), computed in the
+  // database; already part of work_order_financials.shop_subtotal and margin.
+  const { data: deductionRows } = await supabase
+    .from("work_order_shop_deductions")
+    .select(SHOP_DEDUCTION_COLUMNS)
+    .eq("work_order_id", id);
+  const deductions = toShopDeductions(deductionRows as Record<string, unknown>[] | null);
+
   // QuickBooks: only for orders that are ready to invoice or invoiced.
   let qbo: QboStatus | null = null;
   let invoice: InvoiceState | null = null;
@@ -655,8 +664,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     customerTaxExempt,
   };
   const rate = customerTaxExempt ? 0 : Number(internal?.tax_rate ?? 0);
-  let shopTotal = 0;
-  for (const l of lines) shopTotal += (l.shop_unit_rate ?? 0) * l.qty;
+  const shopTotal = shopPayable(lines, deductions);
   const { subtotal, taxable, salesTax, total: invoiceTotal } = taxSummary(
     lines.map((l) => {
       const p = one(l.work_order_line_pricing);
@@ -1098,6 +1106,27 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       </tr>
                     );
                   })}
+                  {deductions.map((d) => (
+                    <tr key={d.kind}>
+                      <td>
+                        <b>Shipping deduction</b>
+                        <div className="small">{deductionLabel(d)}</div>
+                        <span className="tag">Automatic on shipped orders, not on the customer invoice</span>
+                      </td>
+                      <td className="num">{d.filters}</td>
+                      <td className="num">
+                        <span className="money">{tbd ? "TBD" : money(d.amount)}</span>
+                        <div className="small">{money(d.unit_amount)} each</div>
+                      </td>
+                      <td className="num">-</td>
+                      <td>Automatic</td>
+                      <td>
+                        <div className="small">Not invoiced</div>
+                      </td>
+                      <td className="num money">{tbd ? "TBD" : money(-d.amount)}</td>
+                      {removeColumn && <td />}
+                    </tr>
+                  ))}
                   {lines.length > 0 && (
                     <tr>
                       <td colSpan={2}>

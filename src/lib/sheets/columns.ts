@@ -47,6 +47,8 @@ export type BackupOrder = {
   lines: BackupLine[];
   components: BackupComponent[];
   shipments: BackupShipment[];
+  /** Automatic deductions on the shop's bill (negative, src/lib/shop-deductions.ts); 0 when none. */
+  shopDeductions?: number;
 };
 
 export const HEADER = [
@@ -89,7 +91,7 @@ const uniq = (values: (string | null | undefined)[]) => [...new Set(values.map((
 
 /** The row of one work order, in HEADER order. Empty cells are "". */
 export function toRow(o: BackupOrder): Cell[] {
-  const shopTotal = round2(o.lines.reduce((s, l) => s + (l.shopUnitRate ?? 0) * l.qty, 0));
+  const shopTotal = round2(o.lines.reduce((s, l) => s + (l.shopUnitRate ?? 0) * l.qty, 0) + (o.shopDeductions ?? 0));
   const customerTotal = round2(o.lines.reduce((s, l) => s + (l.customerUnitPrice ?? 0) * l.qty, 0));
   const shippingCosts = o.shipments.map((s) => s.cost).filter((c): c is number => c != null);
   const shipping = round2(shippingCosts.reduce((s, c) => s + c, 0));
