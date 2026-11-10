@@ -309,6 +309,10 @@
     "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
+  "table public.work_order_internal_notes": {
+    "authenticated": "DELETE,INSERT,SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
   "table public.work_order_line_pricing": {
     "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"

@@ -383,6 +383,35 @@ export async function deleteNote(woId: string, noteId: string): Promise<ActionSt
   return done(woId, "Note deleted.");
 }
 
+/** A CDS-only internal note (work_order_internal_notes); shops never see these. */
+export async function addInternalNote(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const note = noteBody(formData.get("body"));
+  if ("error" in note) return { error: note.error };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("work_order_internal_notes")
+    .insert({ work_order_id: woId, author_id: profile.id, body: note.body });
+  if (error) return { error: error.message };
+  return done(woId, "Internal note added.");
+}
+
+export async function deleteInternalNote(woId: string, noteId: string): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId) || !isUuid(noteId)) return { error: "Note not found." };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("work_order_internal_notes")
+    .delete()
+    .eq("id", noteId)
+    .eq("work_order_id", woId)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Note not found." };
+  return done(woId, "Internal note deleted.");
+}
+
 /** Misc. hardware and other items priced per line: the amount from the shop's invoice, billed as is. */
 export async function addPassThroughLine(woId: string, itemId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
   await requireCds();

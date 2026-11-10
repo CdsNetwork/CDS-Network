@@ -59,8 +59,9 @@ describe("original email on the CDS work order page", () => {
     expect(page).toMatch(/const EMAIL_COLUMNS = "id, from_header, from_address, to_addresses, subject, received_at, body_text, body_html, attachments"/);
   });
 
-  it("shows it right after Internal notes, as plain text", () => {
-    expect(page).toMatch(/<Fact label="Internal notes">\{internal\?\.internal_notes\}<\/Fact>\s*\{emails\.map\(\(e\) => \(\s*<OriginalEmail /);
+  it("shows it right after Routing notes, as plain text", () => {
+    // Internal notes moved to their own history section (work_order_internal_notes, 2026-11-10).
+    expect(page).toMatch(/<Fact label="Routing notes">\{internal\?\.routing_notes\}<\/Fact>\s*\{emails\.map\(\(e\) => \(\s*<OriginalEmail /);
     expect(page).toContain("htmlToText(email.body_html");
     expect(page).not.toContain("dangerouslySetInnerHTML");
   });

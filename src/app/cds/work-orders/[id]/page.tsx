@@ -43,7 +43,7 @@ import {
   wrapCell,
 } from "@/lib/format";
 import { htmlToText } from "@/lib/intake/email";
-import { NOTE_MAX_LENGTH, type NoteView } from "@/lib/notes";
+import { internalNotesHistory, NOTE_MAX_LENGTH, ORDER_CREATED_NOTE_ID, type NoteView } from "@/lib/notes";
 import { NotesList } from "@/components/WorkOrderNotes";
 import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
@@ -59,8 +59,10 @@ import {
   addPassThroughLine,
   addShipment,
   createQuickBooksInvoice,
+  addInternalNote,
   addNote,
   decideAuthorization,
+  deleteInternalNote,
   deleteNote,
   dispatchWorkOrder,
   removeLine,
@@ -467,7 +469,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   if (!woData) notFound();
   const wo = woData as unknown as WorkOrder;
 
-  const [internalRes, finRes, linesRes, compRes, authRes, attRes, shipRes, eventRes, shopsRes, catalogRes, locationCounts, billingRes, emailsRes, notesRes] =
+  const [internalRes, finRes, linesRes, compRes, authRes, attRes, shipRes, eventRes, shopsRes, catalogRes, locationCounts, billingRes, emailsRes, notesRes, internalNotesRes] =
     await Promise.all([
       supabase
         .from("work_order_internal")
@@ -515,6 +517,11 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase.from("customer_billing").select("tax_exempt").eq("customer_id", wo.customer_id).maybeSingle(),
       supabase.from("inbound_emails").select(EMAIL_COLUMNS).eq("work_order_id", id).order("received_at", { ascending: false }),
       supabase.from("work_order_notes").select("id, author_name, created_at, body").eq("work_order_id", id).order("created_at"),
+      supabase
+        .from("work_order_internal_notes")
+        .select("id, author_name, created_at, body")
+        .eq("work_order_id", id)
+        .order("created_at"),
     ]);
 
   // QuickBooks: only for orders that are ready to invoice or invoiced.
@@ -538,6 +545,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const shipments = (shipRes.data ?? []) as unknown as Shipment[];
   const emails = (emailsRes.data ?? []) as InboundEmail[];
   const notes = (notesRes.data ?? []) as NoteView[];
+  const internalNotes = internalNotesHistory(internal?.internal_notes, wo.created_at, (internalNotesRes.data ?? []) as NoteView[]);
   const canShip = shipStationConfigured();
   const [labels, packageDefaults] = shipments.length
     ? await Promise.all([activeLabels(supabase, { workOrderId: id }, true), canShip ? defaultPackage(supabase) : null])
@@ -765,7 +773,6 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 {location?.dock_note ? `\nDock: ${location.dock_note}` : ""}
               </Fact>
               <Fact label="Routing notes">{internal?.routing_notes}</Fact>
-              <Fact label="Internal notes">{internal?.internal_notes}</Fact>
               {emails.map((e) => (
                 <OriginalEmail key={e.id} email={e} />
               ))}
@@ -1234,6 +1241,32 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </div>
             )}
             <p className="small">Links expire after 10 minutes. Reload the page for fresh links.</p>
+          </section>
+
+          <section className="section" id="internal-notes">
+            <h3>Internal notes</h3>
+            <p className="small">Only CDS staff see these notes. Shops never do.</p>
+            {internalNotesRes.error && <div className="notice danger">Internal notes could not be loaded. Reload the page.</div>}
+            <NotesList
+              notes={internalNotes}
+              actions={(n) =>
+                n.id === ORDER_CREATED_NOTE_ID ? null : (
+                  <ActionForm
+                    action={deleteInternalNote.bind(null, wo.id, n.id)}
+                    submitLabel="Delete"
+                    pendingLabel="..."
+                    buttonClass="remove"
+                    confirmText="Delete this internal note?"
+                  />
+                )
+              }
+            />
+            <ActionForm action={addInternalNote.bind(null, wo.id)} submitLabel="Add internal note" pendingLabel="Adding..." resetOnSuccess>
+              <div className="field" style={{ marginTop: 10 }}>
+                <label htmlFor="internal-note-body">New internal note (CDS only)</label>
+                <textarea id="internal-note-body" name="body" rows={3} maxLength={NOTE_MAX_LENGTH} required />
+              </div>
+            </ActionForm>
           </section>
 
           <section className="section" id="notes">
