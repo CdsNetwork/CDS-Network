@@ -428,7 +428,9 @@ async function parseTemplate(email: NormalizedEmail, text: string, t: TemplateRe
   const partsOnly = matched.length > 0 && matched.every((i) => categoryOf.get(i.catalog_item_id!) !== "service");
   const requestType = partsOnly && !t.items.some((i) => i.service) ? "parts_only" : "service";
 
-  // ---- pickup or shipping: the template's own, a parts order ships, else the location default
+  // ---- pickup or shipping: the template's own, a parts order ships, else the location default.
+  // A Ryder form has no real choice (always "Pick Up Request"), so its location decides and
+  // pickup is only the fallback when the location has no default.
   let fulfillment: Field<Fulfillment> = none();
   if (f.fulfillment) fulfillment = exact(f.fulfillment);
   else if (t.template === "first_student_iprocure" && requestType === "parts_only") fulfillment = { value: "shipping", source: "template", confidence: 0.9 };
@@ -436,6 +438,8 @@ async function parseTemplate(email: NormalizedEmail, text: string, t: TemplateRe
     const loc = location ? locations.find((l) => l.id === location.id) : null;
     if (loc && (loc.fulfillment === "pickup" || loc.fulfillment === "shipping")) {
       fulfillment = { value: loc.fulfillment, source: "location_default", confidence: 0.6 };
+    } else if (t.template === "ryder") {
+      fulfillment = { value: "pickup", source: "template", confidence: 0.6 };
     }
   }
 

@@ -108,6 +108,22 @@ describe("Ryder pick up request", () => {
     expect(p.confidence_label).toBe("high");
   });
 
+  // Reported by CDS 2026-11-10: Ryder 1016 and 576 are shipping sites but came in as local
+  // pickup, because every Ryder form says "Pick Up Request" whatever the site does.
+  it("takes pickup or shipping from the location, not from the form's Pick Up wording", async () => {
+    const shipping = await parseTemplate(t.ryderEgrReturn);
+    expect(shipping.location?.id).toBe(loc0611.id);
+    expect(shipping.fields.fulfillment).toMatchObject({ value: "shipping", source: "location_default" });
+    const pickup = await parseTemplate(t.ryderDpfClamps);
+    expect(pickup.fields.fulfillment).toMatchObject({ value: "pickup", source: "location_default" });
+  });
+
+  it("falls back to pickup for a Ryder form when the location has no default", async () => {
+    const p = await parseTemplate(t.ryderMissing);
+    expect(p.location).toBeNull();
+    expect(p.fields.fulfillment.value).toBe("pickup");
+  });
+
   it("proposes several services and the clamp and gasket kit when the Part # matches one", async () => {
     const p = await parseTemplate(t.ryderDocKit);
     expect(p.items.map((i) => i.catalog_item_id)).toEqual([DPF_CLEAN.id, DOC_CLEAN.id, KIT_ISB.id]);
@@ -224,7 +240,8 @@ describe("Ryder pick up request", () => {
         p_return_to_location: true,
         p_order_type: "G14 Classified",
         p_customer_region: "Northeast",
-        p_fulfillment: "pickup",
+        // 611 ships (location default), even though every Ryder form says "Pick Up Request".
+        p_fulfillment: "shipping",
         p_lines: [{ catalog_item_id: EGR.id, qty: 1 }],
       });
       expect(d.params.p_internal_notes).toMatch(/Please call before arriving/);

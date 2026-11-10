@@ -147,7 +147,7 @@ export function parseRyder(subject: string, text: string): TemplateResult | null
         mileage: miles(v.Miles),
       }),
       ...(returnToLocation ? { return_to_location: true } : {}),
-      fulfillment: "pickup",
+      // No fulfillment here: every Ryder form says "Pick Up Request", the location decides.
     },
     items,
     warnings,
