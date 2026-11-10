@@ -14,6 +14,8 @@ type Row = {
   tracking_number: string | null;
   tracking_url: string | null;
   is_test: boolean;
+  shop_affiliate_id?: string | null;
+  affiliates?: { display_name: string } | { display_name: string }[] | null;
   shipment_label_costs?: { label_cost: number | string; insurance_cost: number | string } | { label_cost: number | string; insurance_cost: number | string }[] | null;
 };
 
@@ -24,8 +26,8 @@ export function shipStationConfigured(): boolean {
 
 /**
  * The label in use on each shipment leg, by shipment id. `withCost` (CDS pages only) adds
- * what the label cost and its carrier pickup; shops cannot read shipment_label_costs or
- * shipment_pickups at all.
+ * what the label cost, its carrier pickup and the shop it was made for; shops cannot read
+ * shipment_label_costs or shipment_pickups at all.
  */
 export async function activeLabels(
   db: SupabaseClient,
@@ -33,7 +35,7 @@ export async function activeLabels(
   withCost: boolean,
 ): Promise<Map<string, LabelView>> {
   const cols = "id, shipment_id, carrier, service_name, tracking_number, tracking_url, is_test";
-  const select = () => db.from("shipment_labels").select(withCost ? `${cols}, shipment_label_costs(label_cost, insurance_cost)` : cols).eq("status", "active");
+  const select = () => db.from("shipment_labels").select(withCost ? `${cols}, shop_affiliate_id, affiliates(display_name), shipment_label_costs(label_cost, insurance_cost)` : cols).eq("status", "active");
   // At most one active label per leg, so each request returns no more rows than ids asked for.
   const groups: string[][] = [];
   if ("workOrderId" in by) groups.push([]);
@@ -65,6 +67,7 @@ export async function activeLabels(
   const out = new Map<string, LabelView>();
   for (const r of results.flatMap((res) => res.data ?? []) as unknown as Row[]) {
     const c = Array.isArray(r.shipment_label_costs) ? r.shipment_label_costs[0] : r.shipment_label_costs;
+    const shop = Array.isArray(r.affiliates) ? r.affiliates[0] : r.affiliates;
     out.set(r.shipment_id, {
       id: r.id,
       carrier: r.carrier,
@@ -73,7 +76,13 @@ export async function activeLabels(
       tracking_url: r.tracking_url,
       is_test: r.is_test,
       cost: withCost && c ? Math.round((Number(c.label_cost) + Number(c.insurance_cost)) * 100) / 100 : null,
-      ...(withCost ? { pickup: pickups.get(r.id) ?? null, pickupRefusal: pickupRefusal(r, config?.testLabels ?? false) } : {}),
+      ...(withCost
+        ? {
+            pickup: pickups.get(r.id) ?? null,
+            pickupRefusal: pickupRefusal(r, config?.testLabels ?? false),
+            shop: r.shop_affiliate_id ? { id: r.shop_affiliate_id, name: shop?.display_name ?? null } : null,
+          }
+        : {}),
     });
   }
   return out;

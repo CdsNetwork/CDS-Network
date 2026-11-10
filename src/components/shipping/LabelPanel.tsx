@@ -21,6 +21,8 @@ export type LabelView = {
   pickup?: PickupView | null;
   /** CDS only: why no pickup can be booked (test labels), or null. */
   pickupRefusal?: string | null;
+  /** CDS only: the shop the label was made for (legs to or from the shop), or null. */
+  shop?: { id: string; name: string | null } | null;
 };
 
 type Rates = Extract<RatesResult, { ok: true }>;

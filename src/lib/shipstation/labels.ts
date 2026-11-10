@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { recordSync } from "@/lib/integration-sync";
 import { shipStationRequest, ShipStationError } from "./client";
 import { shipStationConfig } from "./config";
-import { ENDS, NO_LOCATION_PROBLEM, NO_SHOP_PROBLEM } from "./ends";
+import { ENDS, labelShop, NO_LOCATION_PROBLEM, NO_SHOP_PROBLEM } from "./ends";
 import { packageForShipment, type ShipmentPackage } from "./package";
 import {
   buildLabelRequest,
@@ -40,6 +40,7 @@ type LocationRow = {
 };
 type ShopRow = {
   display_name: string;
+  active: boolean;
   address_line1: string | null;
   city: string | null;
   region: string | null;
@@ -80,6 +81,8 @@ type Context = {
   to: { address: ShipAddress; summary: string };
   carriers: CarrierRow[];
   hasActiveLabel: boolean;
+  /** The shop at the leg's shop end (null for legs between CDS and the customer). */
+  shopId: string | null;
 };
 
 function summary(a: ShipAddress): string {
@@ -90,23 +93,38 @@ async function loadContext(db: Db, shipmentId: string): Promise<{ ok: true; ctx:
   const { data: sh, error } = await db
     .from("shipments")
     .select(
-      "id, work_order_id, direction, weight_lb, length_in, width_in, height_in, work_orders(id, wo_number, location_label, location_id, affiliate_id, customers(name))",
+      "id, work_order_id, direction, weight_lb, length_in, width_in, height_in, work_orders(id, wo_number, status, location_label, location_id, affiliate_id, customers(name), customer_locations(default_affiliate_id))",
     )
     .eq("id", shipmentId)
     .maybeSingle();
   if (error) return { ok: false, error: "The shipment could not be read. Try again." };
   if (!sh) return { ok: false, error: "Shipment not found." };
-  const wo = one(sh.work_orders as One<{ id: string; wo_number: number; location_label: string; location_id: string | null; affiliate_id: string | null; customers: One<{ name: string }> }>);
+  const wo = one(
+    sh.work_orders as One<{
+      id: string;
+      wo_number: number;
+      status: string;
+      location_label: string;
+      location_id: string | null;
+      affiliate_id: string | null;
+      customers: One<{ name: string }>;
+      customer_locations: One<{ default_affiliate_id: string | null }>;
+    }>,
+  );
   if (!wo) return { ok: false, error: "Work order not found." };
   const ends = ENDS[sh.direction];
   if (!ends) return { ok: false, error: "This shipment direction has no label." };
+  // The order's shop, or while it is in review the planned shop (CDS preps labels before dispatch).
+  const shopFor = ends.includes("shop")
+    ? labelShop({ status: wo.status, affiliateId: wo.affiliate_id, locationDefault: one(wo.customer_locations)?.default_affiliate_id ?? null })
+    : null;
 
   const [loc, shop, settings, carriers, active] = await Promise.all([
     wo.location_id
       ? db.from("customer_locations").select("name, address_line1, city, region, postal_code, country").eq("id", wo.location_id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    wo.affiliate_id
-      ? db.from("affiliates").select("display_name, address_line1, city, region, postal_code, country").eq("id", wo.affiliate_id).maybeSingle()
+    shopFor
+      ? db.from("affiliates").select("display_name, active, address_line1, city, region, postal_code, country").eq("id", shopFor.affiliateId).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     db
       .from("shipping_settings")
@@ -146,7 +164,8 @@ async function loadContext(db: Db, shipmentId: string): Promise<{ ok: true; ctx:
     }
     if (end === "shop") {
       const a = shop.data as ShopRow | null;
-      if (!a) return { ok: false, problem: NO_SHOP_PROBLEM };
+      // A planned shop must still be one Review & Dispatch offers (active).
+      if (!a || (shopFor?.planned && !a.active)) return { ok: false, problem: NO_SHOP_PROBLEM };
       return toShipAddress(
         { name: "Service Department", company: a.display_name, phone: cdsPhone, line1: a.address_line1, city: a.city, region: a.region, postalCode: a.postal_code, country: a.country },
         "Shop",
@@ -193,6 +212,7 @@ async function loadContext(db: Db, shipmentId: string): Promise<{ ok: true; ctx:
       to: { address: to.address, summary: summary(to.address) },
       carriers: (carriers.data ?? []) as CarrierRow[],
       hasActiveLabel: (active.count ?? 0) > 0,
+      shopId: shopFor?.affiliateId ?? null,
     },
   };
 }
@@ -336,6 +356,7 @@ export async function createLabelForShipment(db: Db, shipmentId: string, choice:
       label_file_path: filePath,
       ship_from_summary: ctx.from.summary,
       ship_to_summary: ctx.to.summary,
+      shop_affiliate_id: ctx.shopId,
       rate_id: choice.rateId,
       quoted_total: choice.quotedTotal,
       label_cost: label.cost,

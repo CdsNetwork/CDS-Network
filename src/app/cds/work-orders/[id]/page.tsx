@@ -53,7 +53,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { LabelPanel, type LabelView } from "@/components/shipping/LabelPanel";
 import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/shipstation/views";
-import { missingLegEnds } from "@/lib/shipstation/ends";
+import { labelShop, labelShopMismatch, missingLegEnds, shopEnd } from "@/lib/shipstation/ends";
 import { packageForShipment } from "@/lib/shipstation/package";
 import { NEW_SHIPMENT_STATUS } from "@/app/cds/shipping/options";
 import {
@@ -666,6 +666,15 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const compName = new Map(components.map((c) => [c.id, `${c.component_type} #${c.seq}`]));
   const locationDefault = location?.default_affiliate_id ?? null;
   const defaultShop = dispatchShopDefault({ status: wo.status, affiliateId: wo.affiliate_id, locationDefault });
+  // Rates and labels for legs to or from the shop: the order's shop, or while it is in review
+  // the planned shop (the Review & Dispatch default, if that shop is still active).
+  const labelShopNow = (() => {
+    const s = labelShop({ status: wo.status, affiliateId: wo.affiliate_id, locationDefault });
+    if (!s) return null;
+    if (!s.planned) return { ...s, name: shop?.display_name ?? null };
+    const active = shops.find((x) => x.id === s.affiliateId);
+    return active ? { ...s, name: active.display_name } : null;
+  })();
 
   // Dispatch picker: the shop the order is with first (unless it declined), then the
   // location's default shop, then the rest by name.
@@ -845,11 +854,25 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       Quoted {money(si?.quoted_cost)} • Actual {money(si?.actual_cost)}
                       {si?.notes ? ` • ${si.notes}` : ""}
                     </div>
-                    {canShip && !labels.has(s.id) && missingLegEnds(s.direction, { affiliateId: wo.affiliate_id, locationId: wo.location_id }).map((p) => (
+                    {canShip && !labels.has(s.id) && missingLegEnds(s.direction, { affiliateId: labelShopNow?.affiliateId ?? null, locationId: wo.location_id }).map((p) => (
                       <div key={p} className="notice warning">
                         {p}. Rates and labels need its address.
                       </div>
                     ))}
+                    {(() => {
+                      const end = shopEnd(s.direction);
+                      const label = labels.get(s.id) ?? null;
+                      if (!end) return null;
+                      const mismatch = label?.shop ? labelShopMismatch({ shopId: label.shop.id, shopName: label.shop.name }, { shop: labelShopNow, shopName: labelShopNow?.name ?? null }) : null;
+                      if (mismatch) return <div className="notice danger">{mismatch}</div>;
+                      // Before dispatch: say which shop the label is (or will be) addressed to.
+                      if (!labelShopNow?.planned || (!label && !canShip)) return null;
+                      return (
+                        <div className="small" style={{ marginTop: 4 }}>
+                          <b>Label {end === "to" ? "to" : "from"}:</b> {(label?.shop?.name ?? labelShopNow.name) || "the planned shop"} (planned, not yet dispatched)
+                        </div>
+                      );
+                    })()}
                     <div style={{ marginTop: 8 }}>
                       <LabelPanel
                         shipmentId={s.id}
