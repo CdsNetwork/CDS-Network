@@ -21,6 +21,8 @@ import {
   completeJob,
   declineJob,
   deleteComponent,
+  prepareUpload,
+  registerUpload,
   removePart,
   requestAuthorization,
   saveComponent,
@@ -315,7 +317,11 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
           stay with the work-order history.
         </p>
         <div className={canUpload ? "grid2" : undefined}>
-          {canUpload && <AttachmentForm workOrderId={id} components={componentOptions} />}
+          {canUpload && <AttachmentForm
+              workOrderId={id}
+              components={componentOptions}
+              actions={{ prepare: prepareUpload, register: registerUpload }}
+            />}
           <div>
             {attachments.length === 0 && <p className="small">No attachments yet.</p>}
             <div className="attachmentGrid">
@@ -341,6 +347,12 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
                     )}
                     <div className="small" style={{ marginTop: 6 }}>
                       {ATTACHMENT_CATEGORY_LABEL[a.category] ?? a.category}
+                      {a.from_cds && (
+                        <>
+                          {" "}
+                          <span className="tag blue">From CDS</span>
+                        </>
+                      )}
                     </div>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>
                       {a.url ? (

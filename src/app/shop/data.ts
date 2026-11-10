@@ -183,7 +183,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
       .order("seq"),
     supabase
       .from("attachments")
-      .select("id, component_id, category, storage_path, file_name, mime_type, note, uploaded_at")
+      .select("id, component_id, category, storage_path, file_name, mime_type, note, uploaded_at, affiliate_id")
       .eq("work_order_id", id)
       .order("uploaded_at"),
     supabase
@@ -251,6 +251,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     mime_type: f.mime_type,
     note: f.note,
     uploaded_at: f.uploaded_at,
+    from_cds: f.affiliate_id === null,
     url: urls.get(f.storage_path) ?? null,
   }));
 

@@ -14,6 +14,19 @@ import { loadInvoice } from "@/lib/qbo/invoice-input";
 import { createdNote, type PendingQbInvoice } from "@/lib/qbo/pending";
 import { qboApi } from "@/lib/qbo/tokens";
 import { createClient } from "@/lib/supabase/server";
+import {
+  ATTACHMENT_BUCKET,
+  cdsCanDelete,
+  checkFile,
+  checkMeta,
+  isUploadPathFor,
+  storedNote,
+  type DeclaredFile,
+  type PrepareResult,
+  type Uploader,
+  type UploadMeta,
+} from "@/lib/attachments";
+import { discardUnrecorded, signedUploadTarget, storedObject } from "@/lib/attachment-storage";
 
 const REQUEST_TYPES = ["service", "parts_only"];
 const FULFILLMENT = ["pickup", "shipping", "supplier_direct", "unspecified"];
@@ -418,6 +431,125 @@ export async function deleteInternalNote(woId: string, noteId: string): Promise<
   if (error) return { error: error.message };
   if (!data?.length) return { error: "Note not found." };
   return done(woId, "Internal note deleted.");
+}
+
+// ---------------------------------------------------------------- files
+//
+// CDS adds photos and files the same way shops do (lib/attachments, lib/attachment-storage):
+// prepareCdsUpload returns a one-time signed upload URL token, the browser uploads, then
+// registerCdsUpload checks the real size and type and records the file with CDS's own
+// client (RLS: CDS only). CDS files keep no shop stamp, so whichever shop has the order
+// sees them while "Shop can see" is ticked.
+
+async function checkCdsUploadTarget(workOrderId: string, meta: UploadMeta): Promise<string | null> {
+  if (!isUuid(workOrderId)) return "Work order not found";
+  const badMeta = checkMeta(meta);
+  if (badMeta) return badMeta;
+  if (meta.componentId !== null && !isUuid(meta.componentId)) return "Component not found";
+  const supabase = await createClient();
+  const { data: wo } = await supabase.from("work_orders").select("id").eq("id", workOrderId).maybeSingle();
+  if (!wo) return "Work order not found";
+  if (meta.componentId) {
+    const { data: comp } = await supabase
+      .from("work_order_components")
+      .select("id")
+      .eq("id", meta.componentId)
+      .eq("work_order_id", workOrderId)
+      .maybeSingle();
+    if (!comp) return "Component not found";
+  }
+  return null;
+}
+
+export async function prepareCdsUpload(workOrderId: string, meta: UploadMeta, file: DeclaredFile): Promise<PrepareResult> {
+  await requireCds();
+  const name = String(file?.name ?? "");
+  const bad = checkFile(name || "File", String(file?.type ?? ""), Number(file?.size));
+  if (bad) return { error: bad };
+  const targetError = await checkCdsUploadTarget(workOrderId, meta);
+  if (targetError) return { error: targetError };
+  return signedUploadTarget(workOrderId, name);
+}
+
+export async function registerCdsUpload(
+  workOrderId: string,
+  meta: UploadMeta,
+  path: string,
+  fileName: string,
+): Promise<ActionState> {
+  const profile = await requireCds();
+  const label = String(fileName ?? "").slice(0, 200) || "File";
+  if (!isUploadPathFor(workOrderId, path)) return { error: `${label} could not be saved.` };
+
+  const discard = async (message: string): Promise<ActionState> => {
+    await discardUnrecorded(path);
+    return { error: message };
+  };
+
+  const targetError = await checkCdsUploadTarget(workOrderId, meta);
+  if (targetError) return discard(targetError);
+
+  const stored = await storedObject(path);
+  if (!stored) return { error: `${label} did not finish uploading. Try again.` };
+  const bad = checkFile(label, stored.type, stored.size);
+  if (bad) return discard(bad);
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("attachments").insert({
+    work_order_id: workOrderId,
+    component_id: meta.componentId,
+    category: meta.category,
+    storage_path: path,
+    file_name: label,
+    mime_type: stored.type,
+    size_bytes: stored.size,
+    note: storedNote(meta.note),
+    uploaded_by: profile.id,
+    shop_visible: meta.shopVisible ?? true,
+  });
+  if (error) {
+    // A repeated register for the same path is already recorded: do not delete the file.
+    if (error.code === "23505") return done(workOrderId, "File added.");
+    return discard(`${label} could not be saved. Try again.`);
+  }
+  return done(workOrderId, "File added.");
+}
+
+export async function setAttachmentShopVisible(woId: string, attachmentId: string, visible: boolean): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId) || !isUuid(attachmentId) || typeof visible !== "boolean") return { error: "File not found." };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("attachments")
+    .update({ shop_visible: visible })
+    .eq("id", attachmentId)
+    .eq("work_order_id", woId)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "File not found." };
+  return done(woId, visible ? "The shop can now see this file." : "This file is now CDS only.");
+}
+
+/** Deletes a file CDS uploaded, and its stored object. Files a shop added stay. */
+export async function deleteCdsAttachment(woId: string, attachmentId: string): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId) || !isUuid(attachmentId)) return { error: "File not found." };
+  const supabase = await createClient();
+  const { data: row } = await supabase
+    .from("attachments")
+    .select("id, storage_path, profiles(full_name, kind)")
+    .eq("id", attachmentId)
+    .eq("work_order_id", woId)
+    .maybeSingle();
+  if (!row) return { error: "File not found." };
+  const uploader = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles) as Uploader;
+  if (!cdsCanDelete(uploader)) return { error: "Only files CDS added can be deleted here." };
+  const { data, error } = await supabase.from("attachments").delete().eq("id", attachmentId).select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "File not found." };
+  // The record is gone first, so a failed removal leaves only an unreachable object.
+  await supabase.storage.from(ATTACHMENT_BUCKET).remove([row.storage_path]);
+  return done(woId, "File deleted.");
 }
 
 /** Misc. hardware and other items priced per line: the amount from the shop's invoice, billed as is. */

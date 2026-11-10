@@ -1,13 +1,11 @@
 "use client";
 
 import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { prepareUpload, registerUpload, type UploadMeta } from "@/app/shop/actions";
+import { precheckFile, type DeclaredFile, type PrepareResult, type UploadMeta } from "@/lib/attachments";
 import { ATTACHMENT_CATEGORY_LABEL } from "@/lib/format";
 import { isNextControlError } from "@/lib/next-errors";
 import { browserClient } from "./browserClient";
 import type { Option } from "./types";
-
-const MAX_BYTES = 25 * 1024 * 1024;
 
 type Step = "waiting" | "uploading" | "saving" | "done" | "error";
 type Progress = { name: string; step: Step; message?: string };
@@ -20,12 +18,12 @@ const STEP_LABEL: Record<Step, string> = {
   error: "Failed",
 };
 
-/** Client-side check only, for a quick answer. The server checks again before and after. */
-function precheck(f: File): string | null {
-  if (!(f.type.startsWith("image/") || f.type === "application/pdf")) return "only photos and PDF files can be added.";
-  if (f.size > MAX_BYTES) return "larger than 25 MB.";
-  return null;
-}
+
+/** The two server steps; the shop and CDS each pass their own (checked for that role). */
+export type UploadActions = {
+  prepare: (workOrderId: string, meta: UploadMeta, file: DeclaredFile) => Promise<PrepareResult>;
+  register: (workOrderId: string, meta: UploadMeta, path: string, fileName: string) => Promise<{ error?: string }>;
+};
 
 type FieldValues = Record<string, string>;
 
@@ -37,6 +35,8 @@ function readFields(form: HTMLFormElement): FieldValues {
       values[el.id] = Array.from(el.files ?? [])
         .map((f) => `${f.name}:${f.size}:${f.lastModified}`)
         .join("|");
+    } else if (el instanceof HTMLInputElement && el.type === "checkbox" && el.id) {
+      values[el.id] = String(el.checked);
     } else if ((el instanceof HTMLInputElement || el instanceof HTMLSelectElement) && el.id) {
       values[el.id] = el.value;
     }
@@ -57,7 +57,9 @@ function clearSubmitted(form: HTMLFormElement, submitted: FieldValues) {
   for (const el of Array.from(form.elements)) {
     if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement) || !el.id) continue;
     if (now[el.id] !== submitted[el.id]) continue;
-    if (el instanceof HTMLSelectElement) {
+    if (el instanceof HTMLInputElement && el.type === "checkbox") {
+      el.checked = el.defaultChecked;
+    } else if (el instanceof HTMLSelectElement) {
       const initial = Array.from(el.options).find((o) => o.defaultSelected) ?? el.options[0];
       if (initial) el.value = initial.value;
     } else {
@@ -66,7 +68,16 @@ function clearSubmitted(form: HTMLFormElement, submitted: FieldValues) {
   }
 }
 
-export function AttachmentForm({ workOrderId, components }: { workOrderId: string; components: Option[] }) {
+type Props = {
+  workOrderId: string;
+  components: Option[];
+  actions: UploadActions;
+  /** "cds": no camera field, category Other by default, and a "Shop can see" checkbox. */
+  variant?: "shop" | "cds";
+};
+
+export function AttachmentForm({ workOrderId, components, actions, variant = "shop" }: Props) {
+  const cds = variant === "cds";
   const formRef = useRef<HTMLFormElement>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, string[]>>({});
@@ -75,7 +86,7 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
 
   function onPick(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
-    const bad = files.map((f) => [f, precheck(f)] as const).find(([, p]) => p);
+    const bad = files.map((f) => [f, precheckFile(f)] as const).find(([, p]) => p);
     setProblem(bad ? `${bad[0].name}: ${bad[1]}` : null);
     setPicked((p) => ({ ...p, [e.target.id]: files.map((f) => f.name) }));
   }
@@ -93,7 +104,7 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
       setProblem("Select at least one photo or file.");
       return;
     }
-    const bad = files.map((f) => [f, precheck(f)] as const).find(([, p]) => p);
+    const bad = files.map((f) => [f, precheckFile(f)] as const).find(([, p]) => p);
     if (bad) {
       setProblem(`${bad[0].name}: ${bad[1]}`);
       return;
@@ -102,6 +113,7 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
       category: String(fd.get("category") ?? ""),
       componentId: String(fd.get("component_id") ?? "") || null,
       note: String(fd.get("note") ?? "").trim() || null,
+      ...(cds ? { shopVisible: fd.get("shop_visible") === "on" } : {}),
     };
 
     const submitted = readFields(form);
@@ -113,7 +125,7 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
     for (const [i, file] of files.entries()) {
       try {
         update(i, "uploading");
-        const prep = await prepareUpload(workOrderId, meta, { name: file.name, type: file.type, size: file.size });
+        const prep = await actions.prepare(workOrderId, meta, { name: file.name, type: file.type, size: file.size });
         if ("error" in prep) {
           failed++;
           update(i, "error", prep.error);
@@ -128,7 +140,7 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
           continue;
         }
         update(i, "saving");
-        const reg = await registerUpload(workOrderId, meta, prep.path, file.name);
+        const reg = await actions.register(workOrderId, meta, prep.path, file.name);
         if (reg.error) {
           failed++;
           update(i, "error", reg.error);
@@ -168,7 +180,7 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
       <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div className="field">
           <label htmlFor="att-category">Category</label>
-          <select id="att-category" name="category" defaultValue="condition_damage">
+          <select id="att-category" name="category" defaultValue={cds ? "other" : "condition_damage"}>
             {Object.entries(ATTACHMENT_CATEGORY_LABEL).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
@@ -190,10 +202,12 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
             <span className="small">Failed or condemned components need a photo linked here.</span>
           </div>
         )}
-        <div className="field">
-          <label htmlFor="att-camera">Take a photo</label>
-          <input className="input" id="att-camera" name="files" type="file" accept="image/*" capture="environment" onChange={onPick} />
-        </div>
+        {!cds && (
+          <div className="field">
+            <label htmlFor="att-camera">Take a photo</label>
+            <input className="input" id="att-camera" name="files" type="file" accept="image/*" capture="environment" onChange={onPick} />
+          </div>
+        )}
         <div className="field">
           <label htmlFor="att-files">Photo / File</label>
           <input className="input" id="att-files" name="files" type="file" accept="image/*,.pdf" multiple onChange={onPick} />
@@ -204,6 +218,15 @@ export function AttachmentForm({ workOrderId, components }: { workOrderId: strin
           <label htmlFor="att-note">Note</label>
           <input className="input" id="att-note" name="note" placeholder="Optional note" maxLength={2000} />
         </div>
+        {cds && (
+          <div className="field">
+            <label htmlFor="att-shop-visible" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input id="att-shop-visible" name="shop_visible" type="checkbox" defaultChecked />
+              Shop can see
+            </label>
+            <span className="small">Untick to keep the file for CDS only.</span>
+          </div>
+        )}
       </fieldset>
 
       {progress.length > 0 && (

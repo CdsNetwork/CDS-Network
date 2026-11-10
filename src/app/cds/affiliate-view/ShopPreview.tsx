@@ -97,6 +97,7 @@ type PreviewFile = {
   mime_type: string | null;
   note: string | null;
   uploaded_at: string;
+  affiliate_id: string | null;
 };
 type PreviewShipment = { id: string; direction: string; carrier: string | null; tracking_number: string | null; status: string };
 type PreviewEvent = { id: number; at: string; message: string; to_status: WoStatus | null };
@@ -150,7 +151,7 @@ export async function loadPreview(supabase: Supabase, shopId: string, woId: stri
       .order("seq"),
     supabase
       .from("attachments")
-      .select("id, component_id, category, storage_path, file_name, mime_type, note, uploaded_at")
+      .select("id, component_id, category, storage_path, file_name, mime_type, note, uploaded_at, affiliate_id")
       .eq("work_order_id", woId)
       .eq("shop_visible", true)
       .or(ownOrNone)
@@ -397,6 +398,12 @@ export function ShopPreview({ data }: { data: PreviewData }) {
                 ) : null}
                 <div className="small" style={{ marginTop: 6 }}>
                   {ATTACHMENT_CATEGORY_LABEL[a.category] ?? a.category}
+                  {a.affiliate_id === null && (
+                    <>
+                      {" "}
+                      <span className="tag blue">From CDS</span>
+                    </>
+                  )}
                 </div>
                 <div style={{ fontWeight: 700, fontSize: 13 }}>
                   {a.url ? (

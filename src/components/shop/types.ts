@@ -96,6 +96,8 @@ export type AttachmentView = {
   mime_type: string | null;
   note: string | null;
   uploaded_at: string;
+  /** Added by CDS staff (CDS files carry no shop stamp; shop files always do). */
+  from_cds: boolean;
   url: string | null;
 };
 

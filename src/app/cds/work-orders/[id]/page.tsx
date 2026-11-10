@@ -45,6 +45,8 @@ import {
 import { htmlToText } from "@/lib/intake/email";
 import { internalNotesHistory, NOTE_MAX_LENGTH, ORDER_CREATED_NOTE_ID, type NoteView } from "@/lib/notes";
 import { NotesList } from "@/components/WorkOrderNotes";
+import { AttachmentForm } from "@/components/shop/AttachmentForm";
+import { cdsCanDelete, uploaderLabel } from "@/lib/attachments";
 import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -62,12 +64,16 @@ import {
   addInternalNote,
   addNote,
   decideAuthorization,
+  deleteCdsAttachment,
   deleteInternalNote,
   deleteNote,
   dispatchWorkOrder,
+  prepareCdsUpload,
+  registerCdsUpload,
   removeLine,
   removePassThroughLine,
   removeShipment,
+  setAttachmentShopVisible,
   setStatus,
   updateTax,
   updateWorkOrderFields,
@@ -189,6 +195,8 @@ type Attachment = {
   note: string | null;
   shop_visible: boolean;
   uploaded_at: string;
+  profiles: MaybeOne<{ full_name: string | null; kind: string | null }>;
+  affiliates: MaybeOne<{ display_name: string }>;
 };
 
 type Shipment = {
@@ -499,7 +507,11 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         )
         .eq("work_order_id", id)
         .order("seq"),
-      supabase.from("attachments").select("*").eq("work_order_id", id).order("uploaded_at"),
+      supabase
+        .from("attachments")
+        .select("*, profiles(full_name, kind), affiliates(display_name)")
+        .eq("work_order_id", id)
+        .order("uploaded_at"),
       supabase
         .from("shipments")
         .select(
@@ -1215,7 +1227,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
             )}
           </section>
 
-          <section className="section">
+          <section className="section" id="attachments">
             <h3>Photos &amp; attachments</h3>
             {attachments.length === 0 ? (
               <p className="small">No files on this work order.</p>
@@ -1227,24 +1239,43 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       <th>File</th>
                       <th>Category</th>
                       <th>Component</th>
-                      <th>Uploaded</th>
+                      <th>Added by</th>
+                      <th>Shop</th>
                       <th />
                     </tr>
                   </thead>
                   <tbody>
                     {attachments.map((a) => {
                       const url = signed.get(a.storage_path);
+                      const uploader = one(a.profiles);
+                      const isImage = (a.mime_type ?? "").startsWith("image/");
                       return (
                         <tr key={a.id}>
                           <td className={wrapCell(a.file_name, a.note)}>
+                            {url && isImage && (
+                              <a href={url} target="_blank" rel="noreferrer">
+                                {/* Signed storage URLs expire, so next/image caching does not fit here. */}
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={url} alt={a.file_name} loading="lazy" className="thumb" style={{ width: 96, height: 64, display: "block", marginBottom: 4 }} />
+                              </a>
+                            )}
                             <b>{a.file_name}</b>
                             {a.note && <div className="small">{a.note}</div>}
                           </td>
                           <td>{ATTACHMENT_CATEGORY_LABEL[a.category] ?? a.category}</td>
                           <td>{a.component_id ? compName.get(a.component_id) ?? "-" : "-"}</td>
                           <td>
-                            <span className="nowrap">{dateTime(a.uploaded_at)}</span>
+                            <div>{uploaderLabel(uploader, one(a.affiliates)?.display_name ?? null)}</div>
+                            <span className="small nowrap">{dateTime(a.uploaded_at)}</span>
+                          </td>
+                          <td>
                             <div>{a.shop_visible ? <span className="tag blue">shop sees this</span> : <span className="tag">CDS only</span>}</div>
+                            <ActionForm
+                              action={setAttachmentShopVisible.bind(null, wo.id, a.id, !a.shop_visible)}
+                              submitLabel={a.shop_visible ? "Make CDS only" : "Let shop see"}
+                              pendingLabel="..."
+                              buttonClass="btn"
+                            />
                           </td>
                           <td>
                             {url ? (
@@ -1253,6 +1284,15 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                               </a>
                             ) : (
                               <span className="small">Unavailable</span>
+                            )}
+                            {cdsCanDelete(uploader) && (
+                              <ActionForm
+                                action={deleteCdsAttachment.bind(null, wo.id, a.id)}
+                                submitLabel="Delete"
+                                pendingLabel="..."
+                                buttonClass="remove"
+                                confirmText={`Delete ${a.file_name}? The file is removed for good.`}
+                              />
                             )}
                           </td>
                         </tr>
@@ -1263,6 +1303,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </div>
             )}
             <p className="small">Links expire after 10 minutes. Reload the page for fresh links.</p>
+            <h4 style={{ marginTop: 14 }}>Add photos or files</h4>
+            <AttachmentForm
+              workOrderId={wo.id}
+              components={components.map((c) => ({ id: c.id, label: compName.get(c.id) ?? c.component_type }))}
+              actions={{ prepare: prepareCdsUpload, register: registerCdsUpload }}
+              variant="cds"
+            />
           </section>
 
           <section className="section" id="internal-notes">

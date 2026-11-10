@@ -1,13 +1,22 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireShop } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { emailCdsAfter } from "@/lib/portal-email-send";
-import { ATTACHMENT_CATEGORY_LABEL, PICKUP_WINDOWS, SHIP_STATUS_LABEL } from "@/lib/format";
+import { PICKUP_WINDOWS, SHIP_STATUS_LABEL } from "@/lib/format";
+import {
+  checkFile,
+  checkMeta,
+  isUploadPathFor,
+  storedNote,
+  type DeclaredFile,
+  type PrepareResult,
+  type UploadMeta,
+} from "@/lib/attachments";
+import { discardUnrecorded, signedUploadTarget, storedObject } from "@/lib/attachment-storage";
 import { noteBody } from "@/lib/notes";
 import type { ActionState } from "@/components/shop/types";
 import { isUuid } from "./data";
@@ -265,56 +274,20 @@ export async function completeJob(workOrderId: string, _prev: ActionState, fd: F
 
 // ---------------------------------------------------------------- attachments
 //
-// Files go straight from the phone to storage, so large photos never pass through a
-// server action (Next.js and Vercel cap request bodies). Two steps, both checked here:
+// Two steps (shared rules in lib/attachments and lib/attachment-storage):
 //   1. prepareUpload: checks the shop, the job and the declared file, then returns a
 //      one-time signed upload URL token for a path inside this work order's folder.
 //   2. registerUpload: after the browser uploaded, checks again, reads the real size and
 //      type from storage (deleting the file if it breaks the rules), then records it.
 
-const MAX_BYTES = 25 * 1024 * 1024;
-const ALLOWED_MIME = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "image/heic",
-  "image/heif",
-  "application/pdf",
-]);
 const UPLOAD_STATUSES = ["accepted", "picked_up", "in_process", "completed"];
-const BUCKET = "wo-files";
-
-function safeName(name: string): string {
-  const cleaned = name
-    .normalize("NFKD")
-    .replace(/[^A-Za-z0-9._-]+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^[._]+/, "");
-  return (cleaned || "file").slice(-100);
-}
-
-export type UploadMeta = {
-  category: string;
-  componentId: string | null;
-  note: string | null;
-};
-export type DeclaredFile = { name: string; type: string; size: number };
-export type PrepareResult = { error: string } | { path: string; token: string };
-
-function checkFile(name: string, type: string, size: number): string | null {
-  if (!ALLOWED_MIME.has(type)) return `${name}: only photos (JPG, PNG, HEIC, WebP, GIF) and PDF files can be added.`;
-  if (!(size > 0)) return `${name} is empty.`;
-  if (size > MAX_BYTES) return `${name} is larger than 25 MB.`;
-  return null;
-}
 
 /** Shared checks for both steps. Uses the shop's own client, so RLS decides visibility. */
 async function checkUploadTarget(workOrderId: string, meta: UploadMeta): Promise<string | null> {
   if (!isUuid(workOrderId)) return "Work order not found";
-  if (!(meta.category in ATTACHMENT_CATEGORY_LABEL)) return "Choose a category.";
+  const badMeta = checkMeta(meta);
+  if (badMeta) return badMeta;
   if (meta.componentId !== null && !isUuid(meta.componentId)) return "Component not found";
-  if (meta.note !== null && typeof meta.note !== "string") return "The note is not valid.";
 
   const supabase = await createClient();
   const { data: wo } = await supabase.from("work_orders").select("id, status").eq("id", workOrderId).maybeSingle();
@@ -339,27 +312,7 @@ export async function prepareUpload(workOrderId: string, meta: UploadMeta, file:
   if (bad) return { error: bad };
   const targetError = await checkUploadTarget(workOrderId, meta);
   if (targetError) return { error: targetError };
-
-  const path = `${workOrderId}/${randomUUID()}-${safeName(name)}`;
-  const { data, error } = await createAdminClient().storage.from(BUCKET).createSignedUploadUrl(path);
-  if (error || !data) return { error: `${name} could not be prepared for upload. Try again.` };
-  return { path: data.path, token: data.token };
-}
-
-const PATH_RE = /^([0-9a-f-]{36})\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[A-Za-z0-9._-]{1,100}$/i;
-
-/** Real size and type of a stored object, from storage metadata. */
-async function storedObject(path: string): Promise<{ size: number; type: string } | null> {
-  const bucket = createAdminClient().storage.from(BUCKET);
-  const { data } = await bucket.info(path);
-  if (data) return { size: Number(data.size ?? 0), type: String(data.contentType ?? "") };
-  // Fallback for storage versions without the info endpoint: list the folder.
-  const slash = path.indexOf("/");
-  const { data: list } = await bucket.list(path.slice(0, slash), { search: path.slice(slash + 1), limit: 5 });
-  const obj = list?.find((o) => o.name === path.slice(slash + 1));
-  if (!obj) return null;
-  const md = (obj.metadata ?? {}) as { size?: number; mimetype?: string };
-  return { size: Number(md.size ?? 0), type: String(md.mimetype ?? "") };
+  return signedUploadTarget(workOrderId, name);
 }
 
 export async function registerUpload(
@@ -371,15 +324,10 @@ export async function registerUpload(
   const profile = await requireShop();
   const label = String(fileName ?? "").slice(0, 200) || "File";
   // The path must sit in this work order's folder and have the shape prepareUpload makes.
-  const m = typeof path === "string" ? PATH_RE.exec(path) : null;
-  if (!m || m[1].toLowerCase() !== String(workOrderId).toLowerCase()) return { error: `${label} could not be saved.` };
+  if (!isUploadPathFor(workOrderId, path)) return { error: `${label} could not be saved.` };
 
-  const admin = createAdminClient();
-  // Removes the uploaded object, unless it is already recorded (a replayed request must
-  // never delete a file that belongs to an existing attachment).
   const discard = async (message: string): Promise<ActionState> => {
-    const { data: existing } = await admin.from("attachments").select("id").eq("storage_path", path).maybeSingle();
-    if (!existing) await admin.storage.from(BUCKET).remove([path]);
+    await discardUnrecorded(path);
     return { error: message };
   };
 
@@ -391,7 +339,8 @@ export async function registerUpload(
   const bad = checkFile(label, stored.type, stored.size);
   if (bad) return discard(bad);
 
-  const { error } = await admin.from("attachments").insert({
+  // Shops cannot hide their own files from themselves: always shop_visible.
+  const { error } = await createAdminClient().from("attachments").insert({
     work_order_id: workOrderId,
     component_id: meta.componentId,
     category: meta.category,
@@ -399,7 +348,7 @@ export async function registerUpload(
     file_name: label,
     mime_type: stored.type,
     size_bytes: stored.size,
-    note: meta.note?.trim().slice(0, 2000) || null,
+    note: storedNote(meta.note),
     uploaded_by: profile.id,
     shop_visible: true,
   });
