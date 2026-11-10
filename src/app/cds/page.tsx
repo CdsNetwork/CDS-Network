@@ -1,6 +1,7 @@
 import Form from "next/form";
 import Link from "next/link";
 import { PeriodSelect } from "@/components/cds-wo/PeriodSelect";
+import { failedMark, isNewFromShop } from "@/components/cds-wo/shop-updates";
 import styles from "@/components/cds-wo/cds-wo.module.css";
 import { one, SHIPMENT_PROBLEM_STATUSES } from "@/components/cds-wo/util";
 import {
@@ -56,6 +57,8 @@ type ListRow = WoRow & {
     | { inbound_emails: { received_at: string | null } | { received_at: string | null }[] | null }
     | { inbound_emails: { received_at: string | null } | { received_at: string | null }[] | null }[]
     | null;
+  work_order_shop_activity: { is_new: boolean | null } | { is_new: boolean | null }[] | null;
+  work_order_components: { result: string | null }[] | null;
 };
 
 type AttentionWo = WoRow & {
@@ -88,8 +91,11 @@ const ATTENTION_SHOWN = 12;
 const WO_COLUMNS =
   "id, wo_number, status, location_label, unit_number, po_number, customers(name), affiliates(display_name, is_in_house)";
 
-/** The table also shows when the request came in and how the part moves. */
-const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at))`;
+/**
+ * The table also shows when the request came in, how the part moves, whether the shop did
+ * something CDS has not opened yet, and a failed or condemned component.
+ */
+const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at)), work_order_shop_activity(is_new), work_order_components(result)`;
 
 /** Unit and PO numbers up to this length stay on one line in the table. */
 const ID_NOWRAP = 22;
@@ -103,7 +109,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
   const sp = await searchParams;
   const deleted = deletedMessage(sp);
   const filters = parseFilters(sp);
-  const { q, status: statusParam, shop: shopParam } = filters;
+  const { q, status: statusParam, shop: shopParam, fromShop } = filters;
   const period = parsePeriod(sp.period);
   const range = periodRange(period);
 
@@ -364,6 +370,10 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
               </option>
             ))}
           </select>
+          <label className="small nowrap" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" name="from_shop" value="1" defaultChecked={fromShop} />
+            New from shop
+          </label>
           {period !== "month" && <input type="hidden" name="period" value={period} />}
           <button className="btn btn-secondary" type="submit">
             Search
@@ -373,7 +383,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
               In-house sales
             </Link>
           )}
-          {(q || statusParam || shopParam) && (
+          {(q || statusParam || shopParam || fromShop) && (
             <Link className="link small" href={`/cds${period !== "month" ? `?period=${period}` : ""}#orders`}>
               Clear
             </Link>
@@ -416,12 +426,21 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   const inHouse = Boolean(one(r.affiliates)?.is_in_house);
                   const fullStatus = STATUS_LABEL[r.status] ?? r.status;
                   const shortStatus = TABLE_STATUS_LABEL[r.status] ?? fullStatus;
+                  const fromShopNew = isNewFromShop(r.work_order_shop_activity);
+                  const failed = failedMark(r.work_order_components);
                   return (
                     <tr key={r.id}>
                       <td className="nowrap">
                         <Link className="link" href={`/cds/work-orders/${r.id}`}>
                           {woLabel(r.wo_number)}
                         </Link>
+                        {fromShopNew && (
+                          <div>
+                            <span className="badge pending" title="The shop added a note, a file or a failure since CDS last opened this order">
+                              New from shop
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="nowrap">{dateReceived(r)}</td>
                       <td className={`${styles.textCol} ${wrapCell(customer) ?? ""}`}>{customer}</td>
@@ -438,6 +457,11 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                         <span className={`status ${r.status}`} title={shortStatus !== fullStatus ? fullStatus : undefined}>
                           {shortStatus}
                         </span>
+                        {failed && (
+                          <div>
+                            <span className="badge rejected">{failed}</span>
+                          </div>
+                        )}
                       </td>
                       <td className="num money">
                         {tbd ? "TBD" : money(f?.shop_subtotal)}

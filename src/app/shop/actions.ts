@@ -247,6 +247,8 @@ export async function saveComponent(
     p_result: result,
     p_result_note: result === "failed" || result === "condemned" ? note : null,
   });
+  // A failure emails dispatch@ once (the store finds this component's latest failure).
+  if (!error && (result === "failed" || result === "condemned")) emailCdsAfter("failed", workOrderId, componentId);
   return done(error);
 }
 

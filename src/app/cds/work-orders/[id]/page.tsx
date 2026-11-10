@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ActionForm } from "@/components/cds-wo/ActionForm";
 import { ActionMessageGroup } from "@/components/cds-wo/ActionMessageGroup";
 import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
+import { MarkSeen } from "@/components/cds-wo/MarkSeen";
 import type { LocationOption } from "@/components/cds-wo/NewWorkOrderForm";
 import { OrderLocationFields } from "@/components/cds-wo/OrderLocationFields";
 import { loadPickerLocations } from "@/app/cds/work-orders/new/locations";
@@ -733,6 +734,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
 
   return (
     <>
+      <MarkSeen workOrderId={id} />
       <div className="row between">
         <div className="title">
           <h1>{woLabel(wo.wo_number)}</h1>
