@@ -41,6 +41,10 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
+  "function public.cds_set_in_house_cost(uuid,numeric)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
   "function public.cds_set_price(text,uuid,uuid,numeric)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"

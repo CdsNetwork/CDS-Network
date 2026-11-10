@@ -9,6 +9,7 @@ import {
   filterQuery,
   financialsFor,
   GROUPS,
+  IN_HOUSE,
   IN_PROGRESS,
   parseFilters,
   parsePeriod,
@@ -99,7 +100,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
   await requireCds();
   const sp = await searchParams;
   const filters = parseFilters(sp);
-  const { q, status: statusParam } = filters;
+  const { q, status: statusParam, shop: shopParam } = filters;
   const period = parsePeriod(sp.period);
   const range = periodRange(period);
 
@@ -126,7 +127,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
       .order("updated_at", { ascending: false })
       .limit(100);
 
-  const [listRes, declinedRes, reviewRes, shipRes, inProgress, toInvoice, pendingReview, invoiced] = await Promise.all([
+  const [listRes, declinedRes, reviewRes, shipRes, inProgress, toInvoice, pendingReview, invoiced, shopsRes] = await Promise.all([
     list,
     attentionQuery("rejected_by_affiliate"),
     attentionQuery("pending_review"),
@@ -140,7 +141,12 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
     countOf(TO_INVOICE),
     countOf(["pending_review"]),
     invoicedQuery,
+    // Shop filter of the table: CDS's in-house shop first, then active shops by name.
+    supabase.from("affiliates").select("id, display_name, is_in_house, active").order("display_name"),
   ]);
+  const shopChoices = ((shopsRes.data ?? []) as { id: string; display_name: string; is_in_house: boolean; active: boolean }[])
+    .filter((s) => !s.is_in_house && (s.active || s.id === shopParam))
+    .map((s) => ({ id: s.id, label: s.active ? s.display_name : `${s.display_name} (inactive)` }));
 
   const rows = (listRes.data ?? []) as unknown as ListRow[];
 
@@ -341,11 +347,25 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
               ))}
             </optgroup>
           </select>
+          <select name="shop" defaultValue={shopParam} style={{ maxWidth: 240 }} aria-label="Shop">
+            <option value="">All shops</option>
+            <option value={IN_HOUSE}>In-house sales (CDS Inc)</option>
+            {shopChoices.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
           {period !== "month" && <input type="hidden" name="period" value={period} />}
           <button className="btn btn-secondary" type="submit">
             Search
           </button>
-          {(q || statusParam) && (
+          {shopParam !== IN_HOUSE && (
+            <Link className="link small" href={`/cds?shop=${IN_HOUSE}${period !== "month" ? `&period=${period}` : ""}#orders`}>
+              In-house sales
+            </Link>
+          )}
+          {(q || statusParam || shopParam) && (
             <Link className="link small" href={`/cds${period !== "month" ? `?period=${period}` : ""}#orders`}>
               Clear
             </Link>

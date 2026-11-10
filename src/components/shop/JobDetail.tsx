@@ -414,24 +414,35 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
             pendingLabel="Completing..."
             submitClass="btn btn-primary"
           >
-            <p className="small">
-              Work cannot be completed until all required component data and the affiliate invoice/reference number are
-              entered. Save each component first.
-            </p>
-            <div className="field" style={{ maxWidth: 420 }}>
-              <label htmlFor="invoice-ref">
-                Affiliate Invoice / Reference # <span className="req">*</span>
-              </label>
-              <input
-                className="input"
-                id="invoice-ref"
-                name="invoice_ref"
-                required
-                maxLength={100}
-                placeholder="Enter invoice or billing reference #"
-                defaultValue={job.affiliate_invoice_ref ?? ""}
-              />
-            </div>
+            {data.inHouse ? (
+              <p className="small">
+                {data.partsSale
+                  ? "CDS parts sale: no components are needed."
+                  : "Work cannot be completed until all required component data is entered. Save each component first."}{" "}
+                CDS in-house job: the reference number is filled in for you ({job.affiliate_invoice_ref || `IN-HOUSE-${job.wo_number}`}).
+              </p>
+            ) : (
+              <>
+                <p className="small">
+                  Work cannot be completed until all required component data and the affiliate invoice/reference number are
+                  entered. Save each component first.
+                </p>
+                <div className="field" style={{ maxWidth: 420 }}>
+                  <label htmlFor="invoice-ref">
+                    Affiliate Invoice / Reference # <span className="req">*</span>
+                  </label>
+                  <input
+                    className="input"
+                    id="invoice-ref"
+                    name="invoice_ref"
+                    required
+                    maxLength={100}
+                    placeholder="Enter invoice or billing reference #"
+                    defaultValue={job.affiliate_invoice_ref ?? ""}
+                  />
+                </div>
+              </>
+            )}
           </ActionForm>
         ) : awaiting ? (
           <p className="small">Accept the job to start work.</p>

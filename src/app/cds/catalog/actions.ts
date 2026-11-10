@@ -92,3 +92,20 @@ export async function setCustomerShopRate(
   revalidatePath("/cds/pricing");
   return { ok: true, message: clear ? "Customer rate removed." : "Rate saved." };
 }
+
+/**
+ * Sets or clears the CDS cost of an item (what CDS itself pays, used on work orders of the
+ * CDS in-house shop), from today. Leaving the amount empty or Clear ends it.
+ */
+export async function setInHouseCost(itemId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  const clear = text(formData, "intent") === "clear";
+  const amount = clear ? null : optionalAmount(formData, "amount");
+  if (Number.isNaN(amount)) return { error: "Enter a cost of zero or more." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("cds_set_in_house_cost", { p_catalog_item: itemId, p_amount: amount });
+  if (error) return { error: dbMessage(error, "Could not save the CDS cost.") };
+  revalidatePath("/cds/catalog");
+  return { ok: true, message: amount === null ? "CDS cost removed." : "CDS cost saved." };
+}

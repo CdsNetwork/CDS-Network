@@ -7,7 +7,7 @@ import { today } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { CATEGORY_LABEL, money } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
-import { saveCatalogItem, setCustomerShopRate } from "./actions";
+import { saveCatalogItem, setCustomerShopRate, setInHouseCost } from "./actions";
 
 type Item = {
   id: string;
@@ -36,7 +36,17 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
   const supabase = await createClient();
   const day = today();
   const current = `effective_to.is.null,effective_to.gt.${day}`;
-  const [{ data: itemData, error }, { data: rateData }, { data: sellData }, { data: customerRateData }, { data: custData }] = await Promise.all([
+  // CDS's in-house shop: its rates are what CDS itself pays (CDS cost).
+  const { data: inHouseShop } = await supabase.from("affiliates").select("id").eq("is_in_house", true).maybeSingle();
+  const inHouseId = (inHouseShop as { id: string } | null)?.id ?? null;
+  const [
+    { data: itemData, error },
+    { data: rateData },
+    { data: sellData },
+    { data: customerRateData },
+    { data: custData },
+    { data: costData },
+  ] = await Promise.all([
     supabase.from("catalog_items").select("id, sku, category, name, oe_cross, tax_class, shop_selectable, active").order("sku"),
     supabase
       .from("shop_rates")
@@ -65,7 +75,19 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
       .or(current)
       .order("effective_from", { ascending: true }),
     supabase.from("customers").select("id, code, name").eq("active", true).order("name"),
+    inHouseId
+      ? supabase
+          .from("shop_rates")
+          .select("catalog_item_id, amount, effective_from")
+          .eq("affiliate_id", inHouseId)
+          .is("customer_id", null)
+          .eq("market", "US")
+          .lte("effective_from", day)
+          .or(current)
+          .order("effective_from", { ascending: true })
+      : Promise.resolve({ data: [] as PriceRow[] }),
   ]);
+  const costs = new Map(((costData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
   const items = (itemData ?? []) as Item[];
   // Ascending order: the latest row in effect wins.
   const rates = new Map(((rateData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
@@ -146,6 +168,7 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
             customers={customers}
             customerName={customerName}
           />
+          {inHouseId && <InHouseCost item={editing} cost={costs.get(editing.id) ?? null} />}
         </div>
       )}
 
@@ -236,6 +259,11 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
                         + {customerRates.get(i.id)!.size} customer {customerRates.get(i.id)!.size === 1 ? "rate" : "rates"}
                       </div>
                     )}
+                    {costs.get(i.id)?.amount != null && (
+                      <div className="small" title="What CDS itself pays, used on CDS in-house orders">
+                        CDS cost {money(costs.get(i.id)!.amount)}
+                      </div>
+                    )}
                   </td>
                   <td className="num">
                     <span className="money">{money(sell)}</span>
@@ -267,8 +295,8 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
       </div>
       <p className="small">
         Shop Rate is the default amount CDS pays a shop (for parts the network figure, for services the affiliate figure).
-        A rate for one customer (Edit the item) applies on that customer&apos;s work orders instead. Per-shop rates are not
-        shown here.
+        A rate for one customer (Edit the item) applies on that customer&apos;s work orders instead. CDS cost is what CDS
+        itself pays, used only on CDS in-house orders (never a shop rate). Per-shop rates are not shown here.
       </p>
     </>
   );
@@ -436,6 +464,38 @@ function CustomerShopRates({
               placeholder="What CDS pays the shop"
             />
           </div>
+        </div>
+      </ActionForm>
+    </div>
+  );
+}
+
+/** CDS cost of an item: the in-house shop's rate, used only on CDS in-house work orders. */
+function InHouseCost({ item, cost }: { item: Item; cost: PriceRow | null }) {
+  return (
+    <div style={{ marginTop: 18 }}>
+      <h3>CDS cost (in-house)</h3>
+      <p className="small" style={{ marginTop: 0 }}>
+        What CDS itself pays for {item.sku} (for a GESi filter, the GESi direct price). Used only on work orders sent to
+        CDS Inc (in-house); default and customer Shop Rates never apply there. Without a CDS cost the line shows TBD.
+        Applies from today to new lines.
+      </p>
+      <ActionForm key={`${item.id}-cost-${cost?.amount ?? ""}`} action={setInHouseCost.bind(null, item.id)} submitLabel="Save CDS cost">
+        <div className="grid3" style={{ alignItems: "end" }}>
+          <div className="field">
+            <label htmlFor={`cds-cost-${item.id}`}>CDS cost (USD)</label>
+            <input
+              className="input"
+              id={`cds-cost-${item.id}`}
+              name="amount"
+              type="number"
+              min="0"
+              step="0.01"
+              defaultValue={cost?.amount ?? ""}
+              placeholder="What CDS pays"
+            />
+          </div>
+          <div className="field small">{cost ? `Since ${cost.effective_from}. Leave empty to remove.` : "Not set."}</div>
         </div>
       </ActionForm>
     </div>

@@ -74,3 +74,43 @@ it("pickShopRatesByItem picks per catalog item", () => {
   const ryder = pickShopRatesByItem(rows, SHOP, RYDER);
   expect(ryder.get("gesi")?.amount).toBe(100);
 });
+
+describe("pickShopRate for the in-house shop: only its own rows (private.shop_rate_pick)", () => {
+  const IN_HOUSE = "in-house";
+  const def = row(null, null, 100);
+  const fs = row(null, FIRST_STUDENT, 150);
+  const other = row(OTHER_SHOP, null, 120);
+  const cost = row(IN_HOUSE, null, 80);
+  const costFs = row(IN_HOUSE, FIRST_STUDENT, 85);
+
+  it("ignores default and customer rows: no in-house row means no rate", () => {
+    expect(pickShopRate([def, fs, other], IN_HOUSE, FIRST_STUDENT, true)).toBeNull();
+    expect(pickShopRate([def], IN_HOUSE, RYDER, true)).toBeNull();
+  });
+
+  it("uses the in-house row, the one for this customer first", () => {
+    expect(pickShopRate([def, fs, other, cost], IN_HOUSE, FIRST_STUDENT, true)).toBe(cost);
+    expect(pickShopRate([def, fs, cost, costFs], IN_HOUSE, FIRST_STUDENT, true)).toBe(costFs);
+    expect(pickShopRate([def, fs, cost, costFs], IN_HOUSE, RYDER, true)).toBe(cost);
+  });
+
+  it("skips an in-house row without an amount, and never falls back to the default", () => {
+    expect(pickShopRate([def, row(IN_HOUSE, null, null)], IN_HOUSE, RYDER, true)).toBeNull();
+  });
+
+  it("an outside shop never takes the in-house row and keeps the usual rule", () => {
+    expect(pickShopRate([def, fs, cost], SHOP, FIRST_STUDENT)).toBe(fs);
+    expect(pickShopRate([def, cost], SHOP, RYDER)).toBe(def);
+  });
+
+  it("pickShopRatesByItem passes the in-house flag", () => {
+    const rows = [
+      { ...def, catalog_item_id: "gesi" },
+      { ...cost, catalog_item_id: "gesi" },
+      { ...row(null, null, 10), catalog_item_id: "gasket" },
+    ];
+    const picked = pickShopRatesByItem(rows, IN_HOUSE, RYDER, true);
+    expect(picked.get("gesi")?.amount).toBe(80);
+    expect(picked.has("gasket")).toBe(false);
+  });
+});

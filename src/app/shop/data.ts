@@ -128,6 +128,10 @@ export type JobDetailData = {
   partOptions: CatalogOption[];
   /** Whole active catalog for extra work requests, with the request kind. */
   authOptions: (CatalogOption & { kind: "service" | "part" })[];
+  /** The job belongs to CDS's in-house shop: no invoice number asked on completion. */
+  inHouse: boolean;
+  /** An in-house parts-only order (CDS sells the part): completes without components. */
+  partsSale: boolean;
 };
 
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -140,17 +144,23 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     .from("work_orders")
     .select(
       "id, wo_number, status, market, fulfillment, location_label, site_address, unit_number, po_number, " +
-        "requested_work, pickup_window, shop_ship_status, affiliate_invoice_ref, completed_at, customer_id, affiliate_id, customers(name)",
+        "requested_work, pickup_window, shop_ship_status, affiliate_invoice_ref, completed_at, customer_id, affiliate_id, request_type, customers(name)",
     )
     .eq("id", id)
     .maybeSingle();
   if (!wo) return null;
-  const w = wo as unknown as Omit<JobRow, "customer_name"> & { customers: Named; customer_id: string; affiliate_id: string | null };
+  const w = wo as unknown as Omit<JobRow, "customer_name"> & {
+    customers: Named;
+    customer_id: string;
+    affiliate_id: string | null;
+    request_type: string;
+  };
   const job: JobRow = { ...w, customer_name: w.customers?.name ?? "" };
   delete (job as Partial<typeof w>).customers;
   // Only to pick the shop's rate for this order's customer; not part of JobRow.
   delete (job as Partial<typeof w>).customer_id;
   delete (job as Partial<typeof w>).affiliate_id;
+  delete (job as Partial<typeof w>).request_type;
 
   const [lines, components, auths, files, ships, notes] = await Promise.all([
     supabase
@@ -266,10 +276,16 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     };
   });
 
+  // RLS: a shop reads its own affiliate row only.
+  const { data: shopRow } = w.affiliate_id
+    ? await supabase.from("affiliates").select("is_in_house").eq("id", w.affiliate_id).maybeSingle()
+    : { data: null };
+  const inHouse = Boolean((shopRow as { is_in_house?: boolean } | null)?.is_in_house);
+
   let partOptions: CatalogOption[] = [];
   let authOptions: JobDetailData["authOptions"] = [];
   if (editable(job)) {
-    ({ partOptions, authOptions } = await loadCatalogOptions(job.market, w.affiliate_id, w.customer_id));
+    ({ partOptions, authOptions } = await loadCatalogOptions(job.market, w.affiliate_id, w.customer_id, inHouse));
   }
 
   return {
@@ -282,10 +298,12 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     notes: (notes.data ?? []) as NoteView[],
     partOptions,
     authOptions,
+    inHouse,
+    partsSale: inHouse && w.request_type === "parts_only",
   };
 }
 
-async function loadCatalogOptions(market: string, shop: string | null, customer: string) {
+async function loadCatalogOptions(market: string, shop: string | null, customer: string, inHouse: boolean) {
   const supabase = await createClient();
   const today = pacificToday();
 
@@ -305,8 +323,9 @@ async function loadCatalogOptions(market: string, shop: string | null, customer:
     ),
   ]);
 
-  // Same rule as the database: the most specific rate for this shop and this order's customer.
-  const best = pickShopRatesByItem(rates.data ?? [], shop, customer);
+  // Same rule as the database: the most specific rate for this shop and this order's customer
+  // (for the in-house shop, only its own rows: CDS's own cost).
+  const best = pickShopRatesByItem(rates.data ?? [], shop, customer, inHouse);
 
   const all = items.data ?? [];
   // Only shop-safe text: SKU, name, category, OE cross reference and the shop's own rate.

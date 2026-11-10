@@ -25,7 +25,18 @@ export type WoFilters = {
   /** The raw status parameter when it is a known group or status, else "". */
   status: string;
   statuses: WoStatus[] | null;
+  /** Shop filter: "" (any shop), IN_HOUSE (CDS's own in-house sales) or a shop id. */
+  shop: string;
 };
+
+/** Shop filter value for CDS's own in-house sales (the shop with is_in_house). */
+export const IN_HOUSE = "in_house";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseShop(raw: string): string {
+  return raw === IN_HOUSE || UUID_RE.test(raw) ? raw : "";
+}
 
 /** Strips characters that have meaning in a PostgREST filter string. */
 function cleanSearch(q: string): string {
@@ -41,11 +52,12 @@ function param(sp: Params, key: string): string {
 
 export function parseFilters(sp: Params): WoFilters {
   const q = cleanSearch(param(sp, "q"));
+  const shop = parseShop(param(sp, "shop"));
   const raw = param(sp, "status");
   const group = GROUPS[raw];
-  if (group) return { q, status: raw, statuses: group.statuses };
-  if (ALL_STATUSES.includes(raw as WoStatus)) return { q, status: raw, statuses: [raw as WoStatus] };
-  return { q, status: "", statuses: null };
+  if (group) return { q, status: raw, statuses: group.statuses, shop };
+  if (ALL_STATUSES.includes(raw as WoStatus)) return { q, status: raw, statuses: [raw as WoStatus], shop };
+  return { q, status: "", statuses: null, shop };
 }
 
 /** Query string for links that keep the current filters ("" when there are none). */
@@ -53,6 +65,7 @@ export function filterQuery(f: WoFilters, extra: Record<string, string> = {}): s
   const p = new URLSearchParams();
   if (f.q) p.set("q", f.q);
   if (f.status) p.set("status", f.status);
+  if (f.shop) p.set("shop", f.shop);
   for (const [k, v] of Object.entries(extra)) if (v) p.set(k, v);
   const s = p.toString();
   return s ? `?${s}` : "";
@@ -66,6 +79,13 @@ export function filterQuery(f: WoFilters, extra: Record<string, string> = {}): s
 export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, columns: string) {
   let list = supabase.from("work_orders").select(columns).order("created_at", { ascending: false }).order("id");
   if (f.statuses) list = f.statuses.length === 1 ? list.eq("status", f.statuses[0]) : list.in("status", f.statuses);
+  if (f.shop === IN_HOUSE) {
+    const { data: inHouse } = await supabase.from("affiliates").select("id").eq("is_in_house", true).maybeSingle();
+    // No in-house shop: nothing matches.
+    list = list.eq("affiliate_id", (inHouse as { id: string } | null)?.id ?? "00000000-0000-0000-0000-000000000000");
+  } else if (f.shop) {
+    list = list.eq("affiliate_id", f.shop);
+  }
   if (f.q) {
     const { data: custs } = await supabase.from("customers").select("id").ilike("name", `%${f.q}%`).limit(100);
     const like = `"*${f.q}*"`;

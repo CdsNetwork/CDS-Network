@@ -102,7 +102,7 @@ type WorkOrder = {
   delivered_at: string | null;
   created_at: string;
   customers: MaybeOne<{ name: string; code: string }>;
-  affiliates: MaybeOne<{ display_name: string }>;
+  affiliates: MaybeOne<{ display_name: string; is_in_house: boolean }>;
   customer_locations: MaybeOne<{ code: string; name: string; default_affiliate_id: string | null; dock_note: string | null }>;
 };
 
@@ -217,6 +217,7 @@ type ShopRow = {
   region: string | null;
   can_egr: boolean | null;
   can_oil_soaked: boolean | null;
+  is_in_house: boolean;
 };
 
 const DEMO_RE = /\(demo\)/i;
@@ -462,7 +463,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const { data: woData } = await supabase
     .from("work_orders")
     .select(
-      "*, customers(name, code), affiliates(display_name), customer_locations(code, name, default_affiliate_id, dock_note)",
+      "*, customers(name, code), affiliates(display_name, is_in_house), customer_locations(code, name, default_affiliate_id, dock_note)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -509,7 +510,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase.from("work_order_events").select("id, at, message, shop_visible, to_status").eq("work_order_id", id).order("at"),
       supabase
         .from("affiliates")
-        .select("id, display_name, kind, city, region, can_egr, can_oil_soaked")
+        .select("id, display_name, kind, city, region, can_egr, can_oil_soaked, is_in_house")
         .eq("active", true)
         .order("display_name"),
       supabase.from("catalog_items").select("id, sku, name, category, oe_cross, price_per_line").eq("active", true).order("sku"),
@@ -578,6 +579,9 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
 
   const customer = one(wo.customers);
   const shop = one(wo.affiliates);
+  // CDS's in-house shop: the shop column is what CDS itself paid (CDS cost), not a shop rate.
+  const inHouse = Boolean(shop?.is_in_house);
+  const rateLabel = inHouse ? "CDS Cost" : "Shop Rate";
   const location = one(wo.customer_locations);
   const inReview = REVIEW_STATUSES.includes(wo.status);
   const declined = wo.status === "rejected_by_affiliate";
@@ -665,6 +669,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         // Demo shops carry "(demo)" in their name on staging; mark any other "demo" shop too.
         /\bdemo\b/i.test(s.display_name) && !DEMO_RE.test(s.display_name) ? "(demo)" : "",
         s.kind === "parts_supplier" ? "(parts supplier)" : "",
+        s.is_in_house ? "(CDS in-house sale)" : "",
       ].filter(Boolean);
       const place = [s.city, s.region].filter(Boolean).join(", ") || "No city";
       const n = locationCounts.get(s.id) ?? 0;
@@ -965,7 +970,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
             {negativeLines.length > 0 && (
               <div className="notice danger" role="status">
                 <b>Negative margin:</b> {negativeLines.length === 1 ? "1 line is" : `${negativeLines.length} lines are`} priced
-                below the shop rate ({negativeLines.map((l) => one(l.catalog_items)?.sku ?? "item").join(", ")}). Check the
+                below the {inHouse ? "CDS cost" : "shop rate"} ({negativeLines.map((l) => one(l.catalog_items)?.sku ?? "item").join(", ")}). Check the
                 customer price before dispatch and invoicing.
               </div>
             )}
@@ -975,7 +980,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   <tr>
                     <th>Item</th>
                     <th className="num">Qty</th>
-                    <th className="num">Shop Rate</th>
+                    <th className="num">{rateLabel}</th>
                     <th className="num">Customer Price</th>
                     <th>Price Source</th>
                     <th>Tax Class</th>
@@ -1006,8 +1011,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                           {isPerLine(l) && <span className="tag">Shop invoice amount, no upcharge</span>}
                           {negative && (
                             <div>
-                              <span className={styles.negTag} title="The customer price is lower than the shop rate">
-                                Below shop rate
+                              <span className={styles.negTag} title={`The customer price is lower than the ${rateLabel.toLowerCase()}`}>
+                                Below {rateLabel.toLowerCase()}
                               </span>
                             </div>
                           )}
@@ -1092,6 +1097,23 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   </label>
                   <input id="line-qty" name="qty" className="input" type="number" min="0.01" step="any" defaultValue="1" required />
                 </div>
+                {inHouse && (
+                  <div style={{ width: 150 }}>
+                    <label className="small" htmlFor="line-cds-cost">
+                      CDS cost each
+                    </label>
+                    <input
+                      id="line-cds-cost"
+                      name="cds_cost"
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="From catalog"
+                      title="What CDS paid for one. Leave empty to use the CDS cost from the catalog."
+                    />
+                  </div>
+                )}
               </ActionForm>
             ) : (
               <p className="small">Lines are fixed once the work is completed.</p>
@@ -1459,7 +1481,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 <b className="money">{money(invoiceTotal)}</b>
               </div>
               <div className="summaryrow">
-                <span>Affiliate payable</span>
+                <span>{inHouse ? "CDS cost (in-house)" : "Affiliate payable"}</span>
                 <b className="money">{tbd ? "TBD" : money(fin?.shop_subtotal ?? shopTotal)}</b>
               </div>
               <div className="summaryrow">

@@ -305,15 +305,23 @@ export async function addLine(woId: string, _prev: ActionState, formData: FormDa
   const qty = Number(text(formData.get("qty")));
   if (!isUuid(item)) return { error: "Choose a catalog item." };
   if (!Number.isFinite(qty) || qty <= 0) return { error: "Quantity must be more than zero." };
+  // In-house orders only (the field is shown there): what CDS paid for one, typed by CDS.
+  const costText = text(formData.get("cds_cost"));
+  const cost = costText === "" ? null : Number(costText);
+  if (cost !== null && (!Number.isFinite(cost) || cost < 0)) return { error: "CDS cost must be a number of zero or more." };
 
   const supabase = await createClient();
   const status = await currentStatus(supabase, woId);
   if (!status) return { error: "Work order not found." };
   if (LINES_LOCKED_STATUSES.includes(status)) return { error: "Lines cannot change once the work is completed." };
 
-  const { error } = await supabase
-    .from("work_order_lines")
-    .insert({ work_order_id: woId, catalog_item_id: item, qty, origin: "cds_order" });
+  const { error } = await supabase.from("work_order_lines").insert({
+    work_order_id: woId,
+    catalog_item_id: item,
+    qty,
+    origin: "cds_order",
+    ...(cost !== null ? { shop_unit_rate: Math.round(cost * 100) / 100 } : {}),
+  });
   if (error) {
     if (error.message.startsWith("No customer price")) return { error: "This item has no customer price yet. Set a fleet price first." };
     return { error: error.message };

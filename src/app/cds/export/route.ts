@@ -32,7 +32,7 @@ function amount(v: number | null | undefined): string {
   return v === null || v === undefined ? "" : Number(v).toFixed(2);
 }
 
-/** CSV of the dashboard work order table with the same filters (q, status). CDS staff only. */
+/** CSV of the dashboard work order table with the same filters (q, status, shop). CDS staff only. */
 export async function GET(request: Request) {
   await requireCds();
   const filters = parseFilters(new URL(request.url).searchParams);

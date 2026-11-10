@@ -5,6 +5,10 @@
  * customer), then the default. Within a level the latest start date wins. A shop or
  * customer row without an amount is skipped.
  *
+ * The in-house shop (CDS selling the part itself, 20261110030000_in_house_shop.sql): only
+ * its own rows count (with this customer, then any customer). Default and customer rows
+ * are regular shop rates and never apply, so with no in-house row there is no rate.
+ *
  * The caller passes only rows in effect on the date (effective_from <= day < effective_to).
  */
 export type ShopRateRow = {
@@ -27,15 +31,20 @@ export function shopRateSource(row: ShopRateRow): ShopRateSource {
   return row.affiliate_id !== null ? "shop" : row.customer_id !== null ? "customer" : "default";
 }
 
-/** The winning row for a shop (or null for any shop) on an order of a customer (or null). */
+/**
+ * The winning row for a shop (or null for any shop) on an order of a customer (or null).
+ * `inHouse`: the shop is the in-house shop, so only its own rows count.
+ */
 export function pickShopRate<T extends ShopRateRow>(
   rows: readonly T[],
   shop: string | null,
   customer: string | null,
+  inHouse = false,
 ): T | null {
   let best: T | null = null;
   for (const r of rows) {
     if (r.affiliate_id !== null && r.affiliate_id !== shop) continue;
+    if (inHouse && (shop === null || r.affiliate_id === null)) continue;
     if (r.customer_id !== null && r.customer_id !== customer) continue;
     if (r.amount === null && level(r) !== 4) continue;
     if (
@@ -54,6 +63,7 @@ export function pickShopRatesByItem<T extends ShopRateRow & { catalog_item_id: s
   rows: readonly T[],
   shop: string | null,
   customer: string | null,
+  inHouse = false,
 ): Map<string, T> {
   const byItem = new Map<string, T[]>();
   for (const r of rows) {
@@ -63,7 +73,7 @@ export function pickShopRatesByItem<T extends ShopRateRow & { catalog_item_id: s
   }
   const out = new Map<string, T>();
   for (const [item, list] of byItem) {
-    const best = pickShopRate(list, shop, customer);
+    const best = pickShopRate(list, shop, customer, inHouse);
     if (best) out.set(item, best);
   }
   return out;

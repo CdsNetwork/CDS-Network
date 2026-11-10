@@ -255,8 +255,8 @@ export async function deleteComponent(workOrderId: string, componentId: string):
 export async function completeJob(workOrderId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
   const bad = await guard(workOrderId);
   if (bad) return bad;
+  // The database asks for the number; on CDS's in-house shop it fills one in when empty.
   const ref = text(fd, "invoice_ref");
-  if (!ref) return { error: "Enter your invoice or reference number" };
   const supabase = await createClient();
   const { error } = await supabase.rpc("shop_complete_work_order", { p_work_order: workOrderId, p_invoice_ref: ref });
   if (!error) emailCdsAfter("finished", workOrderId);
