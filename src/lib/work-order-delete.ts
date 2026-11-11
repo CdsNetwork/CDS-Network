@@ -1,10 +1,13 @@
 /**
- * Deleting a work order (CDS only). The database removes the order and everything on it in
+ * Deleting a work order (CDS staff with profiles.can_delete_work_orders, which is Sarah only). The database removes the order and everything on it in
  * one transaction (public.cds_delete_work_order); QuickBooks is never touched, so an invoice
  * stays there and CDS voids it in QuickBooks.
  */
 import type { ActionMessage } from "@/components/cds-wo/action-message";
 import { woLabel } from "@/lib/format";
+
+/** What a CDS login without the delete permission is told (the database says the same). */
+export const DELETE_NOT_ALLOWED = "Only Sarah can delete work orders. Ask her to delete this one.";
 
 export type QbInvoiceRef = { id: string; number: string | null } | null;
 

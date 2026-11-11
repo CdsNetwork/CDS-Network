@@ -29,7 +29,7 @@ import {
   type UploadMeta,
 } from "@/lib/attachments";
 import { discardUnrecorded, signedUploadTarget, storedObject } from "@/lib/attachment-storage";
-import { deletedHref, storagePathsToRemove } from "@/lib/work-order-delete";
+import { DELETE_NOT_ALLOWED, deletedHref, storagePathsToRemove } from "@/lib/work-order-delete";
 
 const REQUEST_TYPES = ["service", "parts_only"];
 const FULFILLMENT = ["pickup", "shipping", "supplier_direct", "unspecified"];
@@ -820,7 +820,9 @@ type DeletedWorkOrder = {
  * files, and goes back to the work order list with a message. QuickBooks is not touched.
  */
 export async function deleteWorkOrder(woId: string): Promise<ActionState> {
-  await requireCds();
+  const profile = await requireCds();
+  // The database refuses too (cds_delete_work_order); this only answers sooner.
+  if (!profile.can_delete_work_orders) return { error: DELETE_NOT_ALLOWED };
   if (!isUuid(woId)) return { error: "Work order not found." };
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("cds_delete_work_order", { p_work_order: woId });

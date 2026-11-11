@@ -14,7 +14,7 @@ const redirect = vi.fn((url: string) => {
   throw new Error(`NEXT_REDIRECT ${url}`);
 });
 vi.mock("next/navigation", () => ({ redirect }));
-const requireCds = vi.fn(async () => ({ id: "u1", kind: "cds" }));
+const requireCds = vi.fn(async () => ({ id: "u1", kind: "cds", can_delete_work_orders: true }));
 vi.mock("@/lib/auth", () => ({ requireCds }));
 vi.mock("@/lib/qbo/tokens", () => ({ qboApi: vi.fn() }));
 
@@ -30,7 +30,7 @@ const supabase = { rpc, storage: { from: vi.fn(() => ({ remove, list })) }, from
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => supabase) }));
 
 const { deleteWorkOrder } = await import("@/app/cds/work-orders/[id]/actions");
-const { deleteConfirmText, deletedHref, deletedMessage, storagePathsToRemove } = await import("@/lib/work-order-delete");
+const { DELETE_NOT_ALLOWED, deleteConfirmText, deletedHref, deletedMessage, storagePathsToRemove } = await import("@/lib/work-order-delete");
 
 beforeEach(() => {
   rpc.mockClear();
@@ -130,6 +130,41 @@ describe("deleteWorkOrder", () => {
   it("refuses a bad id without calling the database", async () => {
     expect(await deleteWorkOrder("nope")).toEqual({ error: "Work order not found." });
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses CDS staff without the delete permission (only Sarah has it)", async () => {
+    requireCds.mockResolvedValueOnce({ id: "u2", kind: "cds", can_delete_work_orders: false });
+    expect(await deleteWorkOrder(WO)).toEqual({ error: DELETE_NOT_ALLOWED });
+    expect(DELETE_NOT_ALLOWED).toMatch(/Sarah/);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
+  });
+});
+
+describe("Delete permission (20261111060000_delete_work_order_permission.sql)", () => {
+  const sql = readFileSync(new URL("../../supabase/migrations/20261111060000_delete_work_order_permission.sql", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../../src/app/cds/work-orders/[id]/page.tsx", import.meta.url), "utf8");
+  const auth = readFileSync(new URL("../../src/lib/auth.ts", import.meta.url), "utf8");
+
+  it("gives the permission to sarah@cds.direct only, and the database refuses everyone else", () => {
+    expect(sql).toMatch(/add column can_delete_work_orders boolean not null default false/);
+    expect(sql).toMatch(/update public\.profiles set can_delete_work_orders = true where email = 'sarah@cds\.direct' and kind = 'cds';/);
+    expect(sql).toMatch(/create or replace function public\.cds_delete_work_order\(p_work_order uuid\)/);
+    expect(sql).toContain(DELETE_NOT_ALLOWED);
+  });
+
+  it("does not let an API login change the permission", () => {
+    expect(sql).toMatch(/current_user in \('anon', 'authenticated'\)/);
+    expect(sql).toMatch(/create trigger guard_permissions before insert or update on public\.profiles/);
+  });
+
+  it("shows the Delete control only to a profile with the permission", () => {
+    expect(auth).toMatch(/can_delete_work_orders/);
+    expect(page).toMatch(/\{profile\.can_delete_work_orders && \(\s*<section className="section" id="delete-work-order">/);
+  });
+
+  it("uses no em or en dashes in the migration", () => {
+    expect(sql).not.toMatch(/[\u2013\u2014]/);
   });
 });
 

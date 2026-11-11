@@ -473,7 +473,7 @@ function num(v: number | null, unit = ""): string {
 }
 
 export default async function WorkOrderPage({ params }: PageProps<"/cds/work-orders/[id]">) {
-  await requireCds();
+  const profile = await requireCds();
   const { id } = await params;
   if (!isUuid(id)) notFound();
   const supabase = await createClient();
@@ -1485,20 +1485,22 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </div>
             )}
           </section>
-          <section className="section" id="delete-work-order">
-            <h3>Delete work order</h3>
-            <p className="small">
-              Deletes this order and everything on it: lines, shipments, labels, notes, files and history. Use it for test orders
-              or orders entered twice. It does not change QuickBooks{qbInvoice ? "; void the invoice in QuickBooks" : ""}.
-            </p>
-            <ActionForm
-              action={deleteWorkOrder.bind(null, wo.id)}
-              submitLabel={`Delete ${woLabel(wo.wo_number)}`}
-              pendingLabel="Deleting..."
-              buttonClass="btn btn-secondary"
-              confirmText={deleteConfirmText({ woNumber: wo.wo_number, qbInvoice })}
-            />
-          </section>
+          {profile.can_delete_work_orders && (
+            <section className="section" id="delete-work-order">
+              <h3>Delete work order</h3>
+              <p className="small">
+                Deletes this order and everything on it: lines, shipments, labels, notes, files and history. Use it for test orders
+                or orders entered twice. It does not change QuickBooks{qbInvoice ? "; void the invoice in QuickBooks" : ""}.
+              </p>
+              <ActionForm
+                action={deleteWorkOrder.bind(null, wo.id)}
+                submitLabel={`Delete ${woLabel(wo.wo_number)}`}
+                pendingLabel="Deleting..."
+                buttonClass="btn btn-secondary"
+                confirmText={deleteConfirmText({ woNumber: wo.wo_number, qbInvoice })}
+              />
+            </section>
+          )}
         </div>
 
         {/* ---------------------------------------------------------- right column */}

@@ -4,8 +4,12 @@
  * a real label in use is refused; the email that created the order stays, marked not a
  * request; the QuickBooks invoice reference is returned and kept in the change log.
  *
+ * Only a profile with can_delete_work_orders (Sarah, 20261111060000) may delete: another CDS
+ * login is refused, and no API login can give itself or anyone else the permission.
+ *
  * Fixtures are created with the service role under a per-run id and removed afterwards.
  */
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { admin, createLogin, deleteLogins, must, runId, type Login } from "./helpers";
 
@@ -14,6 +18,7 @@ const LABEL = `DELWO-${runId}`;
 let shop: string;
 let customer: string;
 let cds: Login;
+let otherCds: Login;
 let shopLogin: Login;
 
 async function insertOne<T extends { id: string }>(table: string, row: Record<string, unknown>): Promise<T> {
@@ -48,6 +53,9 @@ beforeAll(async () => {
   shop = (await insertOne("affiliates", { short_code: `DWS-${runId}`, display_name: `Delete WO Shop ${runId}` })).id;
   customer = (await insertOne("customers", { code: `DWC-${runId}`, name: `Delete WO Customer ${runId}` })).id;
   cds = await createLogin("cds", null);
+  // The permission Sarah has; set with the service role, as only a migration or the service role can.
+  await must(admin.from("profiles").update({ can_delete_work_orders: true }).eq("id", cds.id));
+  otherCds = await createLogin("cds", null);
   shopLogin = await createLogin("shop", shop);
 }, 120_000);
 
@@ -132,10 +140,73 @@ describe("cds_delete_work_order", () => {
     expect(await count("shipment_labels", "id", real.id)).toBe(0);
   });
 
+  it("is refused for CDS staff without the permission", async () => {
+    const wo = await workOrder("DW-5");
+    const res = await otherCds.client.rpc("cds_delete_work_order", { p_work_order: wo.id });
+    expect(res.error?.code).toBe("42501");
+    expect(res.error?.message).toBe("Only Sarah can delete work orders. Ask her to delete this one.");
+    expect(await count("work_orders", "id", wo.id)).toBe(1);
+  });
+
   it("is refused for a shop", async () => {
     const wo = await workOrder("DW-4");
     const res = await shopLogin.client.rpc("cds_delete_work_order", { p_work_order: wo.id });
     expect(res.error).not.toBeNull();
     expect(await count("work_orders", "id", wo.id)).toBe(1);
+  });
+});
+
+describe("can_delete_work_orders", () => {
+  const flag = async (id: string) =>
+    ((await must(admin.from("profiles").select("can_delete_work_orders").eq("id", id).single())) as { can_delete_work_orders: boolean })
+      .can_delete_work_orders;
+
+  it("is on for sarah@cds.direct only, besides this run's test logins", async () => {
+    const rows = (await must(admin.from("profiles").select("email, kind").eq("can_delete_work_orders", true))) as { email: string; kind: string }[];
+    for (const r of rows) {
+      expect(r.kind).toBe("cds");
+      expect(r.email === "sarah@cds.direct" || /^rls-cds-[a-z0-9]+-\d+@test\.invalid$/.test(r.email), r.email).toBe(true);
+    }
+  });
+
+  it("cannot be switched on by CDS staff, for themselves or for another login", async () => {
+    for (const target of [otherCds.id, shopLogin.id]) {
+      const res = await otherCds.client.from("profiles").update({ can_delete_work_orders: true }).eq("id", target).select("id");
+      expect(res.error?.code).toBe("42501");
+    }
+    expect(await flag(otherCds.id)).toBe(false);
+    expect(await flag(shopLogin.id)).toBe(false);
+  });
+
+  it("cannot be switched off by the CDS login that has it, nor changed with other fields", async () => {
+    const res = await cds.client.from("profiles").update({ can_delete_work_orders: false, full_name: "Renamed" }).eq("id", cds.id).select("id");
+    expect(res.error).not.toBeNull();
+    expect(await flag(cds.id)).toBe(true);
+  });
+
+  it("does not stop CDS from changing other profile fields", async () => {
+    const res = await cds.client.from("profiles").update({ full_name: `RLS cds ${runId} renamed` }).eq("id", otherCds.id).select("id");
+    expect(res.error).toBeNull();
+    expect(res.data).toHaveLength(1);
+  });
+
+  it("cannot be set by a shop on its own profile", async () => {
+    const res = await shopLogin.client.from("profiles").update({ can_delete_work_orders: true }).eq("id", shopLogin.id).select("id");
+    // No shop update policy: nothing is updated (or the trigger refuses).
+    expect(res.data ?? []).toHaveLength(0);
+    expect(await flag(shopLogin.id)).toBe(false);
+  });
+
+  it("cannot be given to a new profile through the API", async () => {
+    const res = await otherCds.client
+      .from("profiles")
+      .insert({ id: randomUUID(), full_name: "x", email: `rls-new-${runId.toLowerCase()}@test.invalid`, kind: "cds", can_delete_work_orders: true });
+    // Refused by the trigger, before any other check.
+    expect(res.error?.code).toBe("42501");
+  });
+
+  it("is only possible on a CDS profile", async () => {
+    const res = await admin.from("profiles").update({ can_delete_work_orders: true }).eq("id", shopLogin.id);
+    expect(res.error?.message).toMatch(/profiles_delete_permission_cds_only/);
   });
 });

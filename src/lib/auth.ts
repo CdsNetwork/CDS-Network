@@ -11,6 +11,8 @@ export type Profile = {
   affiliate_id: string | null;
   active: boolean;
   affiliate_name: string | null;
+  /** May delete work orders (Sarah only, 20261111060000_delete_work_order_permission.sql). */
+  can_delete_work_orders: boolean;
 };
 
 /** The signed-in auth user, or null. Cached per request. */
@@ -30,7 +32,7 @@ export const getProfile = cache(async (): Promise<Profile | null> => {
 
   const { data } = await supabase
     .from("profiles")
-    .select("id, full_name, email, kind, affiliate_id, active, affiliates(display_name)")
+    .select("id, full_name, email, kind, affiliate_id, active, can_delete_work_orders, affiliates(display_name)")
     .eq("id", user.id)
     .maybeSingle();
   if (!data || !data.active) return null;
@@ -44,6 +46,7 @@ export const getProfile = cache(async (): Promise<Profile | null> => {
     affiliate_id: data.affiliate_id,
     active: data.active,
     affiliate_name: affiliate?.display_name ?? null,
+    can_delete_work_orders: data.kind === "cds" && data.can_delete_work_orders === true,
   };
 });
 
