@@ -29,8 +29,8 @@ function query(table: string) {
 const supabase = { from: vi.fn((table: string) => query(table)) };
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => supabase) }));
 
-const { setShipmentLabelStatus, updateShipment } = await import("@/app/cds/shipping/actions");
-const { LABEL_STATUSES, isLabelStatus } = await import("@/app/cds/shipping/options");
+const { setShipmentLabelStatus, setShipmentStatus, updateShipment } = await import("@/app/cds/shipping/actions");
+const { LABEL_STATUSES, SHIPMENT_STATUSES, isLabelStatus } = await import("@/app/cds/shipping/options");
 
 const SHIP = "22222222-2222-4222-8222-222222222222";
 const WO = "11111111-1111-4111-8111-111111111111";
@@ -82,10 +82,35 @@ describe("setShipmentLabelStatus", () => {
   });
 });
 
+describe("setShipmentStatus (Sarah 2026-11-11: change the status from the work order's shipment box)", () => {
+  it("saves a Shipping page status and refreshes both pages", async () => {
+    const res = await setShipmentStatus(SHIP, {}, form({ status: SHIPMENT_STATUSES[0] }));
+    expect(res).toEqual({ ok: true, message: "Saved." });
+    expect(updates).toEqual([{ table: "shipments", row: { status: SHIPMENT_STATUSES[0] }, filters: [["id", SHIP]] }]);
+    expect(revalidatePath).toHaveBeenCalledWith("/cds/shipping");
+    expect(revalidatePath).toHaveBeenCalledWith(`/cds/work-orders/${WO}`);
+  });
+
+  it("refuses a status the Shipping page does not offer, and a bad or unknown shipment", async () => {
+    expect(await setShipmentStatus(SHIP, {}, form({ status: "lost" }))).toEqual({ error: "Choose a status." });
+    expect(await setShipmentStatus("nope", {}, form({ status: SHIPMENT_STATUSES[0] }))).toEqual({ error: "Shipment not found." });
+    expect(updates).toHaveLength(0);
+    updated = [];
+    expect(await setShipmentStatus(SHIP, {}, form({ status: SHIPMENT_STATUSES[0] }))).toEqual({ error: "Shipment not found." });
+  });
+});
+
 describe("work order page shipment box", () => {
+  it("offers the shipment status control bound to the Shipping page action and options", () => {
+    const page = readFileSync(new URL("../../src/app/cds/work-orders/[id]/page.tsx", import.meta.url), "utf8");
+    expect(page).toMatch(/setShipmentStatus\.bind\(null, s\.id\)/);
+    expect(page).toMatch(/Object\.entries\(SHIPMENT_STATUS_LABEL\)\.map/);
+    expect(page).toMatch(/name="status"/);
+  });
+
   it("offers the label status control bound to the Shipping page action", () => {
     const page = readFileSync(new URL("../../src/app/cds/work-orders/[id]/page.tsx", import.meta.url), "utf8");
-    expect(page).toMatch(/import \{ setShipmentLabelStatus \} from "@\/app\/cds\/shipping\/actions"/);
+    expect(page).toMatch(/import \{ setShipmentLabelStatus, setShipmentStatus \} from "@\/app\/cds\/shipping\/actions"/);
     expect(page).toMatch(/setShipmentLabelStatus\.bind\(null, s\.id\)/);
     expect(page).toMatch(/LABEL_STATUSES\.map/);
     expect(page).toMatch(/name="label_status"/);
