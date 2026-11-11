@@ -30,7 +30,7 @@ import {
   setShipStatus,
 } from "@/app/shop/actions";
 import type { JobDetailData } from "@/app/shop/data";
-import { deductionLabel, shopPayable } from "@/lib/shop-deductions";
+import { deductionLabel, hasMissingShopRate, shopMoney, shopPayable } from "@/lib/shop-deductions";
 import { ActionButton, ActionForm } from "./ActionForm";
 import { AddPartForm } from "./AddPartForm";
 import { AttachmentForm } from "./AttachmentForm";
@@ -69,7 +69,7 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
   const canShipStatus = isShipping && ["accepted", "in_process", "completed"].includes(job.status);
 
   const settlement = shopPayable(lines, deductions);
-  const missingRate = lines.some((l) => l.shop_unit_rate === null);
+  const missingRate = hasMissingShopRate(lines);
   const photoCount = (componentId: string) => attachments.filter((a) => a.component_id === componentId).length;
   const componentOptions = components.map((c) => ({ id: c.id, label: componentLabel(c) }));
   const componentName = new Map(components.map((c) => [c.id, componentLabel(c)]));
@@ -221,9 +221,9 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
 
         <section className="section" style={{ marginTop: 0 }}>
           <h3>Settlement preview</h3>
-          <div className="bigAmount">{money(settlement)}</div>
+          <div className="bigAmount">{missingRate ? "TBD" : money(settlement)}</div>
           <p className="small">Calculated from CDS-controlled affiliate rates. Customer pricing is not shown.</p>
-          {missingRate && <p className="small">Some items have no rate yet. CDS will confirm them.</p>}
+          {missingRate && <p className="small">Some items have no rate yet (TBD). CDS will enter them.</p>}
         </section>
       </div>
 
@@ -258,9 +258,9 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
             <div className={styles.lineMoney}>
               <div>
                 <div className="small">
-                  {qtyText(l.qty)} x {money(l.shop_unit_rate)}
+                  {qtyText(l.qty)} x {shopMoney(l.shop_unit_rate)}
                 </div>
-                <div className="money">{l.shop_unit_rate === null ? "-" : money(l.shop_unit_rate * l.qty)}</div>
+                <div className="money">{shopMoney(l.shop_unit_rate === null ? null : l.shop_unit_rate * l.qty)}</div>
               </div>
               {editable && l.origin === "shop_added" && (
                 <ActionButton
@@ -496,7 +496,7 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
             </div>
             <div className="small">From the CDS affiliate rates for the services and parts above, less any deductions.</div>
           </div>
-          <div className="amount money">{money(settlement)}</div>
+          <div className="amount money">{missingRate ? "TBD" : money(settlement)}</div>
         </div>
       </section>
     </div>

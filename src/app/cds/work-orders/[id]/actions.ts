@@ -7,7 +7,7 @@ import { isUuid, LINES_LOCKED_STATUSES, REMOVABLE_LABEL_STATUSES, REVIEW_STATUSE
 import { requireCds } from "@/lib/auth";
 import { recordSync } from "@/lib/integration-sync";
 import { noteBody } from "@/lib/notes";
-import { passThroughInput } from "@/lib/pass-through";
+import { passThroughInput, pricedLineInput, shopRateInput } from "@/lib/pass-through";
 import { emailCdsAfter } from "@/lib/portal-email-send";
 import { createInvoice, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
 import { QboError } from "@/lib/qbo/client";
@@ -604,6 +604,47 @@ export async function addPassThroughLine(woId: string, itemId: string, _prev: Ac
   });
   if (error) return { error: error.message };
   return done(woId, "Line added at the amount on the shop's invoice.");
+}
+
+/**
+ * An item priced on the order (reconditioned and new filters): the customer price CDS quoted,
+ * and the shop rate when known (else TBD, entered later on the line).
+ */
+export async function addPricedLine(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  const itemId = text(formData.get("catalog_item_id"));
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  if (!isUuid(itemId)) return { error: "Choose an item." };
+  const input = pricedLineInput(text(formData.get("description")), text(formData.get("amount")), text(formData.get("shop_rate")));
+  if (!input.ok) return { error: input.error };
+  const supabase = await createClient();
+  const { data: lineId, error } = await supabase.rpc("cds_add_pass_through_line", {
+    p_work_order: woId,
+    p_catalog_item: itemId,
+    p_description: input.description,
+    p_amount: input.amount,
+  });
+  if (error) return { error: error.message };
+  if (input.shopRate !== null) {
+    const rate = await supabase.rpc("cds_set_line_shop_rate", { p_line: lineId as string, p_amount: input.shopRate });
+    if (rate.error) {
+      revalidatePath(`/cds/work-orders/${woId}`);
+      return { error: `Line added, but the shop rate was not saved: ${rate.error.message}` };
+    }
+  }
+  return done(woId, input.shopRate === null ? "Line added. Enter the shop rate on the line when it is known." : "Line added.");
+}
+
+/** The shop rate of a line whose rate is TBD (or that CDS entered before). */
+export async function setLineShopRate(woId: string, lineId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId) || !isUuid(lineId)) return { error: "Line not found." };
+  const input = shopRateInput(text(formData.get("amount")));
+  if (!input.ok) return { error: input.error };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("cds_set_line_shop_rate", { p_line: lineId, p_amount: input.amount });
+  if (error) return { error: error.message };
+  return done(woId, "Shop rate saved.");
 }
 
 export async function removePassThroughLine(woId: string, lineId: string): Promise<ActionState> {

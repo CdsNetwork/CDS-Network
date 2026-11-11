@@ -102,7 +102,7 @@ export function supabaseIntakeStore(client: SupabaseClient, actorId: string | nu
         fetchAll<CatalogRef>((a, b) =>
           client
             .from("catalog_items")
-            .select("id, sku, name, category, oe_cross, price_per_line")
+            .select("id, sku, name, category, oe_cross, price_per_line, pass_through")
             .eq("active", true)
             .order("id")
             .range(a, b),

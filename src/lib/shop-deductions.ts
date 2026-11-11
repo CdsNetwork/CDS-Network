@@ -53,6 +53,20 @@ export function shopPayable(
   return round2(fromLines + deductions.reduce((sum, d) => sum + d.amount, 0));
 }
 
+/**
+ * True when a line has no shop rate yet (TBD: First Student's AM gaskets and clamps, items
+ * priced on the order, items with no rate in the price list). The bill total is then TBD,
+ * never the other lines' sum as if that line paid nothing.
+ */
+export function hasMissingShopRate(lines: readonly { shop_unit_rate: number | null }[]): boolean {
+  return lines.some((l) => l.shop_unit_rate === null);
+}
+
+/** A shop amount for display: "TBD" while the rate is not entered. */
+export function shopMoney(amount: number | null): string {
+  return amount === null ? "TBD" : money(amount);
+}
+
 /** The line text shown to CDS and to the shop. */
 export function deductionLabel(d: ShopDeduction): string {
   const filters = `${d.filters} ${d.filters === 1 ? "filter" : "filters"}`;

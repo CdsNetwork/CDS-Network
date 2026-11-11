@@ -26,7 +26,15 @@ export default async function NewWorkOrderPage() {
   const [customersRes, locationsRes, catalogRes, sellRes, overrideRes] = await Promise.all([
     supabase.from("customers").select("id, code, name").eq("active", true).order("name"),
     loadPickerLocations(supabase),
-    supabase.from("catalog_items").select("id, sku, name, category, oe_cross").eq("active", true).order("category").order("sku"),
+    // Customer items (First Student's AM gaskets and clamps) are never picked: the regular
+    // item becomes the customer item on that customer's orders (private.use_customer_item).
+    supabase
+      .from("catalog_items")
+      .select("id, sku, name, category, oe_cross")
+      .eq("active", true)
+      .is("variant_of", null)
+      .order("category")
+      .order("sku"),
     supabase
       .from("sell_prices")
       .select("catalog_item_id, amount, effective_from")

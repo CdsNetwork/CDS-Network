@@ -55,6 +55,8 @@ export type CatalogRef = {
   oe_cross: string | null;
   /** Priced per line from the shop's invoice (Misc. hardware): never proposed by intake. */
   price_per_line?: boolean;
+  /** Priced per line: false when CDS enters the customer price (reconditioned and new filters). */
+  pass_through?: boolean;
 };
 
 /** The catalog items intake may propose: everything except items priced per line. */

@@ -63,10 +63,12 @@ import { labelShop, labelShopMismatch, missingLegEnds, shopEnd } from "@/lib/shi
 import { packageForShipment } from "@/lib/shipstation/package";
 import { LABEL_STATUSES, NEW_SHIPMENT_STATUS } from "@/app/cds/shipping/options";
 import { setShipmentLabelStatus, setShipmentStatus } from "@/app/cds/shipping/actions";
+import { isCustomerItem, lineItemFor } from "@/lib/customer-items";
 import { ActionForm as ShippingActionForm } from "@/components/cds-admin/ActionForm";
 import {
   addLine,
   addPassThroughLine,
+  addPricedLine,
   addShipment,
   createQuickBooksInvoice,
   addInternalNote,
@@ -76,6 +78,7 @@ import {
   deleteWorkOrder,
   deleteInternalNote,
   setQuestionPending,
+  setLineShopRate,
   deleteNote,
   dispatchWorkOrder,
   prepareCdsUpload,
@@ -163,7 +166,7 @@ type Line = {
   shop_unit_rate: number | null;
   origin: string;
   description: string | null;
-  catalog_items: MaybeOne<{ sku: string; name: string; price_per_line: boolean }>;
+  catalog_items: MaybeOne<{ sku: string; name: string; price_per_line: boolean; pass_through: boolean }>;
   work_order_line_pricing: MaybeOne<{ customer_unit_price: number; price_source: string; tax_class: string }>;
 };
 
@@ -507,7 +510,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase
         .from("work_order_lines")
         .select(
-          "id, qty, shop_unit_rate, origin, description, catalog_items(sku, name, price_per_line), work_order_line_pricing(customer_unit_price, price_source, tax_class)",
+          "id, qty, shop_unit_rate, origin, description, catalog_items(sku, name, price_per_line, pass_through), work_order_line_pricing(customer_unit_price, price_source, tax_class)",
         )
         .eq("work_order_id", id)
         .order("created_at"),
@@ -537,7 +540,11 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         .select("id, display_name, kind, city, region, can_egr, can_oil_soaked, is_in_house")
         .eq("active", true)
         .order("display_name"),
-      supabase.from("catalog_items").select("id, sku, name, category, oe_cross, price_per_line").eq("active", true).order("sku"),
+      supabase
+        .from("catalog_items")
+        .select("id, sku, name, category, oe_cross, price_per_line, pass_through, variant_of, variant_customer_id")
+        .eq("active", true)
+        .order("sku"),
       loadLocationCounts(supabase),
       supabase.from("customer_billing").select("tax_exempt").eq("customer_id", wo.customer_id).maybeSingle(),
       supabase.from("inbound_emails").select(EMAIL_COLUMNS).eq("work_order_id", id).order("received_at", { ascending: false }),
@@ -606,6 +613,9 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     category: string;
     oe_cross: string | null;
     price_per_line: boolean;
+    pass_through: boolean;
+    variant_of: string | null;
+    variant_customer_id: string | null;
   }[];
 
   // Signed links for files (bucket is private; checked as CDS above).
@@ -666,8 +676,14 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   // Items priced per line (Misc. hardware) come from the shop's invoice, so CDS can add and
   // remove them after the work is completed, until the order is invoiced.
   const perLineOpen = !["invoiced", "cancelled"].includes(wo.status);
-  const perLineItems = catalog.filter((c) => c.price_per_line);
+  // Misc. hardware: the amount on the shop's invoice. Priced on the order (reconditioned and
+  // new filters): CDS enters the customer price, the shop rate is entered on the line.
+  const perLineItems = catalog.filter((c) => c.price_per_line && c.pass_through);
+  const pricedItems = catalog.filter((c) => c.price_per_line && !c.pass_through);
   const isPerLine = (l: Line) => one(l.catalog_items)?.price_per_line === true;
+  const isPassThrough = (l: Line) => isPerLine(l) && one(l.catalog_items)?.pass_through !== false;
+  // A line with no shop rate yet (TBD): CDS enters it until the order is invoiced.
+  const canSetRate = (l: Line) => perLineOpen && l.shop_unit_rate === null && !isPassThrough(l);
   const removeColumn = !linesLocked || (perLineOpen && lines.some(isPerLine));
   const tbd = fin?.supplier_cost_tbd ?? false;
   const approver = one(internal?.profiles ?? null);
@@ -734,12 +750,21 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         keywords: s.kind === "parts_supplier" ? "supplier parts" : undefined,
       };
     });
-  const catalogOptions: SearchOption[] = catalog.filter((c) => !c.price_per_line).map((c) => ({
-    value: c.id,
-    label: `${c.sku} - ${c.name}`,
-    hint: CATEGORY_LABEL[c.category] ?? c.category,
-    keywords: c.oe_cross ?? undefined,
-  }));
+  // Customer items (First Student's AM gaskets and clamps) are never picked by hand: the
+  // regular item becomes the customer item on that customer's orders (database trigger).
+  const skuById = new Map(catalog.map((c) => [c.id, c.sku]));
+  const catalogOptions: SearchOption[] = catalog
+    .filter((c) => !c.price_per_line && !isCustomerItem(c))
+    .map((c) => {
+      const used = lineItemFor(c.id, wo.customer_id, catalog);
+      const category = CATEGORY_LABEL[c.category] ?? c.category;
+      return {
+        value: c.id,
+        label: `${c.sku} - ${c.name}`,
+        hint: used === c.id ? category : `${category} - added as ${skuById.get(used)} for this customer`,
+        keywords: c.oe_cross ?? undefined,
+      };
+    });
 
   // Lines priced below what the shop is paid lose money on every unit.
   const isNegative = (l: Line) => {
@@ -1168,7 +1193,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                           <b>{item?.sku}</b>
                           <div className="small">{item?.name}</div>
                           {l.description && <div className="small">{l.description}</div>}
-                          {isPerLine(l) && <span className="tag">Shop invoice amount, no upcharge</span>}
+                          {isPassThrough(l) && <span className="tag">Shop invoice amount, no upcharge</span>}
+                          {isPerLine(l) && !isPassThrough(l) && <span className="tag">Price set on this order</span>}
                           {negative && (
                             <div>
                               <span className={styles.negTag} title={`The customer price is lower than the ${rateLabel.toLowerCase()}`}>
@@ -1184,6 +1210,25 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                         <td className="num">
                           <span className="money">{l.shop_unit_rate === null ? "TBD" : money(shopAmt)}</span>
                           <div className="small">{l.shop_unit_rate === null ? "" : `${money(l.shop_unit_rate)} each`}</div>
+                          {canSetRate(l) && (
+                            <ActionForm
+                              action={setLineShopRate.bind(null, wo.id, l.id)}
+                              submitLabel="Set"
+                              pendingLabel="..."
+                              inline
+                              buttonClass="btn btn-secondary btn-small"
+                            >
+                              <input
+                                name="amount"
+                                className="input"
+                                inputMode="decimal"
+                                required
+                                placeholder={`${rateLabel} each`}
+                                aria-label={`${rateLabel} each for ${item?.sku ?? "this line"}`}
+                                style={{ width: 110 }}
+                              />
+                            </ActionForm>
+                          )}
                         </td>
                         <td className="num">
                           <span className="money">{money(custAmt)}</span>
@@ -1338,6 +1383,50 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   </div>
                 </ActionForm>
               ))}
+            {perLineOpen && pricedItems.length > 0 && (
+              <ActionForm
+                action={addPricedLine.bind(null, wo.id)}
+                submitLabel="+ Add Item"
+                inline
+                resetOnSuccess
+                buttonClass="btn btn-secondary"
+                className="summarybox"
+              >
+                <div style={{ flex: "1 1 200px" }}>
+                  <label className="small" htmlFor="priced-item">
+                    Priced on this order
+                  </label>
+                  <select id="priced-item" name="catalog_item_id" className="input" required defaultValue="">
+                    <option value="" disabled>
+                      Choose...
+                    </option>
+                    {pricedItems.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.sku} - {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: "1 1 180px" }}>
+                  <label className="small" htmlFor="priced-desc">
+                    Description (optional)
+                  </label>
+                  <input id="priced-desc" name="description" className="input" maxLength={500} placeholder="e.g. part number" />
+                </div>
+                <div style={{ width: 120 }}>
+                  <label className="small" htmlFor="priced-amount">
+                    Customer price
+                  </label>
+                  <input id="priced-amount" name="amount" className="input" inputMode="decimal" required placeholder="0.00" />
+                </div>
+                <div style={{ width: 120 }}>
+                  <label className="small" htmlFor="priced-rate">
+                    {rateLabel}
+                  </label>
+                  <input id="priced-rate" name="shop_rate" className="input" inputMode="decimal" placeholder="TBD" />
+                </div>
+              </ActionForm>
+            )}
           </section>
 
           <section className="section">

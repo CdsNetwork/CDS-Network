@@ -5,6 +5,7 @@ import { CATEGORY_LABEL, money } from "@/lib/format";
 import { pacificToday } from "@/lib/dates";
 import { fetchAllSettled } from "@/lib/supabase/fetch-all";
 import { pickShopRatesByItem } from "@/lib/shop-rates";
+import { isCustomerItem, lineItemFor } from "@/lib/customer-items";
 import type { NoteView } from "@/lib/notes";
 import {
   TAB_STATUSES,
@@ -314,7 +315,11 @@ async function loadCatalogOptions(market: string, shop: string | null, customer:
   const today = pacificToday();
 
   const [items, rates] = await Promise.all([
-    supabase.from("catalog_items").select("id, sku, name, category, oe_cross, shop_selectable").eq("active", true).order("sku"),
+    supabase
+      .from("catalog_items")
+      .select("id, sku, name, category, oe_cross, shop_selectable, variant_of, variant_customer_id")
+      .eq("active", true)
+      .order("sku"),
     // RLS returns the default rows plus this shop's own rows only (each with or without a
     // customer). Paged so a larger catalog never passes the 1000 row cap.
     fetchAllSettled((from, to) =>
@@ -341,15 +346,24 @@ async function loadCatalogOptions(market: string, shop: string | null, customer:
     category: CATEGORY_LABEL[i.category as string] ?? String(i.category),
     keywords: (i.oe_cross as string | null) ?? undefined,
   });
-  const partOptions: CatalogOption[] = all
+  // A part the shop picks may become this customer's own item (First Student's AM gaskets
+  // and clamps, private.use_customer_item): its rate is the one shown. Customer items are
+  // never picked by hand.
+  const refs = all.map((i) => ({
+    id: i.id as string,
+    variant_of: (i.variant_of as string | null) ?? null,
+    variant_customer_id: (i.variant_customer_id as string | null) ?? null,
+  }));
+  const pickable = all.filter((i) => !isCustomerItem({ variant_of: (i.variant_of as string | null) ?? null }));
+  const partOptions: CatalogOption[] = pickable
     .filter((i) => i.shop_selectable && i.category !== "service")
     .map((i) => {
-      const amount = num(best.get(i.id)?.amount ?? null);
+      const amount = num(best.get(lineItemFor(i.id as string, customer, refs))?.amount ?? null);
       const o = base(i);
       const rate = amount === null ? "Rate set by CDS" : `Your rate ${money(amount)}`;
       return { ...o, hint: `${o.category} • ${rate}` };
     });
-  const authOptions = all.map((i) => {
+  const authOptions = pickable.map((i) => {
     const o = base(i);
     return { ...o, hint: o.category, kind: (i.category === "service" ? "service" : "part") as "service" | "part" };
   });

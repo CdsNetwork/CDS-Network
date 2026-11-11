@@ -215,7 +215,10 @@ export async function parseEmail(email: NormalizedEmail, ref: IntakeReference, o
       (n) => n && words(n).trim() && allWords.includes(words(n)),
     ),
   );
-  for (const c of asked) warnings.push(`${c.name} is asked for: add it by hand with the amount from the shop's invoice.`);
+  for (const c of asked) {
+    const how = c.pass_through === false ? "the customer price for this order" : "the amount from the shop's invoice";
+    warnings.push(`${c.name} is asked for: add it by hand with ${how}.`);
+  }
 
   const matched = items.filter((i) => i.catalog_item_id);
   const requestType = matched.length > 0 && matched.every((i) => categoryOf.get(i.catalog_item_id!) !== "service") ? "parts_only" : "service";

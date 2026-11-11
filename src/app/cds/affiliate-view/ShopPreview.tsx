@@ -19,7 +19,15 @@ import {
   type WoStatus,
 } from "@/lib/format";
 import type { createClient } from "@/lib/supabase/server";
-import { SHOP_DEDUCTION_COLUMNS, deductionLabel, shopPayable, toShopDeductions, type ShopDeduction } from "@/lib/shop-deductions";
+import {
+  SHOP_DEDUCTION_COLUMNS,
+  deductionLabel,
+  hasMissingShopRate,
+  shopMoney,
+  shopPayable,
+  toShopDeductions,
+  type ShopDeduction,
+} from "@/lib/shop-deductions";
 
 // Read-only copy of the shop job screen for CDS. The CDS client can read everything, so
 // every query below selects only the columns the shop portal itself reads
@@ -214,6 +222,7 @@ export function ShopPreview({ data }: { data: PreviewData }) {
   const isPickup = job.fulfillment === "pickup";
   const isShipping = job.fulfillment === "shipping";
   const settlement = shopPayable(lines, deductions);
+  const missingRate = hasMissingShopRate(lines);
   const componentName = new Map(components.map((c) => [c.id, `${c.component_type} #${c.seq}`]));
 
   return (
@@ -290,7 +299,7 @@ export function ShopPreview({ data }: { data: PreviewData }) {
         </section>
         <section className="section" style={{ marginTop: 0 }}>
           <h3>Settlement preview</h3>
-          <div className="bigAmount">{money(settlement)}</div>
+          <div className="bigAmount">{missingRate ? "TBD" : money(settlement)}</div>
           <p className="small">Calculated from CDS-controlled affiliate rates. Customer pricing is not shown.</p>
         </section>
       </div>
@@ -310,9 +319,9 @@ export function ShopPreview({ data }: { data: PreviewData }) {
               </div>
               <div className={styles.lineMoney}>
                 <div className="small">
-                  {l.qty} x {money(l.shop_unit_rate)}
+                  {l.qty} x {shopMoney(l.shop_unit_rate)}
                 </div>
-                <div className="money">{l.shop_unit_rate === null ? "-" : money(l.shop_unit_rate * l.qty)}</div>
+                <div className="money">{shopMoney(l.shop_unit_rate === null ? null : l.shop_unit_rate * l.qty)}</div>
               </div>
             </div>
           );
