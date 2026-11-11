@@ -6,6 +6,7 @@ import { ActionForm } from "@/components/cds-wo/ActionForm";
 import { ActionMessageGroup } from "@/components/cds-wo/ActionMessageGroup";
 import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
 import { MarkSeen } from "@/components/cds-wo/MarkSeen";
+import { QUESTION_NOTE_MAX } from "@/components/cds-wo/question-pending";
 import type { LocationOption } from "@/components/cds-wo/NewWorkOrderForm";
 import { OrderLocationFields } from "@/components/cds-wo/OrderLocationFields";
 import { loadPickerLocations } from "@/app/cds/work-orders/new/locations";
@@ -74,6 +75,7 @@ import {
   deleteCdsAttachment,
   deleteWorkOrder,
   deleteInternalNote,
+  setQuestionPending,
   deleteNote,
   dispatchWorkOrder,
   prepareCdsUpload,
@@ -555,6 +557,20 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     .eq("work_order_id", id);
   const deductions = toShopDeductions(deductionRows as Record<string, unknown>[] | null);
 
+  // "Question Pending" (CDS only): a customer question CDS is following up with the shop.
+  const { data: questionData } = await supabase
+    .from("work_order_questions")
+    .select("question_pending, note, set_at, setter:profiles!work_order_questions_set_by_fkey(full_name)")
+    .eq("work_order_id", id)
+    .maybeSingle();
+  const question = questionData as unknown as {
+    question_pending: boolean;
+    note: string | null;
+    set_at: string | null;
+    setter: { full_name: string } | { full_name: string }[] | null;
+  } | null;
+  const questionOpen = Boolean(question?.question_pending);
+
   // QuickBooks: only for orders that are ready to invoice or invoiced.
   let qbo: QboStatus | null = null;
   let invoice: InvoiceState | null = null;
@@ -757,6 +773,43 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
           {inReview && <span className="status pending_review">NOT SENT TO AFFILIATE</span>}
         </div>
       </div>
+
+      <ActionMessageGroup>
+        <div className={questionOpen ? styles.questionPanel : undefined} id="question-pending" style={questionOpen ? undefined : { marginTop: 18 }}>
+          {questionOpen ? (
+            <>
+              <div className="row between" style={{ alignItems: "flex-start", gap: 12 }}>
+                <div>
+                  <span className={styles.questionBadge}>Question Pending</span>
+                  {question?.note && <p style={{ margin: "8px 0 0" }}>{question.note}</p>}
+                  <p className="small" style={{ margin: "6px 0 0" }}>
+                    Set by {one(question?.setter ?? null)?.full_name ?? "CDS"}
+                    {question?.set_at ? ` on ${dateTime(question.set_at)}` : ""}. The shop does not see this.
+                  </p>
+                </div>
+                <ActionForm
+                  action={setQuestionPending.bind(null, wo.id, false)}
+                  submitLabel="Clear Question Pending"
+                  pendingLabel="Clearing..."
+                  buttonClass="btn btn-secondary"
+                />
+              </div>
+            </>
+          ) : (
+            <ActionForm
+              action={setQuestionPending.bind(null, wo.id, true)}
+              submitLabel="Mark Question Pending"
+              buttonClass="btn btn-secondary"
+              inline
+            >
+              <div className="field" style={{ flex: 1, minWidth: 240 }}>
+                <label htmlFor="question-note">Customer question for the shop (optional, CDS only)</label>
+                <input id="question-note" name="question_note" maxLength={QUESTION_NOTE_MAX} placeholder="What does Ryder want to know?" />
+              </div>
+            </ActionForm>
+          )}
+        </div>
+      </ActionMessageGroup>
 
       <div className="grid4" style={{ margin: "22px 0" }}>
         <div className="card">

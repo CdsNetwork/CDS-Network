@@ -1,6 +1,7 @@
 import "server-only";
 import { STATUS_ORDER, type WoStatus } from "@/lib/format";
 import type { createClient } from "@/lib/supabase/server";
+import { QUESTION_PARAM } from "./question-pending";
 import { FROM_SHOP_PARAM } from "./shop-updates";
 
 /**
@@ -30,6 +31,8 @@ export type WoFilters = {
   shop: string;
   /** Only work orders with shop activity CDS has not opened yet ("New from shop"). */
   fromShop: boolean;
+  /** Only work orders with a customer question pending ("Question Pending", CDS only). */
+  question: boolean;
 };
 
 /** Shop filter value for CDS's own in-house sales (the shop with is_in_house). */
@@ -57,11 +60,12 @@ export function parseFilters(sp: Params): WoFilters {
   const q = cleanSearch(param(sp, "q"));
   const shop = parseShop(param(sp, "shop"));
   const fromShop = param(sp, FROM_SHOP_PARAM) === "1";
+  const question = param(sp, QUESTION_PARAM) === "1";
   const raw = param(sp, "status");
   const group = GROUPS[raw];
-  if (group) return { q, status: raw, statuses: group.statuses, shop, fromShop };
-  if (ALL_STATUSES.includes(raw as WoStatus)) return { q, status: raw, statuses: [raw as WoStatus], shop, fromShop };
-  return { q, status: "", statuses: null, shop, fromShop };
+  if (group) return { q, status: raw, statuses: group.statuses, shop, fromShop, question };
+  if (ALL_STATUSES.includes(raw as WoStatus)) return { q, status: raw, statuses: [raw as WoStatus], shop, fromShop, question };
+  return { q, status: "", statuses: null, shop, fromShop, question };
 }
 
 /** Query string for links that keep the current filters ("" when there are none). */
@@ -71,6 +75,7 @@ export function filterQuery(f: WoFilters, extra: Record<string, string> = {}): s
   if (f.status) p.set("status", f.status);
   if (f.shop) p.set("shop", f.shop);
   if (f.fromShop) p.set(FROM_SHOP_PARAM, "1");
+  if (f.question) p.set(QUESTION_PARAM, "1");
   for (const [k, v] of Object.entries(extra)) if (v) p.set(k, v);
   const s = p.toString();
   return s ? `?${s}` : "";
@@ -79,7 +84,7 @@ export function filterQuery(f: WoFilters, extra: Record<string, string> = {}): s
 /** Matches no work order. */
 const NO_ID = "00000000-0000-0000-0000-000000000000";
 /**
- * Upper bound of flagged orders the "New from shop" filter lists (the most recent shop
+ * Upper bound of flagged orders the "New from shop" and "Question Pending" filters list (the most recent shop
  * activity first); it matches the dashboard's 200 rows and keeps the request URL short.
  */
 const MAX_FLAGGED = 200;
@@ -109,6 +114,19 @@ export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, colum
       .limit(MAX_FLAGGED);
     if (error) throw new Error(`New from shop not loaded: ${error.message}`);
     const ids = ((flagged ?? []) as { work_order_id: string }[]).map((r) => r.work_order_id);
+    list = list.in("id", ids.length ? ids : [NO_ID]);
+  }
+  if (f.question) {
+    // Few orders have a question open at a time; none: nothing matches. Combined with the
+    // New from shop filter, both id lists apply (an order must be in each).
+    const { data: open, error } = await supabase
+      .from("work_order_questions")
+      .select("work_order_id")
+      .eq("question_pending", true)
+      .order("set_at", { ascending: false })
+      .limit(MAX_FLAGGED);
+    if (error) throw new Error(`Question Pending not loaded: ${error.message}`);
+    const ids = ((open ?? []) as { work_order_id: string }[]).map((r) => r.work_order_id);
     list = list.in("id", ids.length ? ids : [NO_ID]);
   }
   if (f.q) {

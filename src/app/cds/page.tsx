@@ -1,6 +1,7 @@
 import Form from "next/form";
 import Link from "next/link";
 import { PeriodSelect } from "@/components/cds-wo/PeriodSelect";
+import { isQuestionPending, QUESTION_PARAM, questionTitle } from "@/components/cds-wo/question-pending";
 import { failedMark, isNewFromShop } from "@/components/cds-wo/shop-updates";
 import styles from "@/components/cds-wo/cds-wo.module.css";
 import { one, SHIPMENT_PROBLEM_STATUSES } from "@/components/cds-wo/util";
@@ -59,6 +60,7 @@ type ListRow = WoRow & {
     | null;
   work_order_shop_activity: { is_new: boolean | null } | { is_new: boolean | null }[] | null;
   work_order_components: { result: string | null }[] | null;
+  work_order_questions: { question_pending: boolean | null; note: string | null } | { question_pending: boolean | null; note: string | null }[] | null;
 };
 
 type AttentionWo = WoRow & {
@@ -93,9 +95,10 @@ const WO_COLUMNS =
 
 /**
  * The table also shows when the request came in, how the part moves, whether the shop did
- * something CDS has not opened yet, and a failed or condemned component.
+ * something CDS has not opened yet, a failed or condemned component, and a pending customer
+ * question.
  */
-const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at)), work_order_shop_activity(is_new), work_order_components(result)`;
+const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at)), work_order_shop_activity(is_new), work_order_components(result), work_order_questions(question_pending, note)`;
 
 /** Unit and PO numbers up to this length stay on one line in the table. */
 const ID_NOWRAP = 22;
@@ -109,7 +112,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
   const sp = await searchParams;
   const deleted = deletedMessage(sp);
   const filters = parseFilters(sp);
-  const { q, status: statusParam, shop: shopParam, fromShop } = filters;
+  const { q, status: statusParam, shop: shopParam, fromShop, question } = filters;
   const period = parsePeriod(sp.period);
   const range = periodRange(period);
 
@@ -374,6 +377,10 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
             <input type="checkbox" name="from_shop" value="1" defaultChecked={fromShop} />
             New from shop
           </label>
+          <label className="small nowrap" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" name={QUESTION_PARAM} value="1" defaultChecked={question} />
+            Question Pending
+          </label>
           {period !== "month" && <input type="hidden" name="period" value={period} />}
           <button className="btn btn-secondary" type="submit">
             Search
@@ -383,7 +390,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
               In-house sales
             </Link>
           )}
-          {(q || statusParam || shopParam || fromShop) && (
+          {(q || statusParam || shopParam || fromShop || question) && (
             <Link className="link small" href={`/cds${period !== "month" ? `?period=${period}` : ""}#orders`}>
               Clear
             </Link>
@@ -428,8 +435,9 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   const shortStatus = TABLE_STATUS_LABEL[r.status] ?? fullStatus;
                   const fromShopNew = isNewFromShop(r.work_order_shop_activity);
                   const failed = failedMark(r.work_order_components);
+                  const questionOpen = isQuestionPending(r.work_order_questions);
                   return (
-                    <tr key={r.id}>
+                    <tr key={r.id} className={questionOpen ? styles.questionRow : undefined}>
                       <td className="nowrap">
                         <Link className="link" href={`/cds/work-orders/${r.id}`}>
                           {woLabel(r.wo_number)}
@@ -438,6 +446,13 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                           <div>
                             <span className="badge pending" title="The shop added a note, a file or a failure since CDS last opened this order">
                               New from shop
+                            </span>
+                          </div>
+                        )}
+                        {questionOpen && (
+                          <div>
+                            <span className={styles.questionBadge} title={questionTitle(r.work_order_questions) ?? undefined}>
+                              Question Pending
                             </span>
                           </div>
                         )}

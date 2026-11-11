@@ -29,6 +29,7 @@ import {
   type UploadMeta,
 } from "@/lib/attachments";
 import { discardUnrecorded, signedUploadTarget, storedObject } from "@/lib/attachment-storage";
+import { questionNote } from "@/components/cds-wo/question-pending";
 import { DELETE_NOT_ALLOWED, deletedHref, storagePathsToRemove } from "@/lib/work-order-delete";
 
 const REQUEST_TYPES = ["service", "parts_only"];
@@ -389,6 +390,26 @@ export async function markWorkOrderSeen(woId: string): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("cds_mark_work_order_seen", { p_work_order: woId });
   if (error) console.error(`New from shop flag not cleared for work order ${woId}: ${error.message}`);
+}
+
+/**
+ * Switches "Question Pending" on (with an optional note of what the question is) or off
+ * (20261111070000_question_pending.sql). It never changes the order's status; the database
+ * function writes the audit_log row.
+ */
+export async function setQuestionPending(woId: string, pending: boolean, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const parsed = pending ? questionNote(formData.get("question_note")) : { note: null };
+  if ("error" in parsed) return { error: parsed.error };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("cds_set_question_pending", {
+    p_work_order: woId,
+    p_pending: pending,
+    p_note: parsed.note,
+  });
+  if (error) return { error: error.message };
+  return done(woId, pending ? "Marked Question Pending." : "Question Pending cleared.");
 }
 
 /** A note the assigned shop sees too (work_order_notes); not the CDS-only internal notes. */

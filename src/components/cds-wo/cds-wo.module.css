@@ -71,6 +71,28 @@
   margin-top: 4px;
 }
 
+/* "Question Pending" (CDS's hot pink rows in the Google Sheet). */
+.questionRow td {
+  background: #ffe3f1;
+}
+.questionBadge {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ff1493;
+  color: #fff;
+  display: inline-block;
+  white-space: nowrap;
+}
+.questionPanel {
+  border: 2px solid #ff1493;
+  background: #fff0f7;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-top: 18px;
+}
+
 /* Affiliate View */
 .previewBanner {
   padding: 12px 14px;

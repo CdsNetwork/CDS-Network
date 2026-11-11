@@ -364,5 +364,13 @@
   "table public.work_order_shop_activity": {
     "authenticated": "SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "function public.cds_set_question_pending(uuid,boolean,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "table public.work_order_questions": {
+    "authenticated": "SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   }
 }
