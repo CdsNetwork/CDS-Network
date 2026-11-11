@@ -372,5 +372,9 @@
   "table public.work_order_questions": {
     "authenticated": "SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "function public.cds_set_line_shop_rate(uuid,numeric)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
   }
 }
