@@ -104,18 +104,26 @@ export async function updateShipment(id: string, _prev: ActionState, formData: F
 }
 
 /** Quick status change from the table row. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Quick shipment status change, from the Shipping page and from the shipment box on the work
+ * order page. Same statuses as the Shipping edit form.
+ */
 export async function setShipmentStatus(id: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
   await requireCds();
+  if (!UUID.test(id)) return { error: "Shipment not found." };
   const status = text(formData, "status");
   if (!SHIPMENT_STATUSES.includes(status)) return { error: "Choose a status." };
   const supabase = await createClient();
-  const { error } = await supabase.from("shipments").update({ status }).eq("id", id);
+  const { data, error } = await supabase.from("shipments").update({ status }).eq("id", id).select("id, work_order_id");
   if (error) return { error: dbMessage(error) };
+  const row = data?.[0] as { work_order_id: string } | undefined;
+  if (!row) return { error: "Shipment not found." };
   revalidatePath("/cds/shipping");
+  revalidatePath(`/cds/work-orders/${row.work_order_id}`);
   return { ok: true, message: "Saved." };
 }
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Quick label status change, from the shipment box on the work order page. Same rule as the

@@ -62,7 +62,7 @@ import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/ships
 import { labelShop, labelShopMismatch, missingLegEnds, shopEnd } from "@/lib/shipstation/ends";
 import { packageForShipment } from "@/lib/shipstation/package";
 import { LABEL_STATUSES, NEW_SHIPMENT_STATUS } from "@/app/cds/shipping/options";
-import { setShipmentLabelStatus } from "@/app/cds/shipping/actions";
+import { setShipmentLabelStatus, setShipmentStatus } from "@/app/cds/shipping/actions";
 import { ActionForm as ShippingActionForm } from "@/components/cds-admin/ActionForm";
 import {
   addLine,
@@ -918,7 +918,27 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   <div key={s.id} className="summarybox">
                     <div className="row between">
                       <b>{DIRECTION_LABEL[s.direction] ?? s.direction}</b>
-                      <span className="tag">{SHIPMENT_STATUS_LABEL[s.status] ?? s.status}</span>
+                      {/* The Shipping page's status action and options. */}
+                      <ShippingActionForm
+                        key={`${s.id}-${s.status}`}
+                        action={setShipmentStatus.bind(null, s.id)}
+                        submitLabel="Set"
+                        submitClassName="btn btn-secondary btn-small"
+                        inline
+                      >
+                        <select
+                          name="status"
+                          defaultValue={s.status}
+                          aria-label="Shipment status"
+                          style={{ padding: "5px 6px", fontSize: 12, width: "auto" }}
+                        >
+                          {Object.entries(SHIPMENT_STATUS_LABEL).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </ShippingActionForm>
                     </div>
                     <div className="small">
                       {s.carrier ?? "Carrier not set"}
