@@ -3,7 +3,8 @@
  * shop, declined by a shop, or finished by a shop (Complete Work), the portal emails
  * dispatch@cds.direct. CDS only: shops get no email from the portal. A shop marking a component
  * failed or condemned also emails dispatch@ (Ashley, 2026-11-11), once per failure
- * (component_failures, 20261111040000_shop_updates.sql).
+ * (component_failures, 20261111040000_shop_updates.sql). A shop accepting a job emails
+ * dispatch@ with the pickup ETA it chose (CDS, 2026-11-11), once per acceptance.
  *
  * Sent through Resend (POST https://api.resend.com/emails) from CDS Portal
  * <portal@in.cds.direct>; in.cds.direct is verified in Resend for sending. Every subject starts
@@ -23,7 +24,7 @@
  */
 import { dateTime } from "@/lib/format";
 
-export type PortalEvent = "sent" | "declined" | "finished" | "failed";
+export type PortalEvent = "sent" | "declined" | "finished" | "failed" | "accepted";
 
 export const PORTAL_FROM = "CDS Portal <portal@in.cds.direct>";
 /** The portal's own sending domain: mail from it is never a request. */
@@ -50,6 +51,8 @@ export type PortalEmailDetails = {
   component?: string | null;
   result?: string | null;
   failureNote?: string | null;
+  /** Acceptance emails only: the pickup ETA / window the shop chose, or how the part moves. */
+  eta?: string | null;
 };
 
 const VERB: Record<PortalEvent, { subject: string; sentence: string }> = {
@@ -57,6 +60,7 @@ const VERB: Record<PortalEvent, { subject: string; sentence: string }> = {
   declined: { subject: "declined by", sentence: "was declined by" },
   finished: { subject: "finished by", sentence: "was finished by" },
   failed: { subject: "marked failed by", sentence: "was marked failed by" },
+  accepted: { subject: "accepted by", sentence: "was accepted by" },
 };
 
 const escapeHtml = (s: string) =>
@@ -72,9 +76,11 @@ export function buildPortalEmail(event: PortalEvent, d: PortalEmailDetails): { s
   const failed = event === "failed";
   const result = d.result?.trim() || "Failed";
   const componentType = d.component?.split(",")[0]?.trim() || "Component";
+  const accepted = event === "accepted";
+  const eta = accepted ? d.eta?.trim() || null : null;
   const subject = failed
     ? `${PORTAL_SUBJECT_PREFIX}${wo} ${componentType} marked ${result} by ${shop}`
-    : `${PORTAL_SUBJECT_PREFIX}${wo} ${VERB[event].subject} ${shop}`;
+    : `${PORTAL_SUBJECT_PREFIX}${wo} ${VERB[event].subject} ${shop}${eta ? `, ETA ${eta}` : ""}`;
   const headline = failed ? `A component on ${wo} was marked ${result} by ${shop}.` : `${wo} ${VERB[event].sentence} ${shop}.`;
   const rows: [string, string | null][] = [
     ["Work order", wo],
@@ -83,6 +89,7 @@ export function buildPortalEmail(event: PortalEvent, d: PortalEmailDetails): { s
     ["Unit", d.unitNumber],
     ["PO", d.poNumber],
     ["Shop", d.shop],
+    ["Pickup ETA / Window", eta],
     ["When", dateTime(d.at)],
     ["Decline reason", event === "declined" ? d.declineReason : null],
     ["Shop invoice / reference", event === "finished" ? d.shopReference : null],

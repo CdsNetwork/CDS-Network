@@ -444,7 +444,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                         </Link>
                         {fromShopNew && (
                           <div>
-                            <span className="badge pending" title="The shop added a note, a file or a failure since CDS last opened this order">
+                            <span className="badge pending" title="The shop accepted, set the pickup ETA, added a note, a file or a failure since CDS last opened this order">
                               New from shop
                             </span>
                           </div>

@@ -72,6 +72,9 @@ export async function acceptJob(workOrderId: string, _prev: ActionState, fd: For
     p_work_order: workOrderId,
     p_pickup_window: window || null,
   });
+  // dispatch@ hears about the acceptance and the ETA. emailCdsAfter runs after the response
+  // and never throws, so an email failure cannot undo or block the accept.
+  if (!error) emailCdsAfter("accepted", workOrderId);
   return done(error);
 }
 

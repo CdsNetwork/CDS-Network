@@ -2,8 +2,9 @@
  * Shop updates on the CDS work order list (20261111040000_shop_updates.sql). Safe on server
  * and client.
  *
- * "New from shop": the shop added a note, uploaded a file, or marked a component failed since
- * CDS last opened the work order. A failed or condemned component shows on the list row
+ * "New from shop": the shop accepted the job, changed its pickup ETA, added a note, uploaded a
+ * file, or marked a component failed since CDS last opened the work order
+ * (20261111080000_shop_accept_activity.sql adds accepting and the ETA). A failed or condemned component shows on the list row
  * whatever the order's status is.
  */
 import { one } from "./util";

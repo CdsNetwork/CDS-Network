@@ -13,6 +13,7 @@
  * it gets the same key and is emailed once.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { pickupWindowLabel } from "@/lib/format";
 import type { PortalEmailDetails, PortalEmailStore, PortalEvent } from "./portal-email";
 
 /** The work_order_events.event_type each status change logs (database functions). */
@@ -20,6 +21,7 @@ export const PORTAL_EVENT_TYPE: Record<Exclude<PortalEvent, "failed">, string> =
   sent: "dispatch",
   declined: "decline",
   finished: "complete",
+  accepted: "accept",
 };
 
 const ENTITY = "portal_email";
@@ -41,12 +43,20 @@ export function componentLabel(c: { component_type: string; manufacturer?: strin
     .join(", ");
 }
 
+/**
+ * The pickup ETA / window the acceptance email gives: the window the shop chose on a pickup
+ * job, null on a shipping job (it has no pickup ETA).
+ */
+export function acceptedEta(pickupWindow: string | null | undefined): string | null {
+  return pickupWindow ? pickupWindowLabel(pickupWindow) : null;
+}
+
 export function supabasePortalEmailStore(db: SupabaseClient): PortalEmailStore {
   return {
     async details(event, workOrderId, componentId) {
       const { data: wo, error: woError } = await db
         .from("work_orders")
-        .select("id, wo_number, location_label, unit_number, po_number, affiliate_id, affiliate_invoice_ref, customers(name), affiliates(display_name)")
+        .select("id, wo_number, location_label, unit_number, po_number, affiliate_id, affiliate_invoice_ref, pickup_window, customers(name), affiliates(display_name)")
         .eq("id", workOrderId)
         .maybeSingle();
       if (woError) throw new Error(`work order not read: ${woError.message}`);
@@ -118,6 +128,7 @@ export function supabasePortalEmailStore(db: SupabaseClient): PortalEmailStore {
         at: change.at,
         declineReason: event === "declined" ? (message.startsWith(prefix) ? message.slice(prefix.length) : message) || null : null,
         shopReference: wo.affiliate_invoice_ref ?? null,
+        eta: event === "accepted" ? acceptedEta(wo.pickup_window) : null,
       };
       return { ...details, key: `${event}:${wo.affiliate_id ?? "none"}:${anchor?.id ?? 0}` };
     },
