@@ -27,6 +27,11 @@ import type { QboAddress } from "./sub-customer";
  * description when there is one. Items priced per line (Misc. hardware: the amount from
  * the shop's invoice, billed as is) are ordinary lines whose description adds the text CDS
  * entered on the line.
+ *
+ * Division and Class (CDS billing, 2026-11-12): the invoice header gets the QuickBooks
+ * Department ("Division" in CDS's company) of the customer and the Class of the shop that
+ * handled the order (qbo_customer_division, qbo_affiliate_class). CDS's company tracks
+ * classes per transaction, not per line. Either is left off when it is not mapped.
  */
 
 export { isTaxable, type TaxClass };
@@ -120,8 +125,20 @@ export type QboInvoiceLine = {
   SalesItemLineDetail: { ItemRef: Ref; Qty: number; UnitPrice: number; TaxCodeRef: { value: "TAX" | "NON" } };
 };
 
+/** QuickBooks ids for the invoice header; empty or missing means not sent. */
+export type InvoiceRefs = {
+  /** qbo_customer_division.qbo_department_id of the work order's customer. */
+  departmentId?: string | null;
+  /** qbo_affiliate_class.qbo_class_id of the work order's shop. */
+  classId?: string | null;
+};
+
 export type QboInvoicePayload = {
   CustomerRef: Ref;
+  /** The customer's Division (QuickBooks Department). */
+  DepartmentRef?: Ref;
+  /** The Class of the shop that handled the order. */
+  ClassRef?: Ref;
   /** Set when the invoice goes to a sub-customer: the parent's billing address (see ./invoice-qbo). */
   BillAddr?: QboAddress;
   /** "Fleet Number" and "PO Number" (see ./custom-fields). */
@@ -240,6 +257,7 @@ export function lineDescription(
  * (written for the person looking at the work order).
  *
  * @param aliases the customer's own part numbers (and descriptions) by catalog item id
+ * @param refs the Division and Class ids, when mapped
  */
 export function buildInvoicePayload(
   workOrder: InvoiceWorkOrder,
@@ -250,6 +268,7 @@ export function buildInvoicePayload(
   location: InvoiceLocation | null,
   components: InvoiceComponent[] = [],
   measurementMap: MeasurementMappings = { customer: {}, default: {} },
+  refs: InvoiceRefs = {},
 ): BuildResult {
   const problems: string[] = [];
   const warnings: string[] = [];
@@ -370,10 +389,14 @@ export function buildInvoicePayload(
   // sees. The "Fleet Number" and "PO Number" custom fields are added when the invoice is
   // sent, once QuickBooks has told us their DefinitionIds (./invoice-qbo).
   const memo = [po && `PO ${po}`, unit && `Unit ${unit}`].filter(Boolean).join(" | ");
+  const departmentId = refs.departmentId?.trim();
+  const classId = refs.classId?.trim();
   return {
     ok: true,
     payload: {
       CustomerRef: { value: customerMap.qboCustomerId, name: customerMap.qboDisplayName },
+      ...(departmentId ? { DepartmentRef: { value: departmentId } } : {}),
+      ...(classId ? { ClassRef: { value: classId } } : {}),
       ShipAddr: shipAddr,
       Line: qboLines,
       PrivateNote: clip([`Portal WO-${workOrder.woNumber}`, po && `PO ${po}`].filter(Boolean).join(" | "), 4000),

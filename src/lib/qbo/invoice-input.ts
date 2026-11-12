@@ -11,6 +11,7 @@ import {
   type InvoiceComponent,
   type InvoiceLine,
   type InvoiceLocation,
+  type InvoiceRefs,
   type InvoiceWorkOrder,
   type ItemMapping,
   type ItemMappings,
@@ -44,7 +45,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
   const { data: woData, error } = await supabase
     .from("work_orders")
     .select(
-      "id, wo_number, status, market, customer_id, location_label, po_number, unit_number, customers(name), customer_locations(id, code, location_number, name, address_line1, city, region, postal_code, country)",
+      "id, wo_number, status, market, customer_id, affiliate_id, location_label, po_number, unit_number, customers(name), customer_locations(id, code, location_number, name, address_line1, city, region, postal_code, country)",
     )
     .eq("id", woId)
     .maybeSingle();
@@ -56,6 +57,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     status: string;
     market: string;
     customer_id: string;
+    affiliate_id: string | null;
     location_label: string;
     po_number: string | null;
     unit_number: string | null;
@@ -73,7 +75,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     }>;
   };
 
-  const [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes, syncRes] = await Promise.all([
+  const [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes, syncRes, refs] = await Promise.all([
     supabase
       .from("work_order_internal")
       .select("tax_parts, tax_labor, tax_shipping, qb_invoice_id, qb_invoice_number, invoiced_at")
@@ -106,6 +108,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
       .eq("status", "ok")
       .order("at", { ascending: false })
       .limit(5),
+    loadRefs(supabase, wo.customer_id, wo.affiliate_id),
   ]);
   for (const r of [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes, syncRes]) {
     if (r.error) throw new Error(`Could not read the invoice details: ${r.error.message}`);
@@ -267,6 +270,41 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
       poNumber: wo.po_number,
       unitNumber: wo.unit_number,
     },
-    result: buildInvoicePayload(workOrder, lines, customerMap, itemMap, aliases, location, components, measurementMap),
+    result: buildInvoicePayload(workOrder, lines, customerMap, itemMap, aliases, location, components, measurementMap, refs),
   };
+}
+
+/**
+ * The Division of the customer (qbo_customer_division) and the Class of the shop
+ * (qbo_affiliate_class). Customers have no parent in the portal (sites are locations), so
+ * the work order's customer is the one whose Division applies. Never stops the invoice: a
+ * missing row or a failed read leaves the ref off, as before these mappings existed.
+ */
+async function loadRefs(supabase: Supabase, customerId: string, affiliateId: string | null): Promise<InvoiceRefs> {
+  const read = async <T>(table: string, query: PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T | null> => {
+    try {
+      const { data, error } = await query;
+      if (error) {
+        console.error(`${table}: could not read the invoice mapping: ${error.message}`);
+        return null;
+      }
+      return data as T | null;
+    } catch (e) {
+      console.error(`${table}: could not read the invoice mapping: ${e instanceof Error ? e.message : "unknown error"}`);
+      return null;
+    }
+  };
+  const [division, cls] = await Promise.all([
+    read<{ qbo_department_id: string }>(
+      "qbo_customer_division",
+      supabase.from("qbo_customer_division").select("qbo_department_id").eq("customer_id", customerId).maybeSingle(),
+    ),
+    affiliateId
+      ? read<{ qbo_class_id: string }>(
+          "qbo_affiliate_class",
+          supabase.from("qbo_affiliate_class").select("qbo_class_id").eq("affiliate_id", affiliateId).maybeSingle(),
+        )
+      : null,
+  ]);
+  return { departmentId: division?.qbo_department_id ?? null, classId: cls?.qbo_class_id ?? null };
 }
