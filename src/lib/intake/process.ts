@@ -44,7 +44,7 @@ export type IntakeStore = {
    * In-Reply-To, and the work order it made or was linked to (with that order's number and status).
    */
   threadEmail?(messageId: string): Promise<ThreadEmail | null>;
-  /** The customer's orders created since the date, newest first, without cancelled and invoiced ones. */
+  /** The customer's orders created since the date, newest first, without invoiced ones (cancelled ones included). */
   recentOrders?(customerId: string, since: string): Promise<RecentOrder[]>;
 };
 
@@ -55,6 +55,7 @@ export type RecentOrder = {
   locationId: string | null;
   unitNumber: string | null;
   createdAt: string;
+  status: string;
   /** The subject of the email that made the order, if one did. */
   subject: string | null;
 };
@@ -127,7 +128,10 @@ export async function processEmail(
     if (!options.forceWorkRequest && isReplyOrForward(row.email)) {
       const thread = await findThreadOrder(store, row.email, parsed);
       if (thread) {
-        const reason = `Reply on the thread of work order ${thread.wo_number ?? "(no number)"}: no new draft.`;
+        const number = thread.wo_number ?? "(no number)";
+        const reason = thread.cancelled
+          ? `Reply on the thread of cancelled work order ${number}: no new draft, the order stays cancelled.`
+          : `Reply on the thread of work order ${number}: no new draft.`;
         parsed = { ...parsed, is_work_request: false, ignore_kind: "thread_reply", ignore_reason: reason, thread_reference: thread };
         await store.saveResult(id, { status: "ignored", parsed, error: null, attempts });
         return outcome("ignored", null, reason);

@@ -7,6 +7,7 @@ import styles from "@/components/cds-wo/cds-wo.module.css";
 import { one, SHIPMENT_PROBLEM_STATUSES } from "@/components/cds-wo/util";
 import {
   ALL_STATUSES,
+  CONDEMNED,
   filteredWorkOrders,
   filterQuery,
   financialsFor,
@@ -362,6 +363,9 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   {STATUS_LABEL[s]}
                 </option>
               ))}
+            </optgroup>
+            <optgroup label="Component result">
+              <option value={CONDEMNED}>Condemned</option>
             </optgroup>
           </select>
           <select name="shop" defaultValue={shopParam} style={{ maxWidth: 240 }} aria-label="Shop">

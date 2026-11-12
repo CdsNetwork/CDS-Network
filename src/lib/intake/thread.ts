@@ -8,9 +8,10 @@
  * was already linked to one. Without a stored thread, a recent open order of the same customer
  * is taken when it has the same location and unit, or the same subject (without Re:, Fw:) and
  * no other unit. A new request (not a reply) always makes its own draft: Ryder sends one
- * request per unit, often with the same subject.
+ * request per unit, often with the same subject. A cancelled order is matched the same way,
+ * but only when no open order matches: the reply is noted on it and no draft is made.
  */
-import type { IntakeStore } from "./process";
+import type { IntakeStore, RecentOrder } from "./process";
 import type { NormalizedEmail, ParsedEmail, ThreadReference } from "./types";
 
 /** How long after a request a reply without a stored thread is still matched to its order. */
@@ -41,6 +42,10 @@ const unitKey = (unit: string | null | undefined) => {
 };
 
 export async function findThreadOrder(store: IntakeStore, email: NormalizedEmail, parsed: ParsedEmail): Promise<ThreadReference | null> {
+  // A cancelled order is only taken when no open order matches: a reply on its thread is
+  // noted on it (it stays cancelled) instead of making a new draft.
+  let cancelled: ThreadReference | null = null;
+
   // 1. The thread, through the stored emails.
   if (store.threadEmail) {
     const visited = new Set<string>();
@@ -48,26 +53,36 @@ export async function findThreadOrder(store: IntakeStore, email: NormalizedEmail
       visited.add(id);
       const parent = await store.threadEmail(id);
       if (!parent) break;
-      if (parent.workOrderId && parent.workOrderStatus !== "cancelled") {
-        return { work_order_id: parent.workOrderId, wo_number: parent.woNumber, via: "thread" };
+      if (parent.workOrderId) {
+        const ref: ThreadReference = { work_order_id: parent.workOrderId, wo_number: parent.woNumber, via: "thread" };
+        if (parent.workOrderStatus !== "cancelled") return ref;
+        cancelled ??= { ...ref, cancelled: true };
       }
       id = parent.inReplyTo;
     }
   }
 
-  // 2. A recent open order of the same customer.
+  // 2. A recent order of the same customer, open first.
   const customerId = parsed.customer?.id;
-  if (!customerId || !store.recentOrders) return null;
+  if (!customerId || !store.recentOrders) return cancelled;
   const received = Date.parse(email.receivedAt);
   const since = new Date((Number.isNaN(received) ? Date.now() : received) - THREAD_WINDOW_DAYS * DAY_MS).toISOString();
-  const orders = await store.recentOrders(customerId, since);
+  const all = await store.recentOrders(customerId, since);
+  const open = all.filter((o) => o.status !== "cancelled");
   const unit = unitKey(parsed.fields.unit_number.value);
   const locationId = parsed.location?.id ?? null;
-  const byUnit = unit && locationId ? orders.find((o) => o.locationId === locationId && unitKey(o.unitNumber) === unit) : undefined;
-  if (byUnit) return { work_order_id: byUnit.id, wo_number: byUnit.woNumber, via: "unit" };
   const key = subjectKey(email.subject);
-  const bySubject = key
-    ? orders.find((o) => subjectKey(o.subject) === key && (!unit || !unitKey(o.unitNumber) || unitKey(o.unitNumber) === unit))
-    : undefined;
-  return bySubject ? { work_order_id: bySubject.id, wo_number: bySubject.woNumber, via: "subject" } : null;
+  const match = (orders: RecentOrder[]): ThreadReference | null => {
+    const byUnit = unit && locationId ? orders.find((o) => o.locationId === locationId && unitKey(o.unitNumber) === unit) : undefined;
+    if (byUnit) return { work_order_id: byUnit.id, wo_number: byUnit.woNumber, via: "unit" };
+    const bySubject = key
+      ? orders.find((o) => subjectKey(o.subject) === key && (!unit || !unitKey(o.unitNumber) || unitKey(o.unitNumber) === unit))
+      : undefined;
+    return bySubject ? { work_order_id: bySubject.id, wo_number: bySubject.woNumber, via: "subject" } : null;
+  };
+  const openMatch = match(open);
+  if (openMatch) return openMatch;
+  if (cancelled) return cancelled;
+  const cancelledMatch = match(all.filter((o) => o.status === "cancelled"));
+  return cancelledMatch ? { ...cancelledMatch, cancelled: true } : null;
 }

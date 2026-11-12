@@ -21,6 +21,11 @@ export const GROUPS: Record<string, { label: string; statuses: WoStatus[] }> = {
   attention: { label: "Pending Review + Declined", statuses: ["pending_review", "rejected_by_affiliate"] },
 };
 export const ALL_STATUSES: WoStatus[] = [...STATUS_ORDER, "rejected_by_affiliate"];
+/**
+ * Status filter value for the orders with at least one condemned component. Condemned is a
+ * component result, not a work order status, so it is not one of ALL_STATUSES.
+ */
+export const CONDEMNED = "condemned";
 
 export type WoFilters = {
   q: string;
@@ -33,6 +38,8 @@ export type WoFilters = {
   fromShop: boolean;
   /** Only work orders with a customer question pending ("Question Pending", CDS only). */
   question: boolean;
+  /** Only work orders with at least one condemned component (status parameter CONDEMNED). */
+  condemned: boolean;
 };
 
 /** Shop filter value for CDS's own in-house sales (the shop with is_in_house). */
@@ -63,9 +70,10 @@ export function parseFilters(sp: Params): WoFilters {
   const question = param(sp, QUESTION_PARAM) === "1";
   const raw = param(sp, "status");
   const group = GROUPS[raw];
-  if (group) return { q, status: raw, statuses: group.statuses, shop, fromShop, question };
-  if (ALL_STATUSES.includes(raw as WoStatus)) return { q, status: raw, statuses: [raw as WoStatus], shop, fromShop, question };
-  return { q, status: "", statuses: null, shop, fromShop, question };
+  if (group) return { q, status: raw, statuses: group.statuses, shop, fromShop, question, condemned: false };
+  if (ALL_STATUSES.includes(raw as WoStatus)) return { q, status: raw, statuses: [raw as WoStatus], shop, fromShop, question, condemned: false };
+  if (raw === CONDEMNED) return { q, status: raw, statuses: null, shop, fromShop, question, condemned: true };
+  return { q, status: "", statuses: null, shop, fromShop, question, condemned: false };
 }
 
 /** Query string for links that keep the current filters ("" when there are none). */
@@ -95,7 +103,11 @@ const MAX_FLAGGED = 200;
  * and an async function would otherwise run it.
  */
 export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, columns: string) {
-  let list = supabase.from("work_orders").select(columns).order("created_at", { ascending: false }).order("id");
+  // Condemned: an inner join on the condemned components keeps only the orders that have one
+  // (under its own name, so the row's own component list stays complete).
+  const select = f.condemned ? `${columns}, condemned_components:work_order_components!inner(id)` : columns;
+  let list = supabase.from("work_orders").select(select).order("created_at", { ascending: false }).order("id");
+  if (f.condemned) list = list.eq("condemned_components.result", "condemned");
   if (f.statuses) list = f.statuses.length === 1 ? list.eq("status", f.statuses[0]) : list.in("status", f.statuses);
   if (f.shop === IN_HOUSE) {
     const { data: inHouse } = await supabase.from("affiliates").select("id").eq("is_in_house", true).maybeSingle();

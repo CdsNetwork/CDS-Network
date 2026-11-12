@@ -136,15 +136,15 @@ describe("supabaseIntakeStore thread lookups", () => {
     const { supabaseIntakeStore } = await import("@/lib/intake/supabase-store");
     const { client, selects } = threadClient({
       work_orders: [
-        { id: "wo-1", customer_id: "c1", wo_number: 101370, location_id: "l1", unit_number: "284177", created_at: "2026-10-27T17:43:00Z", inbound_emails: [{ subject: "***Ryder***" }] },
-        { id: "wo-2", customer_id: "c1", wo_number: 101371, location_id: null, unit_number: null, created_at: "2026-10-27T18:00:00Z", inbound_emails: [] },
+        { id: "wo-1", customer_id: "c1", wo_number: 101370, status: "dispatched", location_id: "l1", unit_number: "284177", created_at: "2026-10-27T17:43:00Z", inbound_emails: [{ subject: "***Ryder***" }] },
+        { id: "wo-2", customer_id: "c1", wo_number: 101371, status: "cancelled", location_id: null, unit_number: null, created_at: "2026-10-27T18:00:00Z", inbound_emails: [] },
       ],
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const orders = await supabaseIntakeStore(client as any).recentOrders!("c1", "2026-10-13T00:00:00Z");
     expect(orders).toEqual([
-      { id: "wo-1", woNumber: 101370, locationId: "l1", unitNumber: "284177", createdAt: "2026-10-27T17:43:00Z", subject: "***Ryder***" },
-      { id: "wo-2", woNumber: 101371, locationId: null, unitNumber: null, createdAt: "2026-10-27T18:00:00Z", subject: null },
+      { id: "wo-1", woNumber: 101370, locationId: "l1", unitNumber: "284177", createdAt: "2026-10-27T17:43:00Z", status: "dispatched", subject: "***Ryder***" },
+      { id: "wo-2", woNumber: 101371, locationId: null, unitNumber: null, createdAt: "2026-10-27T18:00:00Z", status: "cancelled", subject: null },
     ]);
     expect(selects.work_orders).toContain("inbound_emails!inbound_emails_work_order_id_fkey(subject)");
   });

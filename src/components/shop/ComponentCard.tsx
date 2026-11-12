@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ActionButton, ActionForm } from "./ActionForm";
-import { componentLabel, type ActionState, type ComponentRow } from "./types";
+import { componentLabel, measurementsRequired, type ActionState, type ComponentRow } from "./types";
 
 const fmt = (v: number | null) => (v === null ? "" : String(v));
 
@@ -60,8 +60,8 @@ export function ComponentCard({
   deleteAction: (prev: ActionState) => Promise<ActionState>;
 }) {
   const isEgr = c.component_type === "EGR";
-  const measured = c.component_type === "DPF" || c.component_type === "DOC";
   const [result, setResult] = useState(c.result ?? "");
+  const measured = measurementsRequired(c.component_type, result);
   const [wBefore, setWBefore] = useState(fmt(c.weight_before_g));
   const [wAfter, setWAfter] = useState(fmt(c.weight_after_g));
 

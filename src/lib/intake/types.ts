@@ -131,7 +131,8 @@ export type IgnoreKind = "reply" | "invoice" | "carrier" | "security" | "cds_sen
  * A reply or forward of a request that already has a work order: found by the thread
  * (In-Reply-To), or by the same location and unit, or the same subject, on a recent open order.
  */
-export type ThreadReference = { work_order_id: string; wo_number: number | null; via: "thread" | "unit" | "subject" };
+/** cancelled: the order was cancelled; the reply is noted on it and the order stays cancelled. */
+export type ThreadReference = { work_order_id: string; wo_number: number | null; via: "thread" | "unit" | "subject"; cancelled?: boolean };
 
 /** Fields read from the templates (and XPO free text) beyond the original set. */
 export type DetailFields = {

@@ -57,7 +57,7 @@ export function memoryStore(options: { failDraft?: boolean } = {}) {
     },
     async recentOrders(customerId, since) {
       return [...orders.entries()]
-        .filter(([, o]) => o.params.p_customer === customerId && o.createdAt >= since && !["cancelled", "invoiced"].includes(o.status))
+        .filter(([, o]) => o.params.p_customer === customerId && o.createdAt >= since && o.status !== "invoiced")
         .sort(([, a], [, b]) => b.createdAt.localeCompare(a.createdAt))
         .map(([id, o]) => ({
           id,
@@ -65,6 +65,7 @@ export function memoryStore(options: { failDraft?: boolean } = {}) {
           locationId: o.params.p_location,
           unitNumber: o.params.p_unit_number,
           createdAt: o.createdAt,
+          status: o.status,
           subject: rows.get(o.params.p_email)?.email.subject ?? null,
         }));
     },

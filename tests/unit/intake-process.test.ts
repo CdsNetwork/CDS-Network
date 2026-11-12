@@ -212,6 +212,48 @@ describe("replies and forwards on a request that already has a work order", () =
     expect(rows.get(out.id)?.parsed?.confidence_label).toBe("high");
   });
 
+  // Reported by CDS 2026-11-12: replies on the thread of a cancelled order made new drafts.
+  it("links a reply on the thread of a cancelled order to that order, makes no draft and keeps it cancelled", async () => {
+    const { store, drafts, rows, orders } = memoryStore();
+    const first = await ingestEmail(store, request, { source: "webhook", llm: null });
+    orders.get(first.workOrderId!)!.status = "cancelled";
+    await ingestEmail(store, dispatchAnswer, { source: "webhook", llm: null });
+
+    const out = await ingestEmail(store, reply(), { source: "webhook", llm: null });
+    expect(out).toMatchObject({ status: "ignored", workOrderId: null });
+    expect(out.message).toBe("Reply on the thread of cancelled work order 101370: no new draft, the order stays cancelled.");
+    expect(drafts).toHaveLength(1);
+    const parsed = rows.get(out.id)?.parsed;
+    expect(parsed?.ignore_kind).toBe("thread_reply");
+    expect(parsed?.thread_reference).toEqual({ work_order_id: first.workOrderId, wo_number: 101370, via: "thread", cancelled: true });
+    expect(parsed?.reply_without_order).toBeFalsy();
+    expect(orders.get(first.workOrderId!)!.status).toBe("cancelled");
+  });
+
+  it("links a reply without a stored thread to a recent cancelled order of the same location and unit", async () => {
+    const { store, drafts, rows, orders } = memoryStore();
+    const first = await ingestEmail(store, request, { source: "webhook", llm: null });
+    orders.get(first.workOrderId!)!.status = "cancelled";
+    const out = await ingestEmail(store, reply({ inReplyTo: "<not-stored@ryder.example>", subject: `RE: ${request.subject}` }), { source: "webhook", llm: null });
+    expect(out).toMatchObject({ status: "ignored", message: "Reply on the thread of cancelled work order 101370: no new draft, the order stays cancelled." });
+    expect(rows.get(out.id)?.parsed?.thread_reference).toMatchObject({ work_order_id: first.workOrderId, via: "unit", cancelled: true });
+    expect(drafts).toHaveLength(1);
+  });
+
+  it("prefers an open order for the same unit over the cancelled order of the thread", async () => {
+    const { store, drafts, rows, orders } = memoryStore();
+    const first = await ingestEmail(store, request, { source: "webhook", llm: null });
+    orders.get(first.workOrderId!)!.status = "cancelled";
+    await ingestEmail(store, dispatchAnswer, { source: "webhook", llm: null });
+    // CDS made the job again as a new order for the same unit.
+    const again = await ingestEmail(store, { ...request, messageId: "<req-again@ryder.example>", receivedAt: "2026-10-27T17:58:00Z" }, { source: "webhook", llm: null });
+    expect(again.status).toBe("converted");
+    const out = await ingestEmail(store, reply(), { source: "webhook", llm: null });
+    expect(out).toMatchObject({ status: "ignored", message: "Reply on the thread of work order 101371: no new draft." });
+    expect(rows.get(out.id)?.parsed?.thread_reference).toEqual({ work_order_id: again.workOrderId, wo_number: 101371, via: "unit" });
+    expect(drafts).toHaveLength(2);
+  });
+
   it("makes the draft anyway when CDS forces it", async () => {
     const { store, drafts } = memoryStore();
     await ingestEmail(store, request, { source: "webhook", llm: null });

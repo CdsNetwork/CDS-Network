@@ -121,6 +121,14 @@ export type Option = { id: string; label: string };
  */
 export type CatalogOption = Option & { category: string; hint: string; keywords?: string };
 
+/**
+ * Whether a component's pressure and weight are required: a DPF or DOC is measured, unless the
+ * shop condemned it (a condemned filter is not measured).
+ */
+export function measurementsRequired(type: ComponentType, result: string | null): boolean {
+  return (type === "DPF" || type === "DOC") && result !== "condemned";
+}
+
 export function componentLabel(c: Pick<ComponentRow, "component_type" | "seq">): string {
   return `${c.component_type} #${c.seq}`;
 }

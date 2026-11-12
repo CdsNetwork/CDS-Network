@@ -1,8 +1,10 @@
 /**
- * Shop accepts a job (20261111080000_shop_accept_activity.sql): accepting marks the order
- * "New from shop" (shop_activity 'accepted') like a shop note, file or failure, and CDS
- * opening the order clears it. A shop's later change of the pickup window would be 'eta';
- * CDS's own changes of the status or the pickup window never flag the order.
+ * Shop accepts a job. 20261111080000_shop_accept_activity.sql marked the order "New from shop"
+ * on accept; since 20261112020000_no_new_label_on_accept.sql (CDS, 2026-11-12) it does not,
+ * because the acceptance email with the ETA already reaches dispatch@. Accepting sets the
+ * pickup window in the same update, so that is no 'eta' either. Shop notes, files and failures
+ * after the accept still flag the order; CDS's own changes of the status or the pickup window
+ * never do.
  *
  * Fixtures are created with the service role under a per-run id and removed afterwards.
  */
@@ -59,7 +61,7 @@ afterAll(async () => {
 }, 120_000);
 
 describe("Shop accepts a job", () => {
-  it("a pickup job accepted with a pickup window is New from shop until CDS opens it", async () => {
+  it("a pickup job accepted with a pickup window is not New from shop", async () => {
     const wo = await workOrder("A-1", "pickup");
     expect(await activity(wo)).toBeNull();
     await must(accept(wo, "10-12"));
@@ -67,16 +69,22 @@ describe("Shop accepts a job", () => {
       status: "accepted",
       pickup_window: "10-12",
     });
-    expect(await activity(wo)).toEqual({ is_new: true, shop_activity: "accepted" });
-
-    await must(cds.client.rpc("cds_mark_work_order_seen", { p_work_order: wo }));
-    expect(await activity(wo)).toEqual({ is_new: false, shop_activity: "accepted" });
+    expect(await activity(wo)).toBeNull();
   });
 
-  it("a shipping job accepted without a window is New from shop too", async () => {
+  it("a shipping job accepted without a window is not New from shop either", async () => {
     const wo = await workOrder("A-2", "shipping");
     await must(accept(wo, null));
-    expect(await activity(wo)).toEqual({ is_new: true, shop_activity: "accepted" });
+    expect(await activity(wo)).toBeNull();
+  });
+
+  it("a shop note after the accept still makes it New from shop until CDS opens it", async () => {
+    const wo = await workOrder("A-6", "pickup");
+    await must(accept(wo, "12-14"));
+    await must(shopLogin.client.from("work_order_notes").insert({ work_order_id: wo, body: "Picked up tomorrow" }));
+    expect(await activity(wo)).toEqual({ is_new: true, shop_activity: "note" });
+    await must(cds.client.rpc("cds_mark_work_order_seen", { p_work_order: wo }));
+    expect(await activity(wo)).toEqual({ is_new: false, shop_activity: "note" });
   });
 
   it("the accept is logged as the 'accept' event the dispatch@ email is keyed on", async () => {

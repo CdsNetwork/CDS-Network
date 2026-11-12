@@ -225,14 +225,14 @@ export function supabaseIntakeStore(client: SupabaseClient, actorId: string | nu
     async recentOrders(customerId, since): Promise<RecentOrder[]> {
       const { data, error } = await client
         .from("work_orders")
-        .select("id, wo_number, location_id, unit_number, created_at, inbound_emails!inbound_emails_work_order_id_fkey(subject)")
+        .select("id, wo_number, status, location_id, unit_number, created_at, inbound_emails!inbound_emails_work_order_id_fkey(subject)")
         .eq("customer_id", customerId)
         .gte("created_at", since)
-        .not("status", "in", "(cancelled,invoiced)")
+        .not("status", "in", "(invoiced)")
         .order("created_at", { ascending: false })
         .limit(500);
       if (error) throw new Error(error.message);
-      type Row = { id: string; wo_number: number; location_id: string | null; unit_number: string | null; created_at: string; inbound_emails: { subject: string | null }[] | { subject: string | null } | null };
+      type Row = { id: string; wo_number: number; status: string; location_id: string | null; unit_number: string | null; created_at: string; inbound_emails: { subject: string | null }[] | { subject: string | null } | null };
       return ((data ?? []) as unknown as Row[]).map((r) => {
         const email = Array.isArray(r.inbound_emails) ? r.inbound_emails[0] : r.inbound_emails;
         return {
@@ -241,6 +241,7 @@ export function supabaseIntakeStore(client: SupabaseClient, actorId: string | nu
           locationId: r.location_id,
           unitNumber: r.unit_number,
           createdAt: r.created_at,
+          status: r.status,
           subject: email?.subject ?? null,
         };
       });
