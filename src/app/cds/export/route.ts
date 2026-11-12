@@ -1,6 +1,7 @@
 import { one } from "@/components/cds-wo/util";
 import { filteredWorkOrders, financialsFor, parseFilters } from "@/components/cds-wo/woFilters";
 import { requireCds } from "@/lib/auth";
+import { internalStatusLabel } from "@/lib/internal-status";
 import { date, dateTime, STATUS_LABEL, woLabel, type WoStatus } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
@@ -18,6 +19,7 @@ type Row = {
   po_number: string | null;
   customers: { name: string } | { name: string }[] | null;
   affiliates: { display_name: string } | { display_name: string }[] | null;
+  work_order_internal: { internal_status: string | null } | { internal_status: string | null }[] | null;
 };
 
 /** One CSV field: quoted when needed; text that a spreadsheet would run as a formula is prefixed. */
@@ -39,7 +41,7 @@ export async function GET(request: Request) {
   const supabase = await createClient();
 
   const columns =
-    "id, wo_number, status, created_at, location_label, unit_number, po_number, customers(name), affiliates(display_name)";
+    "id, wo_number, status, created_at, location_label, unit_number, po_number, customers(name), affiliates(display_name), work_order_internal(internal_status)";
   const rows: Row[] = [];
   for (let from = 0; from < MAX_ROWS; from += PAGE) {
     const { query } = await filteredWorkOrders(supabase, filters, columns);
@@ -70,6 +72,7 @@ export async function GET(request: Request) {
     "PO",
     "Shop",
     "Status",
+    "Internal status",
     "Shop Payable",
     "Customer Subtotal",
     "Margin",
@@ -88,6 +91,7 @@ export async function GET(request: Request) {
         field(r.po_number),
         field(one(r.affiliates)?.display_name),
         field(STATUS_LABEL[r.status] ?? r.status),
+        field(internalStatusLabel(one(r.work_order_internal)?.internal_status)),
         tbd ? "TBD" : field(amount(f?.shop_subtotal), false),
         field(amount(f?.customer_subtotal), false),
         tbd ? "TBD" : field(amount(f?.margin), false),

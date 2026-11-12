@@ -398,7 +398,7 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
         <h3>Components Received</h3>
         <p className="small">
           Add every DPF, DOC, SCR or EGR actually received, one item per component. DPF and DOC need pressure and weight
-          before and after; EGR coolers are Pass / Fail only. Every required field must be filled in before completion.
+          before and after; EGR coolers are Pass / Condemned only. Every required field must be filled in before completion.
         </p>
         {editable && (
           <ActionForm
@@ -523,7 +523,7 @@ function ComponentSummary({ component: c }: { component: ComponentRow }) {
       ["Weight Removed", removed],
     );
   }
-  rows.push(["Result", c.result ? (isEgr && c.result === "failed" ? "Fail" : COMPONENT_RESULT_LABEL[c.result]) : "-"]);
+  rows.push(["Result", c.result ? (COMPONENT_RESULT_LABEL[c.result] ?? c.result) : "-"]);
   if (c.result_note) rows.push(["Reason", c.result_note]);
   return (
     <div className="component">

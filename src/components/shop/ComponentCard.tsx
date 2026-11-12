@@ -69,7 +69,7 @@ export function ComponentCard({
     wBefore !== "" && wAfter !== "" && Number.isFinite(Number(wBefore) - Number(wAfter))
       ? `${Math.round((Number(wBefore) - Number(wAfter)) * 10) / 10} g`
       : "";
-  const needsReason = result === "failed" || result === "condemned";
+  const needsReason = result === "condemned";
   const key = (f: string) => `c-${c.id}-${f}`;
 
   return (
@@ -153,19 +153,18 @@ export function ComponentCard({
           )}
           <div className="field">
             <label htmlFor={key("result")}>
-              {isEgr ? "Result (Pass / Fail)" : "Component Result"} <span className="req">*</span>
+              {isEgr ? "Result (Pass / Condemned)" : "Component Result"} <span className="req">*</span>
             </label>
             <select id={key("result")} name="result" value={result} onChange={(e) => setResult(e.target.value)}>
               <option value="">Select result...</option>
               {isEgr ? (
                 <>
                   <option value="passed">Pass</option>
-                  <option value="failed">Fail</option>
+                  <option value="condemned">Condemned</option>
                 </>
               ) : (
                 <>
                   <option value="cleaned">Cleaned Successfully</option>
-                  <option value="failed">Failed</option>
                   <option value="condemned">Condemned</option>
                 </>
               )}
@@ -184,7 +183,7 @@ export function ComponentCard({
               <strong>Damage / Condition Photo *</strong>{" "}
               {photoCount > 0
                 ? `${photoCount} photo${photoCount === 1 ? "" : "s"} linked to ${componentLabel(c)}.`
-                : `At least one photo is required for failed or condemned components. Add it under Photos & Attachments with "Linked component" set to ${componentLabel(c)}.`}
+                : `At least one photo is required for condemned components. Add it under Photos & Attachments with "Linked component" set to ${componentLabel(c)}.`}
             </p>
           </div>
         )}

@@ -36,8 +36,19 @@ describe("CDS work order list", () => {
   it("has Date received right after WO, and a Logistics column", () => {
     expect(page).toMatch(/<th>WO<\/th>\s*<th>Date received<\/th>/);
     expect(page).toMatch(/<th>Logistics<\/th>/);
-    expect(page).toMatch(/work_order_internal\(inbound_emails\(received_at\)\)/);
+    expect(page).toMatch(/work_order_internal\(inbound_emails\(received_at\), internal_status(, qb_invoice_number)?\)/);
     expect(page).toMatch(/fulfillment/);
     expect(page).toMatch(/colSpan=\{12\}/);
+  });
+
+  it("shows CDS's internal status as a badge in the Status column, with no new column (2026-11-12)", () => {
+    expect(page).toMatch(/internalStatusLabel\(one\(r\.work_order_internal\)\?\.internal_status\)/);
+    expect(page).toMatch(/className="badge internal"/);
+  });
+
+  it("marks an order invoiced in QuickBooks while the shop is still working (2026-11-12)", () => {
+    expect(page).toMatch(/work_order_internal\(inbound_emails\(received_at\), internal_status, qb_invoice_number\)/);
+    expect(page).toMatch(/invoicedEarly/);
+    expect(page).toMatch(/Invoiced \{/);
   });
 });

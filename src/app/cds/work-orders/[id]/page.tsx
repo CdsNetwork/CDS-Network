@@ -28,6 +28,8 @@ import {
 } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
 import { orderTaxExempt, TAX_FROZEN_STATUSES, taxLabel, taxSummary, type TaxFlags } from "@/lib/tax";
+import { invoiceLocked, movesToInvoiced } from "@/lib/invoice-lock";
+import { INTERNAL_STATUSES, INTERNAL_STATUS_LABEL } from "@/lib/internal-status";
 import {
   ATTACHMENT_CATEGORY_LABEL,
   CATEGORY_LABEL,
@@ -77,6 +79,7 @@ import {
   deleteCdsAttachment,
   deleteWorkOrder,
   deleteInternalNote,
+  setInternalStatus,
   setQuestionPending,
   setLineShopRate,
   deleteNote,
@@ -148,6 +151,7 @@ type Internal = {
   invoiced_at: string | null;
   qb_invoice_id: string | null;
   qb_invoice_number: string | null;
+  internal_status: string | null;
   profiles: MaybeOne<{ full_name: string }>;
 };
 
@@ -352,7 +356,10 @@ function Milestone2() {
   return <span className="small"> Milestone 2</span>;
 }
 
-/** Customer invoice in QuickBooks: create it when Ready to Invoice, show it once invoiced. */
+/**
+ * Customer invoice in QuickBooks: CDS creates it at any status but cancelled (@/lib/invoice-lock),
+ * and it shows once recorded, also while the shop is still working on the order.
+ */
 function InvoicePanel({
   woId,
   status,
@@ -379,7 +386,7 @@ function InvoicePanel({
   if (status === "invoiced" || invoice?.qbInvoiceId) {
     return (
       <section className="section panel-invoice">
-        <h3>Invoiced</h3>
+        <h3>{status === "invoiced" ? "Invoiced" : "Invoiced in QuickBooks"}</h3>
         {invoice?.qbInvoiceId ? (
           <p>
             QuickBooks invoice <b>{invoice.qbInvoiceNumber ?? `id ${invoice.qbInvoiceId}`}</b>
@@ -388,20 +395,28 @@ function InvoicePanel({
         ) : (
           <p className="small">No QuickBooks invoice is recorded for this order.</p>
         )}
+        {status !== "invoiced" && (
+          <p className="small">
+            The shop has not completed the job yet. The order moves to Invoiced when it does. Lines, prices, tax and the
+            customer are locked so they match the invoice.
+          </p>
+        )}
         {emailButton}
       </section>
     );
   }
 
+  const done = movesToInvoiced(status);
+  const heading = status === "ready_to_invoice" ? "Ready to Invoice" : "Customer invoice";
   const pending = invoice?.pendingQb ?? null;
   if (pending) {
     const name = pending.number ?? `id ${pending.id}`;
     return (
       <section className="section panel-invoice">
-        <h3>Ready to Invoice</h3>
+        <h3>{heading}</h3>
         <div className="notice warning" role="status">
-          QuickBooks invoice <b>{name}</b> was created in QuickBooks {dateTime(pending.at)}, but the work order was not marked
-          Invoiced. Record it below; no second invoice is created.
+          QuickBooks invoice <b>{name}</b> was created in QuickBooks {dateTime(pending.at)}, but it is not recorded on the work
+          order. Record it below; no second invoice is created.
         </div>
         <ActionForm
           action={createQuickBooksInvoice.bind(null, woId)}
@@ -419,7 +434,7 @@ function InvoicePanel({
   const warnings = invoice?.result.warnings ?? [];
   return (
     <section className="section panel-invoice">
-      <h3>Ready to Invoice</h3>
+      <h3>{heading}</h3>
       {loadError && <div className="notice danger">The invoice details could not be loaded. Reload the page.</div>}
       {qbo && !qbo.connected ? (
         <div className="notice warning">
@@ -432,8 +447,11 @@ function InvoicePanel({
       ) : (
         <>
           <p className="small">
-            Work is complete. This creates the customer invoice in QuickBooks
+            {done ? "Work is complete. " : ""}This creates the customer invoice in QuickBooks
             {qbo?.companyName ? ` (${qbo.companyName})` : ""}; QuickBooks calculates the sales tax from the ship-to address.
+            {done
+              ? ""
+              : " The shop has not completed the job yet: the order keeps its status and moves to Invoiced when the shop completes it. Lines, prices, tax and the customer are then locked."}
           </p>
           {problems.length > 0 && (
             <div className="notice warning" role="status">
@@ -464,7 +482,11 @@ function InvoicePanel({
             pendingLabel="Creating invoice..."
             buttonClass="btn btn-blue"
             disabled={problems.length > 0 || loadError}
-            confirmText="Create the customer invoice in QuickBooks and mark this work order Invoiced?"
+            confirmText={
+              done
+                ? "Create the customer invoice in QuickBooks and mark this work order Invoiced?"
+                : "Create the customer invoice in QuickBooks now? Lines, prices, tax and the customer are locked from then on, and the order moves to Invoiced when the shop completes it."
+            }
           />
         </>
       )}
@@ -498,7 +520,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase
         .from("work_order_internal")
         .select(
-          "source, review_reason, routing_notes, internal_notes, order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, qb_invoice_id, qb_invoice_number, profiles(full_name)",
+          "source, review_reason, routing_notes, internal_notes, order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, qb_invoice_id, qb_invoice_number, internal_status, profiles(full_name)",
         )
         .eq("work_order_id", id)
         .maybeSingle(),
@@ -578,11 +600,15 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   } | null;
   const questionOpen = Boolean(question?.question_pending);
 
-  // QuickBooks: only for orders that are ready to invoice or invoiced.
+  // QuickBooks: the customer invoice can be created at any status but cancelled, and is shown
+  // once recorded (@/lib/invoice-lock).
+  const qbInvoiceId = (internalRes.data as { qb_invoice_id: string | null } | null)?.qb_invoice_id ?? null;
+  const invoiceLockedNow = invoiceLocked(wo.status, qbInvoiceId);
+  const showInvoice = wo.status !== "cancelled" || qbInvoiceId !== null;
   let qbo: QboStatus | null = null;
   let invoice: InvoiceState | null = null;
   let invoiceLoadError = false;
-  if (wo.status === "ready_to_invoice" || wo.status === "invoiced") {
+  if (showInvoice) {
     try {
       [qbo, invoice] = await Promise.all([qboStatus(supabase), loadInvoice(supabase, id)]);
     } catch {
@@ -672,10 +698,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       ),
     ];
   }
-  const linesLocked = LINES_LOCKED_STATUSES.includes(wo.status);
+  // Lines are also locked once the order has a QuickBooks invoice, so they match the invoice.
+  const linesLocked = LINES_LOCKED_STATUSES.includes(wo.status) || invoiceLockedNow;
   // Items priced per line (Misc. hardware) come from the shop's invoice, so CDS can add and
   // remove them after the work is completed, until the order is invoiced.
-  const perLineOpen = !["invoiced", "cancelled"].includes(wo.status);
+  const perLineOpen = !invoiceLockedNow && wo.status !== "cancelled";
+  // Shop rates are shop pay, not on the customer invoice: open until the order is invoiced.
+  const rateOpen = !["invoiced", "cancelled"].includes(wo.status);
   // Misc. hardware: the amount on the shop's invoice. Priced on the order (reconditioned and
   // new filters): CDS enters the customer price, the shop rate is entered on the line.
   const perLineItems = catalog.filter((c) => c.price_per_line && c.pass_through);
@@ -683,8 +712,10 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const isPerLine = (l: Line) => one(l.catalog_items)?.price_per_line === true;
   const isPassThrough = (l: Line) => isPerLine(l) && one(l.catalog_items)?.pass_through !== false;
   // A line with no shop rate yet (TBD): CDS enters it until the order is invoiced.
-  const canSetRate = (l: Line) => perLineOpen && l.shop_unit_rate === null && !isPassThrough(l);
+  const canSetRate = (l: Line) => rateOpen && l.shop_unit_rate === null && !isPassThrough(l);
   const removeColumn = !linesLocked || (perLineOpen && lines.some(isPerLine));
+  // An order with a QuickBooks invoice keeps its tax like an invoiced one.
+  const taxStatus = invoiceLockedNow ? "invoiced" : wo.status;
   const tbd = fin?.supplier_cost_tbd ?? false;
   const approver = one(internal?.profiles ?? null);
 
@@ -692,7 +723,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   // exemption: the same rule as the QuickBooks invoice (src/lib/tax.ts). Invoiced and
   // cancelled orders show what is stored on them, whatever the customer's exemption is now.
   const customerTaxExempt = orderTaxExempt({
-    status: wo.status,
+    status: taxStatus,
     customerTaxExempt: (billingRes.data as { tax_exempt: boolean } | null)?.tax_exempt ?? false,
     taxSource: internal?.tax_source ?? null,
   });
@@ -1032,7 +1063,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                         pkg={packageForShipment(s, packageDefaults)}
                       />
                     </div>
-                    {!labels.has(s.id) && !s.tracking_number && REMOVABLE_LABEL_STATUSES.includes(s.label_status) && wo.status !== "invoiced" && (
+                    {!labels.has(s.id) && !s.tracking_number && REMOVABLE_LABEL_STATUSES.includes(s.label_status) && !invoiceLockedNow && (
                       <div style={{ marginTop: 8 }}>
                         <ActionForm
                           action={removeShipment.bind(null, wo.id, s.id)}
@@ -1122,7 +1153,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                         {c.component_type} #{c.seq}
                       </b>
                       {c.result ? (
-                        <span className={`tag${c.result === "failed" || c.result === "condemned" ? "" : " green"}`}>
+                        <span className={`tag${c.result === "condemned" ? "" : " green"}`}>
                           {COMPONENT_RESULT_LABEL[c.result] ?? c.result}
                         </span>
                       ) : (
@@ -1738,7 +1769,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
             </section>
           )}
 
-          {(wo.status === "ready_to_invoice" || wo.status === "invoiced") && (
+          {showInvoice && (
             <InvoicePanel woId={wo.id} status={wo.status} qbo={qbo} invoice={invoice} loadError={invoiceLoadError} />
           )}
 
@@ -1763,7 +1794,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   confirmText="Take this order back from the shop and return it to review?"
                 />
               )}
-              {wo.status !== "invoiced" && wo.status !== "cancelled" && (
+              {!invoiceLockedNow && wo.status !== "cancelled" && (
                 <details>
                   <summary className="small link">Cancel work order</summary>
                   <ActionForm
@@ -1783,6 +1814,21 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               {["accepted", "picked_up", "in_process"].includes(wo.status) && (
                 <p className="small">The shop moves this order forward. CDS can act again once the shop completes it.</p>
               )}
+              <ActionForm action={setInternalStatus.bind(null, wo.id)} submitLabel="Save" buttonClass="btn btn-secondary btn-small" inline>
+                <div style={{ flex: "1 1 180px" }}>
+                  <label className="small" htmlFor="internal-status">
+                    Internal status (CDS only)
+                  </label>
+                  <select id="internal-status" name="internal_status" className="input" defaultValue={internal?.internal_status ?? ""}>
+                    <option value="">Blank</option>
+                    {INTERNAL_STATUSES.map((v) => (
+                      <option key={v} value={v}>
+                        {INTERNAL_STATUS_LABEL[v]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </ActionForm>
             </div>
           </section>
 
@@ -1816,8 +1862,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
             </div>
             {customerTaxExempt && (
               <div className="notice">
-                {TAX_FROZEN_STATUSES.includes(wo.status) ? (
-                  <>No sales tax on this order: {customer?.name ?? "the customer"} was tax exempt when it was {wo.status}.</>
+                {TAX_FROZEN_STATUSES.includes(taxStatus) ? (
+                  <>No sales tax on this order: {customer?.name ?? "the customer"} was tax exempt when it was {taxStatus}.</>
                 ) : (
                   <>
                     {customer?.name ?? "This customer"} is tax exempt: no sales tax on this order, and every line is invoiced
@@ -1827,7 +1873,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </div>
             )}
             {internal && !customerTaxExempt && (
-              <ActionForm action={updateTax.bind(null, wo.id)} submitLabel="Save Tax Settings" buttonClass="btn btn-secondary" disabled={wo.status === "invoiced"}>
+              <ActionForm action={updateTax.bind(null, wo.id)} submitLabel="Save Tax Settings" buttonClass="btn btn-secondary" disabled={invoiceLockedNow}>
                 <div className="field" style={{ marginTop: 12 }}>
                   <label htmlFor="tax-rate">Sales tax rate (%)</label>
                   <input id="tax-rate" name="tax_rate" className="input" type="number" min="0" max="99.999" step="0.001" defaultValue={rate} />

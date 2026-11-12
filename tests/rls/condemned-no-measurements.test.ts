@@ -3,8 +3,8 @@
  * 20261112010000_condemned_no_measurements.sql).
  *
  * shop_complete_work_order no longer asks for pressure and weight on a DPF or DOC the shop
- * marked condemned. A cleaned or failed one without them is still refused, and a condemned
- * one still needs its photo.
+ * marked condemned. A cleaned one without them is still refused, and a condemned one still
+ * needs its photo. ("Failed" is gone since 20261112050000_condemned_replaces_failed.sql.)
  *
  * Fixtures are created with the service role under a per-run id and removed afterwards.
  */
@@ -23,7 +23,7 @@ async function insertOne<T extends { id: string }>(table: string, row: Record<st
 }
 
 /** An in-process job with one DPF that has no measurements, with the given result. */
-async function jobWithDpf(unit: string, result: "cleaned" | "failed" | "condemned", photo: boolean): Promise<string> {
+async function jobWithDpf(unit: string, result: "cleaned" | "condemned", photo: boolean): Promise<string> {
   const wo = await insertOne("work_orders", {
     customer_id: customer,
     location_label: LABEL,
@@ -88,12 +88,6 @@ describe("completing a job with a filter that has no measurements", () => {
     expect(after.status).toBe("completed");
   });
 
-  it("a failed DPF without pressure or weight is still refused", async () => {
-    const wo = await jobWithDpf("C-2", "failed", true);
-    const { error } = await complete(wo);
-    expect(error?.message).toMatch(/pressure before and after, and weight before and after/);
-  });
-
   it("a cleaned DPF without pressure or weight is still refused", async () => {
     const wo = await jobWithDpf("C-3", "cleaned", false);
     const { error } = await complete(wo);
@@ -103,6 +97,6 @@ describe("completing a job with a filter that has no measurements", () => {
   it("a condemned DPF still needs its photo", async () => {
     const wo = await jobWithDpf("C-4", "condemned", false);
     const { error } = await complete(wo);
-    expect(error?.message).toMatch(/add a photo for a failed or condemned part/);
+    expect(error?.message).toMatch(/add a photo for a condemned part/);
   });
 });

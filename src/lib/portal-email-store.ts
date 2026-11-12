@@ -29,7 +29,7 @@ const ENTITY = "portal_email";
 type One<T> = T | T[] | null;
 const first = <T>(v: One<T>): T | null => (Array.isArray(v) ? (v[0] ?? null) : v);
 
-const RESULT_LABEL: Record<string, string> = { failed: "Failed", condemned: "Condemned" };
+const RESULT_LABEL: Record<string, string> = { condemned: "Condemned" };
 
 /** "DPF, part 2871891, serial SN-4471" (the parts that are known). */
 export function componentLabel(c: { component_type: string; manufacturer?: string | null; part_number?: string | null; serial_number?: string | null }): string {

@@ -18,10 +18,7 @@ export function isNewFromShop(activity: Activity | Activity[] | undefined): bool
   return Boolean(one(activity ?? null)?.is_new);
 }
 
-/** "Failed" when any component failed, else "Condemned" when one was condemned, else null. */
-export function failedMark(components: { result: string | null }[] | null | undefined): "Failed" | "Condemned" | null {
-  const results = (components ?? []).map((c) => c.result);
-  if (results.includes("failed")) return "Failed";
-  if (results.includes("condemned")) return "Condemned";
-  return null;
+/** "Condemned" when a component was condemned ("Failed" is no longer a result), else null. */
+export function failedMark(components: { result: string | null }[] | null | undefined): "Condemned" | null {
+  return (components ?? []).some((c) => c.result === "condemned") ? "Condemned" : null;
 }

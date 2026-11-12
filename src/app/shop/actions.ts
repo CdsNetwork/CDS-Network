@@ -214,13 +214,14 @@ export async function saveComponent(
   const isEgr = type === "EGR";
 
   const result = text(fd, "result") || null;
-  const allowed = isEgr ? ["passed", "failed"] : ["cleaned", "failed", "condemned"];
+  // "Failed" is no longer a result: CDS uses Condemned only (2026-11-12).
+  const allowed = isEgr ? ["passed", "condemned"] : ["cleaned", "condemned"];
   if (result && !allowed.includes(result)) {
-    return { error: isEgr ? "EGR result is Pass or Fail." : "Choose Cleaned Successfully, Failed or Condemned." };
+    return { error: isEgr ? "EGR result is Pass or Condemned." : "Choose Cleaned Successfully or Condemned." };
   }
   const note = text(fd, "result_note");
-  if ((result === "failed" || result === "condemned") && !note) {
-    return { error: "Enter the failure / condemn reason." };
+  if (result === "condemned" && !note) {
+    return { error: "Enter the condemn reason." };
   }
 
   const dpBefore = isEgr ? null : decimal(fd, "dp_before");
@@ -248,10 +249,10 @@ export async function saveComponent(
     p_weight_before_g: wBefore,
     p_weight_after_g: wAfter,
     p_result: result,
-    p_result_note: result === "failed" || result === "condemned" ? note : null,
+    p_result_note: result === "condemned" ? note : null,
   });
-  // A failure emails dispatch@ once (the store finds this component's latest failure).
-  if (!error && (result === "failed" || result === "condemned")) emailCdsAfter("failed", workOrderId, componentId);
+  // A condemned component emails dispatch@ once (the store finds this component's latest one).
+  if (!error && result === "condemned") emailCdsAfter("failed", workOrderId, componentId);
   return done(error);
 }
 

@@ -364,19 +364,23 @@ describe("cds_mark_invoiced", () => {
     ]);
 
     const again = await mark(cds.client, wo, `T${runId}2`);
-    expect(again.error?.message).toMatch(/Ready to Invoice/);
+    expect(again.error?.message).toMatch(/already invoiced/);
     const same = await mark(cds.client, wo, id);
     expect(same.error).not.toBeNull();
   });
 
-  it("refuses an order that is not Ready to Invoice", async () => {
-    for (const status of ["completed", "delivered", "cancelled"]) {
+  it("moves a completed or delivered order to Invoiced too, and refuses a cancelled one (invoice any time, 2026-11-12)", async () => {
+    for (const status of ["completed", "delivered"]) {
       const wo = await workOrder(status, `QB-${status}`);
-      const { error } = await mark(cds.client, wo, `T${runId}${status}`);
-      expect(error?.message, status).toMatch(/Ready to Invoice/);
+      await must(mark(cds.client, wo, `T${runId}${status}`));
       const order = await must(admin.from("work_orders").select("status").eq("id", wo).single());
-      expect(order.status).toBe(status);
+      expect(order.status, status).toBe("invoiced");
     }
+    const wo = await workOrder("cancelled", "QB-cancelled");
+    const { error } = await mark(cds.client, wo, `T${runId}cancelled`);
+    expect(error?.message).toMatch(/cancelled/);
+    const order = await must(admin.from("work_orders").select("status").eq("id", wo).single());
+    expect(order.status).toBe("cancelled");
   });
 
   it("needs an invoice id, and the same QuickBooks invoice cannot go on two orders", async () => {

@@ -98,7 +98,7 @@ export function toRow(o: BackupOrder): Cell[] {
   const filters = o.components.filter((c) => c.type !== "EGR");
   const soot = filters.map((c) => c.weightRemovedG).filter((w): w is number => w != null);
   const failed = o.components
-    .filter((c) => c.result === "failed" || c.result === "condemned")
+    .filter((c) => c.result === "condemned")
     .map((c) => `${c.type} ${COMPONENT_RESULT_LABEL[c.result!] ?? c.result}${c.resultNote ? `: ${c.resultNote}` : ""}`);
 
   const row: Cell[] = [

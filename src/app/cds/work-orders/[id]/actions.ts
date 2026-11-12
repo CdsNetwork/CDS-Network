@@ -9,6 +9,8 @@ import { recordSync } from "@/lib/integration-sync";
 import { noteBody } from "@/lib/notes";
 import { passThroughInput, pricedLineInput, shopRateInput } from "@/lib/pass-through";
 import { emailCdsAfter } from "@/lib/portal-email-send";
+import { INTERNAL_STATUS_LABEL, parseInternalStatus } from "@/lib/internal-status";
+import { invoiceBlockReason, invoicedOutcome, invoiceLocked, qbInvoiceIdOf } from "@/lib/invoice-lock";
 import { createInvoice, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
 import { QboError } from "@/lib/qbo/client";
 import { loadInvoice } from "@/lib/qbo/invoice-input";
@@ -64,9 +66,15 @@ function optionalNumber(value: FormDataEntryValue | null): number | null {
   return Number(s);
 }
 
-async function currentStatus(supabase: Awaited<ReturnType<typeof createClient>>, woId: string) {
-  const { data } = await supabase.from("work_orders").select("status").eq("id", woId).maybeSingle();
-  return (data?.status as string | undefined) ?? null;
+/**
+ * The order's status, and whether it is locked by its customer invoice: invoiced, or it has a
+ * QuickBooks invoice while the shop is still working (@/lib/invoice-lock). Null when not found.
+ */
+async function orderState(supabase: Awaited<ReturnType<typeof createClient>>, woId: string) {
+  const { data } = await supabase.from("work_orders").select("status, work_order_internal(qb_invoice_id)").eq("id", woId).maybeSingle();
+  if (!data) return null;
+  const status = data.status as string;
+  return { status, invoiced: invoiceLocked(status, qbInvoiceIdOf(data.work_order_internal)) };
 }
 
 export async function dispatchWorkOrder(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -113,7 +121,7 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
   const supabase = await createClient();
   const { data: current, error: readError } = await supabase
     .from("work_orders")
-    .select("status, customer_id, location_id")
+    .select("status, customer_id, location_id, work_order_internal(qb_invoice_id)")
     .eq("id", woId)
     .maybeSingle();
   if (readError) return { error: "The work order could not be read. Try again." };
@@ -122,6 +130,10 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
 
   const customerChanged = customerId !== current.customer_id;
   const locationChanged = (locationId || null) !== current.location_id;
+  // The QuickBooks invoice is billed to this customer and location (the database refuses too).
+  if ((customerChanged || locationChanged) && invoiceLocked(current.status, qbInvoiceIdOf(current.work_order_internal))) {
+    return { error: "The customer and location cannot change after the order is invoiced in QuickBooks." };
+  }
   if (customerChanged) {
     const [cust, lines] = await Promise.all([
       supabase.from("customers").select("id").eq("id", customerId).maybeSingle(),
@@ -277,8 +289,8 @@ export async function removeShipment(woId: string, shipmentId: string): Promise<
   const profile = await requireCds();
   if (!isUuid(woId) || !isUuid(shipmentId)) return { error: "Shipment not found." };
   const supabase = await createClient();
-  const [status, shipRes, labelRes] = await Promise.all([
-    currentStatus(supabase, woId),
+  const [order, shipRes, labelRes] = await Promise.all([
+    orderState(supabase, woId),
     supabase.from("shipments").select("carrier, tracking_number, label_status").eq("id", shipmentId).eq("work_order_id", woId).maybeSingle(),
     supabase
       .from("shipment_labels")
@@ -287,8 +299,8 @@ export async function removeShipment(woId: string, shipmentId: string): Promise<
       .eq("status", "active"),
   ]);
   if (shipRes.error || labelRes.error) return { error: "The shipment could not be read. Try again." };
-  if (!status || !shipRes.data) return { error: "Shipment not found." };
-  if (status === "invoiced") return { error: "Shipments cannot be removed after the order is invoiced." };
+  if (!order || !shipRes.data) return { error: "Shipment not found." };
+  if (order.invoiced) return { error: "Shipments cannot be removed after the order is invoiced." };
   if (labelRes.count) return { error: "This shipment has a label. Void the label first, then remove the shipment." };
   if (shipRes.data.tracking_number) return { error: "This shipment has a tracking number, so it cannot be removed." };
   if (!REMOVABLE_LABEL_STATUSES.includes(shipRes.data.label_status)) {
@@ -328,8 +340,10 @@ export async function addLine(woId: string, _prev: ActionState, formData: FormDa
   if (cost !== null && (!Number.isFinite(cost) || cost < 0)) return { error: "CDS cost must be a number of zero or more." };
 
   const supabase = await createClient();
-  const status = await currentStatus(supabase, woId);
-  if (!status) return { error: "Work order not found." };
+  const order = await orderState(supabase, woId);
+  if (!order) return { error: "Work order not found." };
+  const { status } = order;
+  if (order.invoiced) return { error: "Lines cannot change once the order is invoiced." };
   if (LINES_LOCKED_STATUSES.includes(status)) return { error: "Lines cannot change once the work is completed." };
 
   const { error } = await supabase.from("work_order_lines").insert({
@@ -357,8 +371,10 @@ export async function removeLine(woId: string, lineId: string): Promise<ActionSt
   const profile = await requireCds();
   if (!isUuid(woId) || !isUuid(lineId)) return { error: "Line not found." };
   const supabase = await createClient();
-  const status = await currentStatus(supabase, woId);
-  if (!status) return { error: "Work order not found." };
+  const order = await orderState(supabase, woId);
+  if (!order) return { error: "Work order not found." };
+  const { status } = order;
+  if (order.invoiced) return { error: "Lines cannot change once the order is invoiced." };
   if (LINES_LOCKED_STATUSES.includes(status)) return { error: "Lines cannot change once the work is completed." };
 
   const { data, error } = await supabase
@@ -410,6 +426,43 @@ export async function setQuestionPending(woId: string, pending: boolean, _prev: 
   });
   if (error) return { error: error.message };
   return done(woId, pending ? "Marked Question Pending." : "Question Pending cleared.");
+}
+
+/**
+ * Sets or clears the CDS-only internal status (@/lib/internal-status). It never changes the
+ * order's status; shops never see it (work_order_internal) nor the event logged for it.
+ */
+export async function setInternalStatus(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const parsed = parseInternalStatus(formData.get("internal_status"));
+  if ("error" in parsed) return { error: parsed.error };
+  const supabase = await createClient();
+  const { data: current, error: readError } = await supabase
+    .from("work_order_internal")
+    .select("internal_status")
+    .eq("work_order_id", woId)
+    .maybeSingle();
+  if (readError) return { error: "The work order could not be read. Try again." };
+  if (!current) return { error: "Work order not found." };
+  const label = parsed.value ? INTERNAL_STATUS_LABEL[parsed.value] : null;
+  if ((current.internal_status ?? null) === parsed.value) return { ok: label ? `Internal status is ${label}.` : "Internal status is blank.", at: Date.now() };
+
+  const { data, error } = await supabase
+    .from("work_order_internal")
+    .update({ internal_status: parsed.value })
+    .eq("work_order_id", woId)
+    .select("work_order_id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Work order not found." };
+  await supabase.from("work_order_events").insert({
+    work_order_id: woId,
+    actor_id: profile.id,
+    event_type: "internal_status",
+    message: label ? `Internal status set to ${label}` : "Internal status cleared",
+    shop_visible: false,
+  });
+  return done(woId, label ? `Internal status set to ${label}.` : "Internal status cleared.");
 }
 
 /** A note the assigned shop sees too (work_order_notes); not the CDS-only internal notes. */
@@ -698,9 +751,9 @@ export async function updateTax(woId: string, _prev: ActionState, formData: Form
   const rate = Number(text(formData.get("tax_rate")) || "0");
   if (!Number.isFinite(rate) || rate < 0 || rate >= 100) return { error: "Tax rate must be a percentage between 0 and 100." };
   const supabase = await createClient();
-  const status = await currentStatus(supabase, woId);
-  if (!status) return { error: "Work order not found." };
-  if (status === "invoiced") return { error: "Tax cannot change after the order is invoiced." };
+  const order = await orderState(supabase, woId);
+  if (!order) return { error: "Work order not found." };
+  if (order.invoiced) return { error: "Tax cannot change after the order is invoiced." };
   const { error } = await supabase
     .from("work_order_internal")
     .update({
@@ -746,10 +799,12 @@ async function logSync(
 }
 
 /**
- * Creates the customer invoice in QuickBooks and marks the work order Invoiced.
+ * Creates the customer invoice in QuickBooks and records it on the work order. Any time except
+ * on a cancelled or invoiced order (@/lib/invoice-lock): a done order moves to Invoiced; an
+ * order the shop is still working on keeps its status and moves to Invoiced on completion.
  *
  * Never creates a second invoice for a work order:
- *   * nothing is sent once the order has a QuickBooks invoice or is no longer Ready to Invoice;
+ *   * nothing is sent once the order has a QuickBooks invoice, is invoiced or is cancelled;
  *   * the request carries Intuit's requestid (the work order id), so a retry after a timeout,
  *     a lost response or a failed portal update gets the original invoice back instead of
  *     a new one. Only after QuickBooks has refused a request outright (HTTP 4xx, so nothing
@@ -772,7 +827,8 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
     return { error: `This work order already has QuickBooks invoice ${invoice.qbInvoiceNumber ?? invoice.qbInvoiceId}.` };
   }
   if (invoice.pendingQb) return recordPendingInvoice(supabase, woId, invoice.status, invoice.pendingQb);
-  if (invoice.status !== "ready_to_invoice") return { error: "Only a work order that is Ready to Invoice can be invoiced." };
+  const blocked = invoiceBlockReason(invoice.status, null);
+  if (blocked) return { error: blocked };
   if (!invoice.result.ok) return { error: `Fix these first: ${invoice.result.problems.join(" ")}` };
   const { payload, itemText } = invoice.result;
 
@@ -842,7 +898,7 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   }
   return done(
     woId,
-    [`QuickBooks invoice ${created.DocNumber ?? created.Id} created. The work order is now Invoiced.`, ...notes].join(" "),
+    [`QuickBooks invoice ${created.DocNumber ?? created.Id} created.`, invoicedOutcome(invoice.status), ...notes].join(" "),
   );
 }
 
@@ -852,9 +908,9 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
  */
 async function recordPendingInvoice(supabase: Supabase, woId: string, status: string, pending: PendingQbInvoice): Promise<ActionState> {
   const name = pending.number ?? `id ${pending.id}`;
-  if (status !== "ready_to_invoice") {
+  if (invoiceBlockReason(status, null)) {
     return {
-      error: `QuickBooks invoice ${name} was created for this work order but is not recorded on it, and the order is no longer Ready to Invoice. Check the invoice in QuickBooks and void it there if it should not exist.`,
+      error: `QuickBooks invoice ${name} was created for this work order but is not recorded on it, and the order is now ${status === "cancelled" ? "cancelled" : "invoiced"}. Check the invoice in QuickBooks and void it there if it should not exist.`,
     };
   }
   const { error } = await supabase.rpc("cds_mark_invoiced", {
@@ -868,7 +924,7 @@ async function recordPendingInvoice(supabase: Supabase, woId: string, status: st
       error: `QuickBooks invoice ${name} exists, but the work order could not be updated (${error.message}). Click again to finish; no second invoice is created.`,
     };
   }
-  return done(woId, `QuickBooks invoice ${name} (created earlier) is now recorded. The work order is now Invoiced.`);
+  return done(woId, `QuickBooks invoice ${name} (created earlier) is now recorded. ${invoicedOutcome(status)}`);
 }
 
 type DeletedWorkOrder = {

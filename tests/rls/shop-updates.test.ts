@@ -142,12 +142,12 @@ describe("New from shop", () => {
     expect(await activity(wo)).toMatchObject({ is_new: true, shop_activity: "file" });
   });
 
-  it("a component marked failed flags the order and records one failure per change", async () => {
+  it("a component marked condemned flags the order and records one failure per change", async () => {
     const wo = await workOrder("U-4");
     const comp = await component(wo);
     expect(await isNew(wo)).toBe(false);
 
-    await must(setResult(wo, comp, "failed", "Cracked substrate"));
+    await must(setResult(wo, comp, "condemned", "Cracked substrate"));
     expect(await activity(wo)).toMatchObject({ is_new: true, shop_activity: "failed" });
     const failures = await must(admin.from("component_failures").select("*").eq("work_order_id", wo));
     expect(failures).toHaveLength(1);
@@ -155,18 +155,18 @@ describe("New from shop", () => {
       component_id: comp,
       affiliate_id: shop,
       component_type: "DPF",
-      result: "failed",
+      result: "condemned",
       result_note: "Cracked substrate",
       failed_by: shopLogin.id,
     });
 
-    // Saving it again unchanged is no new failure; cleaned and failed again is.
-    await must(setResult(wo, comp, "failed", "Cracked substrate, more photos"));
+    // Saving it again unchanged is no new failure; cleaned and condemned again is.
+    await must(setResult(wo, comp, "condemned", "Cracked substrate, more photos"));
     expect(await must(admin.from("component_failures").select("id").eq("work_order_id", wo))).toHaveLength(1);
     await must(setResult(wo, comp, "cleaned", null));
     await must(setResult(wo, comp, "condemned", "Melted"));
     expect(await must(admin.from("component_failures").select("result").eq("work_order_id", wo).order("at"))).toEqual([
-      { result: "failed" },
+      { result: "condemned" },
       { result: "condemned" },
     ]);
   });

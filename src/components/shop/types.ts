@@ -72,7 +72,7 @@ export type ComponentRow = {
   dp_after: number | null;
   weight_before_g: number | null;
   weight_after_g: number | null;
-  result: "cleaned" | "passed" | "failed" | "condemned" | null;
+  result: "cleaned" | "passed" | "condemned" | null;
   result_note: string | null;
 };
 

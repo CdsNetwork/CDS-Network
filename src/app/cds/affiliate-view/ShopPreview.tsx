@@ -366,7 +366,7 @@ export function ShopPreview({ data }: { data: PreviewData }) {
           }
           rows.push([
             "Result",
-            c.result ? (isEgr && c.result === "failed" ? "Fail" : COMPONENT_RESULT_LABEL[c.result] ?? c.result) : "-",
+            c.result ? (COMPONENT_RESULT_LABEL[c.result] ?? c.result) : "-",
           ]);
           if (c.result_note) rows.push(["Reason", c.result_note]);
           return (

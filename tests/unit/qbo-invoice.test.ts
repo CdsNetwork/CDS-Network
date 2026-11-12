@@ -297,7 +297,7 @@ describe("measurement lines", () => {
     weightBeforeG: null,
     weightAfterG: null,
     weightRemovedG: null,
-    result: "failed",
+    result: "condemned",
   };
   const measurements: MeasurementMappings = {
     customer: { DPF: { qboItemId: "201", qboItemName: "DPF MEASUREMENTS & INFO - First Student" } },
@@ -318,8 +318,8 @@ describe("measurement lines", () => {
     expect(measurementDescription({ ...doc, result: null })).toBe("Manufacturer: Detroit\nSerial Number: SN-2");
   });
 
-  it("describes an EGR with manufacturer, part, serial and Pass or Fail only", () => {
-    expect(measurementDescription(egr)).toBe("Manufacturer: Volvo\nPart Number: EGR-9\nSerial Number: SN-3\nResult: Fail");
+  it("describes an EGR with manufacturer, part, serial and Pass or Condemned only", () => {
+    expect(measurementDescription(egr)).toBe("Manufacturer: Volvo\nPart Number: EGR-9\nSerial Number: SN-3\nResult: Condemned");
     expect(measurementDescription({ ...egr, result: "passed", dpBefore: 5 })).toBe(
       "Manufacturer: Volvo\nPart Number: EGR-9\nSerial Number: SN-3\nResult: Pass",
     );
@@ -354,7 +354,7 @@ describe("measurement lines", () => {
       expect(l.SalesItemLineDetail.Qty).toBe(1);
       expect(l.SalesItemLineDetail.TaxCodeRef.value).toBe("NON");
     }
-    expect(extra[2].Description).toBe("Manufacturer: Volvo\nPart Number: EGR-9\nSerial Number: SN-3\nResult: Fail");
+    expect(extra[2].Description).toBe("Manufacturer: Volvo\nPart Number: EGR-9\nSerial Number: SN-3\nResult: Condemned");
   });
 
   it("skips a component type without a measurement item and warns, without blocking the invoice", () => {

@@ -80,7 +80,7 @@ export type ItemMappings = {
 };
 
 export type ComponentType = "DPF" | "DOC" | "SCR" | "EGR";
-export type ComponentResult = "cleaned" | "passed" | "failed" | "condemned";
+export type ComponentResult = "cleaned" | "passed" | "condemned";
 
 export type InvoiceComponent = {
   seq: number;
@@ -156,7 +156,6 @@ const DESCRIPTION_MAX = 4000;
 const RESULT_TEXT: Record<ComponentResult, string> = {
   cleaned: "Cleaned Successfully",
   passed: "Pass",
-  failed: "Fail",
   condemned: "Condemned",
 };
 
@@ -187,7 +186,7 @@ function reading(n: number | null | undefined): string | null {
  * The description of a component's measurement line, for example
  * "Manufacturer: X\nPart Number: Y\n...\nResult: Cleaned Successfully", one reading per line
  * (QuickBooks keeps the line breaks). Empty fields are left out; EGR coolers have no
- * measurements, only Pass or Fail.
+ * measurements, only Pass or Condemned.
  */
 export function measurementDescription(c: InvoiceComponent): string {
   const egr = c.componentType === "EGR";
@@ -210,7 +209,7 @@ export function measurementDescription(c: InvoiceComponent): string {
           ["Weight after", grams(c.weightAfterG)],
           ["Weight removed", grams(removed)],
         ] as [string, string | null][])),
-    ["Result", c.result && (!egr || c.result === "passed" || c.result === "failed") ? RESULT_TEXT[c.result] : null],
+    ["Result", c.result ? RESULT_TEXT[c.result] : null],
   ];
   const text = fields
     .filter((f): f is [string, string] => !!f[1])

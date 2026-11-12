@@ -59,7 +59,7 @@ const VERB: Record<PortalEvent, { subject: string; sentence: string }> = {
   sent: { subject: "sent to", sentence: "was sent to" },
   declined: { subject: "declined by", sentence: "was declined by" },
   finished: { subject: "finished by", sentence: "was finished by" },
-  failed: { subject: "marked failed by", sentence: "was marked failed by" },
+  failed: { subject: "marked condemned by", sentence: "was marked condemned by" },
   accepted: { subject: "accepted by", sentence: "was accepted by" },
 };
 
@@ -74,7 +74,7 @@ export function buildPortalEmail(event: PortalEvent, d: PortalEmailDetails): { s
   const shop = d.shop?.trim() || "a shop";
   const wo = `WO ${d.woNumber}`;
   const failed = event === "failed";
-  const result = d.result?.trim() || "Failed";
+  const result = d.result?.trim() || "Condemned";
   const componentType = d.component?.split(",")[0]?.trim() || "Component";
   const accepted = event === "accepted";
   const eta = accepted ? d.eta?.trim() || null : null;
@@ -189,7 +189,7 @@ export async function notifyWorkOrderEvent(
     store: PortalEmailStore;
     env?: Record<string, string | undefined>;
     fetchImpl?: typeof fetch;
-    /** "failed" only: the component the shop marked failed or condemned. */
+    /** "failed" only: the component the shop marked condemned. */
     componentId?: string;
   },
 ): Promise<NotifyResult> {

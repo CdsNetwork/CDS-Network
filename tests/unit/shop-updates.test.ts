@@ -27,11 +27,6 @@ const COMPONENT = "33333333-3333-4333-8333-333333333333";
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
 describe("failedMark", () => {
-  it("shows Failed when any component failed, even if another was cleaned", () => {
-    expect(failedMark([{ result: "cleaned" }, { result: "failed" }])).toBe("Failed");
-    expect(failedMark([{ result: "condemned" }, { result: "failed" }])).toBe("Failed");
-  });
-
   it("shows Condemned when the only bad result is condemned", () => {
     expect(failedMark([{ result: "condemned" }, { result: null }])).toBe("Condemned");
   });
@@ -112,14 +107,14 @@ const details = (over: Partial<PortalEmailDetails> = {}): PortalEmailDetails => 
   declineReason: null,
   shopReference: null,
   component: "DPF, part 2871891, serial SN-4471",
-  result: "Failed",
+  result: "Condemned",
   failureNote: "Cracked substrate, see photos",
   ...over,
 });
 
 describe("Failure email", () => {
   it("names the work order, the component and the shop in a [Portal] subject", () => {
-    expect(buildPortalEmail("failed", details()).subject).toBe("[Portal] WO 101924 DPF marked Failed by Enviromotive");
+    expect(buildPortalEmail("failed", details()).subject).toBe("[Portal] WO 101924 DPF marked Condemned by Enviromotive");
     expect(buildPortalEmail("failed", details({ result: "Condemned", shop: null })).subject).toBe(
       "[Portal] WO 101924 DPF marked Condemned by a shop",
     );
@@ -127,11 +122,11 @@ describe("Failure email", () => {
 
   it("has the customer, location, component, reason and a link to the work order", () => {
     const { text, html } = buildPortalEmail("failed", details({ failureNote: "Cracked <badly>" }));
-    expect(text).toContain("A component on WO 101924 was marked Failed by Enviromotive.");
+    expect(text).toContain("A component on WO 101924 was marked Condemned by Enviromotive.");
     expect(text).toContain("Customer: First Student, Inc");
     expect(text).toContain("Location: FS 12723 Anaheim");
     expect(text).toContain("Component: DPF, part 2871891, serial SN-4471");
-    expect(text).toContain("Result: Failed");
+    expect(text).toContain("Result: Condemned");
     expect(text).toContain("Reason: Cracked <badly>");
     expect(text).toContain(`https://cds-network-portal.vercel.app/cds/work-orders/${WO}`);
     expect(html).toContain("Cracked &lt;badly&gt;");

@@ -24,6 +24,7 @@ import {
 } from "@/components/cds-wo/woFilters";
 import { requireCds } from "@/lib/auth";
 import { deletedMessage } from "@/lib/work-order-delete";
+import { internalStatusLabel } from "@/lib/internal-status";
 import {
   dateReceived,
   FULFILLMENT_LABEL,
@@ -52,13 +53,16 @@ type WoRow = {
   affiliates: Shop | Shop[];
 };
 
+type ListInternal = {
+  inbound_emails: { received_at: string | null } | { received_at: string | null }[] | null;
+  internal_status: string | null;
+  qb_invoice_number?: string | null;
+};
+
 type ListRow = WoRow & {
   created_at: string;
   fulfillment: string;
-  work_order_internal:
-    | { inbound_emails: { received_at: string | null } | { received_at: string | null }[] | null }
-    | { inbound_emails: { received_at: string | null } | { received_at: string | null }[] | null }[]
-    | null;
+  work_order_internal: ListInternal | ListInternal[] | null;
   work_order_shop_activity: { is_new: boolean | null } | { is_new: boolean | null }[] | null;
   work_order_components: { result: string | null }[] | null;
   work_order_questions: { question_pending: boolean | null; note: string | null } | { question_pending: boolean | null; note: string | null }[] | null;
@@ -96,10 +100,10 @@ const WO_COLUMNS =
 
 /**
  * The table also shows when the request came in, how the part moves, whether the shop did
- * something CDS has not opened yet, a failed or condemned component, and a pending customer
- * question.
+ * something CDS has not opened yet, a failed or condemned component, a pending customer
+ * question, and CDS's own internal status.
  */
-const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at)), work_order_shop_activity(is_new), work_order_components(result), work_order_questions(question_pending, note)`;
+const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at), internal_status, qb_invoice_number), work_order_shop_activity(is_new), work_order_components(result), work_order_questions(question_pending, note)`;
 
 /** Unit and PO numbers up to this length stay on one line in the table. */
 const ID_NOWRAP = 22;
@@ -440,6 +444,9 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   const fromShopNew = isNewFromShop(r.work_order_shop_activity);
                   const failed = failedMark(r.work_order_components);
                   const questionOpen = isQuestionPending(r.work_order_questions);
+                  const internalStatus = internalStatusLabel(one(r.work_order_internal)?.internal_status);
+                  // Invoiced in QuickBooks before the shop finished: the status moves to Invoiced when the shop completes.
+                  const invoicedEarly = r.status !== "invoiced" ? one(r.work_order_internal)?.qb_invoice_number ?? null : null;
                   return (
                     <tr key={r.id} className={questionOpen ? styles.questionRow : undefined}>
                       <td className="nowrap">
@@ -479,6 +486,20 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                         {failed && (
                           <div>
                             <span className="badge rejected">{failed}</span>
+                          </div>
+                        )}
+                        {invoicedEarly && (
+                          <div>
+                            <span className="badge internal" title="Invoiced in QuickBooks; moves to Invoiced when the shop completes the job">
+                              Invoiced {invoicedEarly}
+                            </span>
+                          </div>
+                        )}
+                        {internalStatus && (
+                          <div>
+                            <span className="badge internal" title="Internal status (CDS only)">
+                              {internalStatus}
+                            </span>
                           </div>
                         )}
                       </td>

@@ -78,7 +78,6 @@ export const SHIP_STATUS_LABEL: Record<string, string> = {
 export const COMPONENT_RESULT_LABEL: Record<string, string> = {
   cleaned: "Cleaned Successfully",
   passed: "Pass",
-  failed: "Failed",
   condemned: "Condemned",
 };
 

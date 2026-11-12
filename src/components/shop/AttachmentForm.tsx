@@ -199,7 +199,7 @@ export function AttachmentForm({ workOrderId, components, actions, variant = "sh
                 </option>
               ))}
             </select>
-            <span className="small">Failed or condemned components need a photo linked here.</span>
+            <span className="small">Condemned components need a photo linked here.</span>
           </div>
         )}
         {!cds && (
