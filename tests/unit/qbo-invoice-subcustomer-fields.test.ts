@@ -94,6 +94,7 @@ function lookups(over: Partial<QboLookups> = {}): QboLookups & { calls: string[]
       ],
     })),
     recentInvoiceCustomFields: vi.fn(async () => []),
+    getItems: vi.fn(async () => []),
     ...over,
   };
 }

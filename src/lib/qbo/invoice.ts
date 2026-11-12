@@ -132,9 +132,22 @@ export type QboInvoicePayload = {
   CustomerMemo?: { value: string };
 };
 
+/**
+ * A billable line that has neither the customer's own description nor a qbo_item_descriptions
+ * text, so it shows our item name for now. When the invoice is sent, the QuickBooks item's own
+ * sales description takes the name's place (./invoice-qbo), as on an invoice made by hand.
+ */
+export type ItemTextLine = {
+  /** Index of the line in payload.Line. */
+  index: number;
+  qboItemId: string;
+  line: Pick<InvoiceLine, "name" | "description">;
+  alias?: CustomerAlias;
+};
+
 /** Problems block the invoice; warnings do not (they are shown next to the button). */
 export type BuildResult =
-  | { ok: true; payload: QboInvoicePayload; warnings: string[] }
+  | { ok: true; payload: QboInvoicePayload; warnings: string[]; itemText: ItemTextLine[] }
   | { ok: false; problems: string[]; warnings: string[] };
 
 /** QuickBooks limit for a line description. */
@@ -208,7 +221,8 @@ export function measurementDescription(c: InvoiceComponent): string {
 
 /**
  * The invoice line description: the customer's own description (with its part number), else
- * the invoice text of the QuickBooks item (qbo_item_descriptions), else our item name; then
+ * the invoice text of the QuickBooks item (qbo_item_descriptions, or the item's own sales
+ * description in QuickBooks, see ItemTextLine), else our item name; then
  * the text entered on the line, and the customer's part number in front when there is one.
  */
 export function lineDescription(
@@ -277,6 +291,7 @@ export function buildInvoicePayload(
 
   const unmapped = new Set<string>();
   const qboLines: QboInvoiceLine[] = [];
+  const itemText: ItemTextLine[] = [];
   for (const l of lines) {
     const forCustomer = itemMap.customer[l.catalogItemId];
     const forAll = itemMap.default[l.catalogItemId];
@@ -302,10 +317,14 @@ export function buildInvoicePayload(
       continue;
     }
     const unitPrice = Number(l.customerUnitPrice);
+    const alias = aliases[l.catalogItemId];
+    if (!(alias?.partNumber?.trim() && alias.description?.trim()) && !item.invoiceDescription?.trim()) {
+      itemText.push({ index: qboLines.length, qboItemId: item.qboItemId, line: { name: l.name, description: l.description }, alias });
+    }
     qboLines.push({
       DetailType: "SalesItemLineDetail",
       Amount: cents(l.qty * unitPrice),
-      Description: lineDescription(l, aliases[l.catalogItemId], item.invoiceDescription),
+      Description: lineDescription(l, alias, item.invoiceDescription),
       SalesItemLineDetail: {
         ItemRef: { value: item.qboItemId, name: item.qboItemName },
         Qty: l.qty,
@@ -362,5 +381,6 @@ export function buildInvoicePayload(
       ...(memo ? { CustomerMemo: { value: clip(memo, 1000) } } : {}),
     },
     warnings,
+    itemText,
   };
 }

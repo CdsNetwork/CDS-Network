@@ -95,6 +95,18 @@ export async function recentInvoiceCustomFields(api: QboApi): Promise<{ CustomFi
   return res.QueryResponse?.Invoice ?? [];
 }
 
+/**
+ * The items with these ids, in one query, for their own sales description (Item.Description),
+ * which QuickBooks puts on a line when CDS makes an invoice by hand.
+ */
+export async function getItems(api: QboApi, ids: string[]): Promise<{ Id: string; Name?: string; Description?: string }[]> {
+  if (!ids.length) return [];
+  const res = await qboRequest<{ QueryResponse?: { Item?: { Id: string; Name?: string; Description?: string }[] } }>(api, "GET", "query", {
+    query: { query: `select * from Item where Id in (${ids.map(qboQuoted).join(", ")}) maxresults ${PAGE}` },
+  });
+  return res.QueryResponse?.Item ?? [];
+}
+
 /** The QuickBooks calls the invoice-time lookups use (./invoice-qbo). */
 export function qboLookups(api: QboApi): QboLookups {
   return {
@@ -102,14 +114,24 @@ export function qboLookups(api: QboApi): QboLookups {
     listSubCustomers: (fqn) => listSubCustomers(api, fqn),
     salesFormsPrefs: () => salesFormsPrefs(api),
     recentInvoiceCustomFields: () => recentInvoiceCustomFields(api),
+    getItems: (ids) => getItems(api, ids),
   };
 }
 
 export type CreatedInvoice = { Id: string; DocNumber?: string; TotalAmt?: number };
 
-/** Creates the invoice. The same requestId never creates a second invoice. */
+/**
+ * Creates the invoice. The same requestId never creates a second invoice.
+ *
+ * include=enhancedAllCustomFields: without it QuickBooks silently drops custom fields of the
+ * newer experience (CDS's "PO Number" was dropped this way while "Fleet Number" was kept).
+ */
 export async function createInvoice(api: QboApi, payload: QboInvoicePayload, requestId: string): Promise<CreatedInvoice> {
-  const res = await qboRequest<{ Invoice?: CreatedInvoice }>(api, "POST", "invoice", { body: payload, requestId });
+  const res = await qboRequest<{ Invoice?: CreatedInvoice }>(api, "POST", "invoice", {
+    query: { include: "enhancedAllCustomFields" },
+    body: payload,
+    requestId,
+  });
   if (!res.Invoice?.Id) throw new Error("QuickBooks did not return the new invoice");
   return res.Invoice;
 }

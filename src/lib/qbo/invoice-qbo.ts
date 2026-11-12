@@ -3,17 +3,20 @@
  *   * the sub-customer for the work order's site (./sub-customer), billed with the parent's
  *     billing address while ShipAddr stays the site;
  *   * the DefinitionIds of the invoice custom fields "Fleet Number" and "PO Number"
- *     (./custom-fields).
- * Neither may stop the invoice: anything not found leaves today's invoice (billed to the
- * parent, no custom field) and adds a note that is shown to CDS and kept on the sync row.
+ *     (./custom-fields);
+ *   * the QuickBooks items' own sales descriptions, for lines that have no other invoice text
+ *     (ItemTextLine in ./invoice).
+ * None may stop the invoice: anything not found leaves today's invoice (billed to the
+ * parent, no custom field, our item names) and adds a note that is shown to CDS and kept on
+ * the sync row.
  * Only an expired or revoked token is passed on, so the caller can refresh it and retry.
  *
  * The QuickBooks calls are passed in (QboLookups, see ./api), so this file has no network
  * code of its own.
  */
 import type { createClient } from "@/lib/supabase/server";
-import type { QboInvoicePayload } from "./invoice";
-import { classicCustomFieldDefs, fillCustomFields, invoiceCustomFieldDefs, missingFields, type CustomFieldDef } from "./custom-fields";
+import { lineDescription, type ItemTextLine, type QboInvoicePayload } from "./invoice";
+import { classicCustomFieldDefs, fillCustomFields, invoiceCustomFieldDefs, type CustomFieldDef } from "./custom-fields";
 import { billAddrFrom, ownName, pickSubCustomer, siteNumberOf, type QboCustomerRecord } from "./sub-customer";
 
 export const FLEET_NUMBER_FIELD = "Fleet Number";
@@ -37,6 +40,8 @@ export type QboLookups = {
   salesFormsPrefs(): Promise<{ CustomField?: unknown[] } | null>;
   /** Recent invoices read with include=enhancedAllCustomFields. */
   recentInvoiceCustomFields(): Promise<{ CustomField?: { DefinitionId?: string; Name?: string }[] }[]>;
+  /** The items with these ids (one query), for their sales description. */
+  getItems(ids: string[]): Promise<{ Id: string; Description?: string }[]>;
 };
 
 export type ResolvedInvoice = {
@@ -95,24 +100,54 @@ async function resolveSubCustomer(
   return { note: `No QuickBooks sub-customer of ${name} has site number ${site}, so the invoice is billed to ${name}.` };
 }
 
-async function customFieldDefs(lookups: QboLookups, wanted: string[]): Promise<CustomFieldDef[]> {
-  const defs = classicCustomFieldDefs(await lookups.salesFormsPrefs());
-  if (!missingFields(defs, wanted).length) return defs;
+/**
+ * The definitions to fill, those learned from recent invoices first: their (enhanced) ids are
+ * the ones QuickBooks keeps when a classic and a newer field are sent together, and they have
+ * no 31-character limit. The classic ids from Preferences remain the fallback, for example
+ * in a company without invoices yet.
+ */
+async function customFieldDefs(lookups: QboLookups): Promise<CustomFieldDef[]> {
+  const classic = classicCustomFieldDefs(await lookups.salesFormsPrefs());
   try {
-    return [...defs, ...invoiceCustomFieldDefs(await lookups.recentInvoiceCustomFields())];
+    return [...invoiceCustomFieldDefs(await lookups.recentInvoiceCustomFields()), ...classic];
   } catch (e) {
     if (unauthorized(e)) throw e;
-    // Reading earlier invoices is a fallback only; the missing fields get their own note.
-    return defs;
+    // Without earlier invoices only the classic fields are known; the missing ones get their own note.
+    return classic;
   }
 }
 
-/** The invoice with its sub-customer and custom fields, and notes for whatever was left out. */
+/** Puts each QuickBooks item's own sales description on the lines that have no other text. */
+async function applyItemText(lookups: QboLookups, payload: QboInvoicePayload, itemText: ItemTextLine[]): Promise<string | null> {
+  if (!itemText.length) return null;
+  try {
+    const items = await lookups.getItems([...new Set(itemText.map((t) => t.qboItemId))]);
+    const text = new Map(items.map((i) => [i.Id, i.Description?.trim()]));
+    const lines = [...payload.Line];
+    for (const t of itemText) {
+      const description = text.get(t.qboItemId);
+      const line = lines[t.index];
+      if (!description || line?.SalesItemLineDetail.ItemRef.value !== t.qboItemId) continue;
+      lines[t.index] = { ...line, Description: lineDescription(t.line, t.alias, description) };
+    }
+    payload.Line = lines;
+    return null;
+  } catch (e) {
+    if (unauthorized(e)) throw e;
+    return `The QuickBooks item descriptions could not be read (${why(e)}), so the lines show our item names.`;
+  }
+}
+
+/**
+ * The invoice with its sub-customer, custom fields and item descriptions, and notes for
+ * whatever was left out.
+ */
 export async function resolveInvoiceQbo(
   lookups: QboLookups,
   base: QboInvoicePayload,
   target: InvoiceTarget,
   cachedSubCustomerId: string | null,
+  itemText: ItemTextLine[] = [],
 ): Promise<ResolvedInvoice> {
   const payload: QboInvoicePayload = { ...base };
   const notes: string[] = [];
@@ -140,10 +175,7 @@ export async function resolveInvoiceQbo(
   ].filter((v) => v.value?.trim());
   if (values.length) {
     try {
-      const defs = await customFieldDefs(
-        lookups,
-        values.map((v) => v.name),
-      );
+      const defs = await customFieldDefs(lookups);
       const filled = fillCustomFields(defs, values);
       if (filled.fields.length) payload.CustomField = filled.fields;
       for (const name of filled.missing) {
@@ -155,6 +187,9 @@ export async function resolveInvoiceQbo(
       notes.push(`The QuickBooks custom fields could not be read (${why(e)}), so ${values.map((v) => v.name).join(" and ")} are not filled.`);
     }
   }
+
+  const itemNote = await applyItemText(lookups, payload, itemText);
+  if (itemNote) notes.push(itemNote);
 
   return { payload, notes, subCustomer };
 }

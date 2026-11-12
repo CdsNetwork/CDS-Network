@@ -11,8 +11,14 @@
  *     https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/preferences
  *   * Custom fields of the newer experience are not in Preferences. Their DefinitionId (the
  *     "legacyIDV2" of the GraphQL custom field API) comes back on existing invoices read with
- *     include=enhancedAllCustomFields, so it is learned from recent invoices.
+ *     include=enhancedAllCustomFields, so it is learned from recent invoices. A classic field
+ *     has such an id too (CDS: "Fleet Number" is classic id 3 and enhanced id
+ *     2800000000000120140).
  *     https://developer.intuit.com/app/developer/qbo/docs/workflows/create-custom-fields
+ * The ids learned from invoices win over the classic ones, and the invoice is created with
+ * include=enhancedAllCustomFields (./api): sent with classic ids, or without that parameter,
+ * QuickBooks kept "Fleet Number" and silently dropped CDS's "PO Number" (enhanced only, id
+ * 513140). Enhanced values have no 31-character limit.
  * A field that cannot be found is left off the invoice with a note; it never stops the invoice.
  */
 
@@ -64,12 +70,6 @@ export function invoiceCustomFieldDefs(invoices: { CustomField?: InvoiceField[] 
     }
   }
   return [...seen.values()];
-}
-
-/** Names from `wanted` that no definition has. */
-export function missingFields(defs: CustomFieldDef[], wanted: string[]): string[] {
-  const have = new Set(defs.map((d) => fieldKey(d.name)));
-  return wanted.filter((w) => !have.has(fieldKey(w)));
 }
 
 /**

@@ -774,7 +774,7 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   if (invoice.pendingQb) return recordPendingInvoice(supabase, woId, invoice.status, invoice.pendingQb);
   if (invoice.status !== "ready_to_invoice") return { error: "Only a work order that is Ready to Invoice can be invoiced." };
   if (!invoice.result.ok) return { error: `Fix these first: ${invoice.result.problems.join(" ")}` };
-  const payload = invoice.result.payload;
+  const { payload, itemText } = invoice.result;
 
   const { count, error: countError } = await supabase
     .from("integration_sync")
@@ -786,12 +786,13 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   if (countError) return { error: "The QuickBooks history of this order could not be read. Try again." };
   const requestId = count ? `${woId}-r${count}` : woId;
 
-  // The site's sub-customer and the custom fields are looked up in QuickBooks now (see
-  // @/lib/qbo/invoice-qbo); what is not found is left out with a note, never an error.
+  // The site's sub-customer, the custom fields and the items' own descriptions are looked up
+  // in QuickBooks now (see @/lib/qbo/invoice-qbo); what is not found is left out with a note,
+  // never an error.
   const parentId = payload.CustomerRef.value;
   const cachedSub = await cachedSubCustomer(supabase, invoice.target.locationId, parentId);
   const send = async (api: Awaited<ReturnType<typeof qboApi>>) => {
-    const r = await resolveInvoiceQbo(qboLookups(api), payload, invoice.target, cachedSub);
+    const r = await resolveInvoiceQbo(qboLookups(api), payload, invoice.target, cachedSub, itemText);
     return { resolved: r, created: await createInvoice(api, r.payload, requestId) };
   };
 
