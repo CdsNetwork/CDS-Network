@@ -175,7 +175,7 @@ export function ComponentCard({
           <div className="notice warning">
             <div className="field">
               <label htmlFor={key("note")}>
-                Failure / Condemn Reason <span className="req">*</span>
+                Condemn Reason <span className="req">*</span>
               </label>
               <textarea id={key("note")} name="result_note" rows={2} required maxLength={2000} defaultValue={c.result_note ?? ""} />
             </div>
