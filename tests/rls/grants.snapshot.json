@@ -357,6 +357,10 @@
     "authenticated": "MAINTAIN,SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
+  "view public.work_order_list": {
+    "authenticated": "MAINTAIN,SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
   "view public.work_order_shop_deductions": {
     "authenticated": "MAINTAIN,SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"

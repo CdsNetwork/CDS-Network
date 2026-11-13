@@ -4,7 +4,7 @@ import { PeriodSelect } from "@/components/cds-wo/PeriodSelect";
 import { isQuestionPending, QUESTION_PARAM, questionTitle } from "@/components/cds-wo/question-pending";
 import { failedMark, isNewFromShop } from "@/components/cds-wo/shop-updates";
 import styles from "@/components/cds-wo/cds-wo.module.css";
-import { one, SHIPMENT_PROBLEM_STATUSES } from "@/components/cds-wo/util";
+import { one } from "@/components/cds-wo/util";
 import {
   ALL_STATUSES,
   CONDEMNED,
@@ -30,7 +30,6 @@ import {
   FULFILLMENT_LABEL,
   logisticsLabel,
   money,
-  SHIPMENT_STATUS_LABEL,
   STATUS_LABEL,
   woLabel,
   type WoStatus,
@@ -68,33 +67,6 @@ type ListRow = WoRow & {
   work_order_questions: { question_pending: boolean | null; note: string | null } | { question_pending: boolean | null; note: string | null }[] | null;
 };
 
-type AttentionWo = WoRow & {
-  updated_at: string;
-  work_order_internal: { review_reason: string | null } | { review_reason: string | null }[] | null;
-};
-
-type ProblemShipment = {
-  id: string;
-  carrier: string | null;
-  tracking_number: string | null;
-  status: string;
-  updated_at: string;
-  work_orders: WoRow | WoRow[] | null;
-};
-
-type AttentionItem = {
-  key: string;
-  red: boolean;
-  title: string;
-  wo: WoRow;
-  detail: string;
-  /** When the item last changed, for newest-first ordering. */
-  at: string;
-};
-
-/** Cards shown in Needs Attention; the rest are reachable through the table filter. */
-const ATTENTION_SHOWN = 12;
-
 const WO_COLUMNS =
   "id, wo_number, status, location_label, unit_number, po_number, customers(name), affiliates(display_name, is_in_house)";
 
@@ -131,29 +103,12 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
   if (range.from) invoicedQuery = invoicedQuery.gte("invoiced_at", range.from.toISOString());
   if (range.to) invoicedQuery = invoicedQuery.lt("invoiced_at", range.to.toISOString());
 
-  // Work order table query (same filters as the CSV export).
+  // Work order table query (same filters and order as the CSV export): most pressing status
+  // first, newest first within a status.
   const list = (await filteredWorkOrders(supabase, filters, LIST_COLUMNS)).query.limit(200);
 
-  // Declined jobs and pending reviews are fetched separately, newest first, so a burst
-  // of pending reviews can never push a declined job out of the queue.
-  const attentionQuery = (status: WoStatus) =>
-    supabase
-      .from("work_orders")
-      .select(`${WO_COLUMNS}, updated_at, work_order_internal(review_reason)`)
-      .eq("status", status)
-      .order("updated_at", { ascending: false })
-      .limit(100);
-
-  const [listRes, declinedRes, reviewRes, shipRes, inProgress, toInvoice, pendingReview, invoiced, shopsRes] = await Promise.all([
+  const [listRes, inProgress, toInvoice, pendingReview, invoiced, shopsRes] = await Promise.all([
     list,
-    attentionQuery("rejected_by_affiliate"),
-    attentionQuery("pending_review"),
-    supabase
-      .from("shipments")
-      .select(`id, carrier, tracking_number, status, updated_at, work_orders(${WO_COLUMNS})`)
-      .in("status", [...SHIPMENT_PROBLEM_STATUSES])
-      .order("updated_at", { ascending: false })
-      .limit(100),
     countOf(IN_PROGRESS),
     countOf(TO_INVOICE),
     countOf(["pending_review"]),
@@ -179,58 +134,14 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
     finError = e instanceof Error ? e.message : "unknown error";
   }
 
-  // Needs Attention items.
-  const attention: AttentionItem[] = [];
-  const attentionWos = [...(declinedRes.data ?? []), ...(reviewRes.data ?? [])] as unknown as AttentionWo[];
-  for (const wo of attentionWos) {
-    const reason = one(wo.work_order_internal)?.review_reason;
-    if (wo.status === "rejected_by_affiliate") {
-      attention.push({
-        key: `wo-${wo.id}`,
-        red: true,
-        title: "Declined by shop",
-        wo,
-        detail: reason || "The shop declined this job. Choose a shop and dispatch it again.",
-        at: wo.updated_at,
-      });
-    } else {
-      attention.push({
-        key: `wo-${wo.id}`,
-        red: false,
-        title: "Review required",
-        wo,
-        detail: reason || "A required routing or request field could not be validated automatically.",
-        at: wo.updated_at,
-      });
-    }
-  }
-  for (const s of (shipRes.data ?? []) as unknown as ProblemShipment[]) {
-    const wo = one(s.work_orders);
-    if (!wo || wo.status === "cancelled") continue;
-    attention.push({
-      key: `ship-${s.id}`,
-      red: true,
-      title: "Carrier delay / exception",
-      wo,
-      detail: `${s.carrier ?? "Carrier"} • ${SHIPMENT_STATUS_LABEL[s.status] ?? s.status} • ${
-        s.tracking_number ?? "no tracking #"
-      }. Customer update may be required.`,
-      at: s.updated_at,
-    });
-  }
-  // Red (declined jobs, carrier exceptions) first, then amber; newest first in each group.
-  attention.sort((a, b) => Number(b.red) - Number(a.red) || Date.parse(b.at) - Date.parse(a.at));
-  const shownAttention = attention.slice(0, ATTENTION_SHOWN);
-
   const kpis = [
-    { k: "Needs Attention", v: attention.length, sub: "CDS action or exception", href: "#attention" },
     { k: "In Progress", v: inProgress.count ?? 0, sub: "Shop / logistics moving", href: "/cds?status=in_progress#orders" },
     { k: "Ready to Invoice", v: toInvoice.count ?? 0, sub: "Work complete / billing next", href: "/cds?status=to_invoice#orders" },
     { k: `Invoiced: ${range.label}`, v: invoiced.count ?? 0, sub: "By invoice date, Pacific time", href: null },
     { k: "Pending Review", v: pendingReview.count ?? 0, sub: "Not sent to a shop yet", href: "/cds?status=pending_review#orders" },
   ];
 
-  const loadError = listRes.error?.message ?? declinedRes.error?.message ?? reviewRes.error?.message ?? shipRes.error?.message ?? finError;
+  const loadError = listRes.error?.message ?? finError;
   const keepForPeriod = filterQuery(filters).replace(/^\?/, "");
   const exportHref = `/cds/export${filterQuery(filters)}`;
 
@@ -240,7 +151,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
         <div className="title">
           <h1>Operations Dashboard</h1>
           <p>
-            Routine work stays in the background. Work the exception queue; completed activity shown for {range.label}.
+            Most pressing orders first in the table below; completed activity shown for {range.label}.
           </p>
         </div>
         <div style={{ display: "grid", gap: 8, width: 220 }}>
@@ -269,7 +180,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
       )}
       {loadError && <div className="notice danger">Could not load work orders: {loadError}</div>}
 
-      <div className="cards">
+      <div className="cards" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
         {kpis.map((m) => {
           const body = (
             <>
@@ -290,58 +201,6 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
         })}
       </div>
 
-      <section className="section" id="attention">
-        <div className="row between">
-          <div>
-            <h3 style={{ marginBottom: 4 }}>Needs Attention</h3>
-            <p className="small" style={{ margin: 0 }}>
-              Only work orders that need a CDS decision or exception handling appear here.
-            </p>
-          </div>
-          <span className="pill">
-            {attention.length} {attention.length === 1 ? "item" : "items"}
-          </span>
-        </div>
-        {attention.length === 0 ? (
-          <div className="notice">
-            <b>No exceptions.</b> Routine jobs are moving through the workflow without CDS intervention.
-          </div>
-        ) : (
-          <>
-            <div className="attentionGrid">
-              {shownAttention.map((a) => {
-                const customer = one(a.wo.customers)?.name ?? "Unknown customer";
-                const shop = one(a.wo.affiliates)?.display_name ?? "Not assigned";
-                return (
-                  <Link key={a.key} href={`/cds/work-orders/${a.wo.id}`} className={`attentionCard${a.red ? " red" : ""}`}>
-                    <div className="eyebrow">
-                      {a.title} • {woLabel(a.wo.wo_number)}
-                    </div>
-                    <div style={{ fontWeight: 750, margin: "6px 0" }}>
-                      {customer} - {a.wo.location_label}
-                    </div>
-                    <div className={`small ${styles.clamp3}`} style={{ color: "#3c4850" }} title={a.detail.length > 180 ? a.detail.slice(0, 600) : undefined}>
-                      {a.detail}
-                    </div>
-                    <div className="small" style={{ marginTop: 6 }}>
-                      Affiliate: {shop} • {STATUS_LABEL[a.wo.status]}
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-            {attention.length > shownAttention.length && (
-              <p className="small">
-                Showing {shownAttention.length} of {attention.length}, most urgent first.{" "}
-                <Link className="link" href="/cds?status=attention#orders">
-                  See all Pending Review and Declined orders
-                </Link>
-              </p>
-            )}
-          </>
-        )}
-      </section>
-
       <section className="section" id="orders">
         <h3>Work orders</h3>
         <Form action="/cds" className="toolbar" scroll={false}>
@@ -349,7 +208,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
             className="input search"
             name="q"
             defaultValue={q}
-            placeholder="Search WO, PO, unit, customer, location..."
+            placeholder="Search WO, PO, unit, customer, location, tracking #..."
             aria-label="Search work orders"
           />
           <select name="status" defaultValue={statusParam} style={{ maxWidth: 260 }} aria-label="Status">
@@ -516,7 +375,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
             </tbody>
           </table>
         </div>
-        {rows.length === 200 && <p className="small">Showing the newest 200. Narrow the search to find older orders.</p>}
+        {rows.length === 200 && <p className="small">Showing the first 200, most pressing first. Narrow the search to find the others.</p>}
       </section>
     </>
   );

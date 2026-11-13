@@ -55,7 +55,7 @@ th { overflow-wrap: normal; }
 .money, .bigAmount, .amount { flex-shrink: 0; }
 .row > *, .summaryrow > *, .bottomTotal > *, .footerAction > *,
 .cards > *, .split > *, .grid2 > *, .grid3 > *, .grid4 > *,
-.attentionGrid > *, .shopGrid > *, .attachmentGrid > * { min-width: 0; }
+.shopGrid > *, .attachmentGrid > * { min-width: 0; }
 
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .row.between { justify-content: space-between; align-items: flex-start; }
@@ -130,12 +130,6 @@ td.num, th.num { text-align: right; }
 .hero h2 { margin: 6px 0; font-size: 25px; }
 .bottomTotal { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid #d8eac7; background: #f1f8eb; border-radius: 10px; margin-top: 14px; }
 .bottomTotal .amount { font-size: 24px; font-weight: 850; }
-.attentionGrid { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
-.attentionCard { border: 1px solid #efd89a; background: #fffaf0; border-radius: 12px; padding: 14px; display: block; }
-.attentionCard:hover { border-color: #d2a93a; }
-.attentionCard.red { border-color: #f0b8b2; background: #fff5f4; }
-.eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800; color: #8a6500; }
-.attentionCard.red .eyebrow { color: #a32d22; }
 .panel-review { border-color: #f0c96b; background: #fffaf0; }
 .panel-invoice { border-color: #8fc6ee; background: #f4faff; }
 .panel-done { border-color: #b9dfc0; background: #f4fbf5; }
@@ -179,7 +173,6 @@ td.num, th.num { text-align: right; }
   .mobile-nav .navbtn { width: auto; white-space: nowrap; margin: 0; padding: 8px 10px; }
   .cards { grid-template-columns: repeat(2, 1fr); }
   .grid2, .grid3, .grid4, .split { grid-template-columns: minmax(0, 1fr); }
-  .attentionGrid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 950px) {
   .shopGrid { grid-template-columns: minmax(0, 1fr); }
@@ -188,7 +181,7 @@ td.num, th.num { text-align: right; }
   .attachmentGrid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 640px) {
-  .attentionGrid, .cards { grid-template-columns: minmax(0, 1fr); }
+  .cards { grid-template-columns: minmax(0, 1fr); }
   .logo small, .chip.hide-sm { display: none; }
   .title h1 { font-size: 22px; }
 }

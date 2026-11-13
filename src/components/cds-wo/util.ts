@@ -52,9 +52,6 @@ export const CUSTOMER_APPROVAL_LABEL: Record<string, string> = {
   declined: "Customer declined",
 };
 
-/** Shipment statuses that need a CDS look. */
-export const SHIPMENT_PROBLEM_STATUSES = ["delayed", "exception", "address_problem", "no_scan"] as const;
-
 /** Statuses after which the order lines are fixed. */
 export const LINES_LOCKED_STATUSES = ["completed", "delivered", "ready_to_invoice", "invoiced", "cancelled"];
 

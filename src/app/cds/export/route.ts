@@ -5,7 +5,7 @@ import { internalStatusLabel } from "@/lib/internal-status";
 import { date, dateTime, STATUS_LABEL, woLabel, type WoStatus } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
-/** Upper bound for one export; the dashboard itself shows the newest 200. */
+/** Upper bound for one export; the dashboard itself shows the first 200. */
 const MAX_ROWS = 10000;
 const PAGE = 1000;
 

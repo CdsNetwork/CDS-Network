@@ -31,7 +31,7 @@ function fakeSupabase() {
     ilike: () => customers,
     limit: async () => ({ data: [], error: null }),
   };
-  const supabase = { from: (table: string) => (table === "work_orders" ? list : customers) };
+  const supabase = { from: (table: string) => (table === "customers" ? customers : list) };
   return { supabase, calls };
 }
 

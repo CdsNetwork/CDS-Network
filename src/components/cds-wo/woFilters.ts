@@ -98,15 +98,22 @@ const NO_ID = "00000000-0000-0000-0000-000000000000";
 const MAX_FLAGGED = 200;
 
 /**
- * The filtered work order query, newest first. Search matches WO number, PO, unit,
- * location and customer name. Wrapped in an object because the query builder is thenable
- * and an async function would otherwise run it.
+ * The filtered work order query, from public.work_order_list: most pressing status first
+ * (list_rank, the order of CDS's tracking sheet), then newest first. Search matches WO
+ * number, PO, unit, location, customer name and the shipments' tracking numbers (spaces and
+ * case ignored). Wrapped in an object because the query builder is thenable and an async
+ * function would otherwise run it.
  */
 export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, columns: string) {
   // Condemned: an inner join on the condemned components keeps only the orders that have one
   // (under its own name, so the row's own component list stays complete).
   const select = f.condemned ? `${columns}, condemned_components:work_order_components!inner(id)` : columns;
-  let list = supabase.from("work_orders").select(select).order("created_at", { ascending: false }).order("id");
+  let list = supabase
+    .from("work_order_list")
+    .select(select)
+    .order("list_rank", { ascending: true })
+    .order("created_at", { ascending: false })
+    .order("id");
   if (f.condemned) list = list.eq("condemned_components.result", "condemned");
   if (f.statuses) list = f.statuses.length === 1 ? list.eq("status", f.statuses[0]) : list.in("status", f.statuses);
   if (f.shop === IN_HOUSE) {
@@ -149,6 +156,9 @@ export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, colum
     if (/^\d{1,12}$/.test(woDigits)) ors.push(`wo_number.eq.${woDigits}`);
     const custIds = (custs ?? []).map((c: { id: string }) => c.id);
     if (custIds.length) ors.push(`customer_id.in.(${custIds.join(",")})`);
+    // tracking_search holds the tracking numbers without spaces, in lower case.
+    const tracking = f.q.replace(/\s+/g, "").toLowerCase();
+    if (tracking) ors.push(`tracking_search.ilike."*${tracking}*"`);
     list = list.or(ors.join(","));
   }
   return { query: list };
