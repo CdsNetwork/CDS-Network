@@ -118,7 +118,8 @@ export function qboLookups(api: QboApi): QboLookups {
   };
 }
 
-export type CreatedInvoice = { Id: string; DocNumber?: string; TotalAmt?: number };
+/** TotalAmt and TxnTaxDetail.TotalTax: the total and sales tax QuickBooks calculated. */
+export type CreatedInvoice = { Id: string; DocNumber?: string; TotalAmt?: number; TxnTaxDetail?: { TotalTax?: number } };
 
 /**
  * Creates the invoice. The same requestId never creates a second invoice.
@@ -134,4 +135,10 @@ export async function createInvoice(api: QboApi, payload: QboInvoicePayload, req
   });
   if (!res.Invoice?.Id) throw new Error("QuickBooks did not return the new invoice");
   return res.Invoice;
+}
+
+/** Reads an invoice (for its tax and total). Null when QuickBooks returns none. */
+export async function getInvoice(api: QboApi, id: string): Promise<CreatedInvoice | null> {
+  const res = await qboRequest<{ Invoice?: CreatedInvoice }>(api, "GET", `invoice/${encodeURIComponent(id)}`);
+  return res.Invoice ?? null;
 }

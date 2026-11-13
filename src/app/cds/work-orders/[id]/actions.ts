@@ -11,13 +11,14 @@ import { passThroughInput, pricedLineInput, shopRateInput } from "@/lib/pass-thr
 import { emailCdsAfter } from "@/lib/portal-email-send";
 import { INTERNAL_STATUS_LABEL, parseInternalStatus } from "@/lib/internal-status";
 import { invoiceBlockReason, invoicedOutcome, invoiceLocked, qbInvoiceIdOf } from "@/lib/invoice-lock";
-import { createInvoice, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
+import { createInvoice, getInvoice, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
 import { QboError } from "@/lib/qbo/client";
 import { loadInvoice } from "@/lib/qbo/invoice-input";
 import { cachedSubCustomer, resolveInvoiceQbo, saveSubCustomer, type ResolvedInvoice } from "@/lib/qbo/invoice-qbo";
 import { createdNote, type PendingQbInvoice } from "@/lib/qbo/pending";
 import { qboApi } from "@/lib/qbo/tokens";
 import { createClient } from "@/lib/supabase/server";
+import { qbInvoiceAmounts, type QbInvoiceAmounts } from "@/lib/tax";
 import {
   ATTACHMENT_BUCKET,
   cdsCanDelete,
@@ -885,10 +886,15 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   if (resolved.subCustomer && resolved.subCustomer.id !== cachedSub) {
     await saveSubCustomer(supabase, invoice.target.locationId, parentId, resolved.subCustomer);
   }
+  // The tax and total QuickBooks calculated (Automated Sales Tax, from the ship-to address):
+  // the work order page shows these once the invoice exists.
+  const amounts = qbInvoiceAmounts(created);
   const { error } = await supabase.rpc("cds_mark_invoiced", {
     p_work_order: woId,
     p_qb_invoice_id: created.Id,
     p_qb_invoice_number: created.DocNumber ?? null,
+    p_qb_tax_total: amounts.taxTotal,
+    p_qb_total: amounts.total,
   });
   if (error) {
     await logSync(supabase, woId, "error", created.Id, `Invoice created in QuickBooks, portal not updated: ${error.message}`);
@@ -913,10 +919,13 @@ async function recordPendingInvoice(supabase: Supabase, woId: string, status: st
       error: `QuickBooks invoice ${name} was created for this work order but is not recorded on it, and the order is now ${status === "cancelled" ? "cancelled" : "invoiced"}. Check the invoice in QuickBooks and void it there if it should not exist.`,
     };
   }
+  const amounts = await readInvoiceAmounts(pending.id);
   const { error } = await supabase.rpc("cds_mark_invoiced", {
     p_work_order: woId,
     p_qb_invoice_id: pending.id,
     p_qb_invoice_number: pending.number,
+    p_qb_tax_total: amounts.taxTotal,
+    p_qb_total: amounts.total,
   });
   if (error) {
     await logSync(supabase, woId, "error", pending.id, `Invoice created in QuickBooks, portal not updated: ${error.message}`);
@@ -925,6 +934,18 @@ async function recordPendingInvoice(supabase: Supabase, woId: string, status: st
     };
   }
   return done(woId, `QuickBooks invoice ${name} (created earlier) is now recorded. ${invoicedOutcome(status)}`);
+}
+
+/**
+ * The tax and total of an invoice created earlier, read from QuickBooks. Best effort: when
+ * QuickBooks cannot be reached the invoice is still recorded, without the amounts.
+ */
+async function readInvoiceAmounts(id: string): Promise<QbInvoiceAmounts> {
+  try {
+    return qbInvoiceAmounts(await getInvoice(await qboApi(), id));
+  } catch {
+    return { taxTotal: null, total: null };
+  }
 }
 
 type DeletedWorkOrder = {

@@ -125,7 +125,7 @@ describe("createQuickBooksInvoice at any status", () => {
     const res = await actions.createQuickBooksInvoice(WO);
 
     expect(createInvoice).toHaveBeenCalledTimes(1);
-    expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", { p_work_order: WO, p_qb_invoice_id: "145", p_qb_invoice_number: "1043" });
+    expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", { p_work_order: WO, p_qb_invoice_id: "145", p_qb_invoice_number: "1043", p_qb_tax_total: null, p_qb_total: null });
     const ok = (res as { ok: string }).ok;
     expect(ok).toMatch(/QuickBooks invoice 1043 created/);
     expect(ok).toMatch(/moves to Invoiced when the shop completes/);
@@ -182,7 +182,7 @@ describe("createQuickBooksInvoice at any status", () => {
     rpc.mockResolvedValue({ error: null });
     const res = await actions.createQuickBooksInvoice(WO);
     expect(createInvoice).not.toHaveBeenCalled();
-    expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", { p_work_order: WO, p_qb_invoice_id: "145", p_qb_invoice_number: "1043" });
+    expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", { p_work_order: WO, p_qb_invoice_id: "145", p_qb_invoice_number: "1043", p_qb_tax_total: null, p_qb_total: null });
     expect((res as { ok: string }).ok).toMatch(/moves to Invoiced when the shop completes/);
   });
 });

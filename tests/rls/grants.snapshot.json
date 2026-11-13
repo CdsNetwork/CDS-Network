@@ -29,7 +29,7 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
-  "function public.cds_mark_invoiced(uuid,text,text)": {
+  "function public.cds_mark_invoiced(uuid,text,text,numeric,numeric)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },

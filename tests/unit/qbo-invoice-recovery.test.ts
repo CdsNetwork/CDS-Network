@@ -110,7 +110,7 @@ describe("createQuickBooksInvoice when the portal update fails", () => {
     const res = await createQuickBooksInvoice(WO);
 
     expect(createInvoice).not.toHaveBeenCalled();
-    expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", { p_work_order: WO, p_qb_invoice_id: "145", p_qb_invoice_number: "1043" });
+    expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", { p_work_order: WO, p_qb_invoice_id: "145", p_qb_invoice_number: "1043", p_qb_tax_total: null, p_qb_total: null });
     expect(res).toMatchObject({ ok: expect.stringContaining("QuickBooks invoice 1043") });
   });
 
@@ -121,7 +121,7 @@ describe("createQuickBooksInvoice when the portal update fails", () => {
     rpc.mockResolvedValue({ error: null });
     await createQuickBooksInvoice(WO);
     expect(createInvoice).not.toHaveBeenCalled();
-    expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", { p_work_order: WO, p_qb_invoice_id: "145", p_qb_invoice_number: null });
+    expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", { p_work_order: WO, p_qb_invoice_id: "145", p_qb_invoice_number: null, p_qb_tax_total: null, p_qb_total: null });
   });
 
   it("tells staff about the invoice when the order moved on and never sends a new one", async () => {

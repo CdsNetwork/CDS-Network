@@ -27,7 +27,7 @@ import {
   TAX_CLASS_LABEL,
 } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
-import { orderTaxExempt, TAX_FROZEN_STATUSES, taxLabel, taxSummary, type TaxFlags } from "@/lib/tax";
+import { invoiceTaxView, orderTaxExempt, TAX_FROZEN_STATUSES, taxLabel, taxSummary, type TaxFlags } from "@/lib/tax";
 import { invoiceLocked, movesToInvoiced } from "@/lib/invoice-lock";
 import { INTERNAL_STATUSES, INTERNAL_STATUS_LABEL } from "@/lib/internal-status";
 import {
@@ -151,6 +151,8 @@ type Internal = {
   invoiced_at: string | null;
   qb_invoice_id: string | null;
   qb_invoice_number: string | null;
+  qb_tax_total: number | string | null;
+  qb_total: number | string | null;
   internal_status: string | null;
   profiles: MaybeOne<{ full_name: string }>;
 };
@@ -520,7 +522,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase
         .from("work_order_internal")
         .select(
-          "source, review_reason, routing_notes, internal_notes, order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, qb_invoice_id, qb_invoice_number, internal_status, profiles(full_name)",
+          "source, review_reason, routing_notes, internal_notes, order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, qb_invoice_id, qb_invoice_number, qb_tax_total, qb_total, internal_status, profiles(full_name)",
         )
         .eq("work_order_id", id)
         .maybeSingle(),
@@ -735,7 +737,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   };
   const rate = customerTaxExempt ? 0 : Number(internal?.tax_rate ?? 0);
   const shopTotal = shopPayable(lines, deductions);
-  const { subtotal, taxable, salesTax, total: invoiceTotal } = taxSummary(
+  const estimate = taxSummary(
     lines.map((l) => {
       const p = one(l.work_order_line_pricing);
       return { amount: (p?.customer_unit_price ?? 0) * l.qty, taxClass: p?.tax_class ?? null };
@@ -743,6 +745,21 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     taxFlags,
     rate,
   );
+  const { subtotal, taxable } = estimate;
+  // QuickBooks calculates the sales tax (Automated Sales Tax, from the ship-to address): once
+  // the order has a QuickBooks invoice the box shows its tax and total, before that the
+  // portal's figure as an estimate (@/lib/tax invoiceTaxView).
+  const amount = (v: number | string | null | undefined) => (v === null || v === undefined ? null : Number(v));
+  const taxView = invoiceTaxView({
+    qbInvoiceId: internal?.qb_invoice_id ?? null,
+    qbInvoiceNumber: internal?.qb_invoice_number ?? null,
+    qbTaxTotal: amount(internal?.qb_tax_total),
+    qbTotal: amount(internal?.qb_total),
+    customerTaxExempt,
+    rate,
+    jurisdiction: internal?.tax_jurisdiction ?? null,
+    estimate,
+  });
   const compName = new Map(components.map((c) => [c.id, `${c.component_type} #${c.seq}`]));
   const locationDefault = location?.default_affiliate_id ?? null;
   const defaultShop = dispatchShopDefault({ status: wo.status, affiliateId: wo.affiliate_id, locationDefault });
@@ -1844,12 +1861,12 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 <b className="money">{money(taxable)}</b>
               </div>
               <div className="summaryrow">
-                <span>{customerTaxExempt ? "Sales tax (customer exempt)" : `Sales tax (${rate}%)`}</span>
-                <b className="money">{money(salesTax)}</b>
+                <span>{taxView.taxLabel}</span>
+                <b className="money">{taxView.tax === null ? taxView.taxText : money(taxView.tax)}</b>
               </div>
               <div className="summaryrow">
-                <span>Customer invoice total</span>
-                <b className="money">{money(invoiceTotal)}</b>
+                <span>{taxView.totalLabel}</span>
+                <b className="money">{taxView.total === null ? taxView.totalText : money(taxView.total)}</b>
               </div>
               <div className="summaryrow">
                 <span>{shopPayableLabel(inHouse)}</span>
@@ -1860,6 +1877,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 <b className="money">{tbd ? "TBD" : money(fin?.margin)}</b>
               </div>
             </div>
+            {taxView.note && <p className="small">{taxView.note}</p>}
             {customerTaxExempt && (
               <div className="notice">
                 {TAX_FROZEN_STATUSES.includes(taxStatus) ? (
