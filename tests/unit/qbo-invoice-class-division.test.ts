@@ -179,6 +179,8 @@ describe("loadInvoice: Class and Division", () => {
     expect(invoice.result.payload.ClassRef).toEqual({ value: "12" });
     expect(queries.find((q) => q.table === "qbo_customer_division")?.eq).toEqual([["customer_id", CUSTOMER]]);
     expect(queries.find((q) => q.table === "qbo_affiliate_class")?.eq).toEqual([["affiliate_id", SHOP]]);
+    // The shop, for the Class lookup at invoice time when it has no row (qbo-shop-class-auto.test.ts).
+    expect(invoice.affiliateId).toBe(SHOP);
   });
 
   it("builds today's invoice when neither is mapped", async () => {

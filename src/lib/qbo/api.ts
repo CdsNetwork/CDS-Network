@@ -2,6 +2,7 @@ import "server-only";
 import { qboRequest, type QboApi } from "./client";
 import type { QboInvoicePayload } from "./invoice";
 import type { QboLookups } from "./invoice-qbo";
+import type { QboClass } from "./shop-class";
 import type { QboCustomerRecord } from "./sub-customer";
 
 /**
@@ -105,6 +106,14 @@ export async function getItems(api: QboApi, ids: string[]): Promise<{ Id: string
     query: { query: `select * from Item where Id in (${ids.map(qboQuoted).join(", ")}) maxresults ${PAGE}` },
   });
   return res.QueryResponse?.Item ?? [];
+}
+
+/** The active Classes (read only; CDS has about 80, inactive ones filtered by the caller too). */
+export async function listClasses(api: QboApi): Promise<QboClass[]> {
+  const res = await qboRequest<{ QueryResponse?: { Class?: QboClass[] } }>(api, "GET", "query", {
+    query: { query: `select * from Class maxresults ${PAGE}` },
+  });
+  return (res.QueryResponse?.Class ?? []).filter((c) => c.Active !== false);
 }
 
 /** The QuickBooks calls the invoice-time lookups use (./invoice-qbo). */

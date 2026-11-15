@@ -72,6 +72,27 @@ describe("QuickBooks Division and Class mappings", () => {
     expect(log).toContainEqual({ action: "update", actor_id: cds.id });
   });
 
+  it("CDS can add a shop's class the way invoicing does (insert only, an existing row wins)", async () => {
+    // A second shop without a row: invoicing picks its class from QuickBooks and adds it.
+    const other = (await must(admin.from("affiliates").insert({ short_code: `QCL2-${runId}`, display_name: `Shop class two ${runId}` }).select().single())).id;
+    try {
+      const options = { onConflict: "affiliate_id", ignoreDuplicates: true };
+      await must(cds.client.from("qbo_affiliate_class").upsert({ affiliate_id: other, qbo_class_id: "1", qbo_class_name: "CDS Dallas", updated_by: cds.id }, options));
+      expect(await must(admin.from("qbo_affiliate_class").select("qbo_class_id, updated_by").eq("affiliate_id", other))).toEqual([
+        { qbo_class_id: "1", updated_by: cds.id },
+      ]);
+      // The same write for a shop that already has a row changes nothing.
+      await must(cds.client.from("qbo_affiliate_class").upsert({ affiliate_id: other, qbo_class_id: "2", qbo_class_name: "CDS INC", updated_by: cds.id }, options));
+      expect((await must(admin.from("qbo_affiliate_class").select("qbo_class_id").eq("affiliate_id", other).single())).qbo_class_id).toBe("1");
+      // A shop user cannot do it.
+      const byShop = await shop.client.from("qbo_affiliate_class").upsert({ affiliate_id: shopId, qbo_class_id: "2", qbo_class_name: "CDS INC" }, options);
+      expect(byShop.error).not.toBeNull();
+    } finally {
+      await must(admin.from("affiliates").delete().eq("id", other));
+      await must(admin.from("audit_log").delete().eq("row_id", other));
+    }
+  });
+
   it("refuse an empty QuickBooks id", async () => {
     const { error } = await admin.from("qbo_customer_division").update({ qbo_department_id: " " }).eq("customer_id", customer);
     expect(error).not.toBeNull();

@@ -30,6 +30,8 @@ export type InvoiceState = {
   qbInvoiceId: string | null;
   qbInvoiceNumber: string | null;
   invoicedAt: string | null;
+  /** The shop that handled the order: its Class is looked up when it has none (see ./shop-class). */
+  affiliateId: string | null;
   /** Created in QuickBooks but not recorded on the work order yet (see ./pending). */
   pendingQb: PendingQbInvoice | null;
   /** What the invoice-time QuickBooks lookups need (sub-customer, custom fields). */
@@ -261,6 +263,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     qbInvoiceId: internal?.qb_invoice_id ?? null,
     qbInvoiceNumber: internal?.qb_invoice_number ?? null,
     invoicedAt: internal?.invoiced_at ?? null,
+    affiliateId: wo.affiliate_id,
     pendingQb: internal?.qb_invoice_id ? null : pendingQbInvoice((syncRes.data ?? []) as InvoiceSyncRow[]),
     target: {
       locationId: loc?.id ?? null,

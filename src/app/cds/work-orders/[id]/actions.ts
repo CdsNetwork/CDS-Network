@@ -11,11 +11,12 @@ import { passThroughInput, pricedLineInput, shopRateInput } from "@/lib/pass-thr
 import { emailCdsAfter } from "@/lib/portal-email-send";
 import { INTERNAL_STATUS_LABEL, parseInternalStatus } from "@/lib/internal-status";
 import { invoiceBlockReason, invoicedOutcome, invoiceLocked, qbInvoiceIdOf } from "@/lib/invoice-lock";
-import { createInvoice, getInvoice, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
+import { createInvoice, getInvoice, listClasses, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
 import { QboError } from "@/lib/qbo/client";
 import { loadInvoice } from "@/lib/qbo/invoice-input";
 import { cachedSubCustomer, resolveInvoiceQbo, saveSubCustomer, type ResolvedInvoice } from "@/lib/qbo/invoice-qbo";
 import { createdNote, type PendingQbInvoice } from "@/lib/qbo/pending";
+import { findShopClass, saveShopClass, type ShopClass } from "@/lib/qbo/shop-class";
 import { qboApi } from "@/lib/qbo/tokens";
 import { createClient } from "@/lib/supabase/server";
 import { qbInvoiceAmounts, type QbInvoiceAmounts } from "@/lib/tax";
@@ -813,7 +814,7 @@ async function logSync(
  *     would otherwise answer the corrected request with the stored refusal.
  */
 export async function createQuickBooksInvoice(woId: string): Promise<ActionState> {
-  await requireCds();
+  const profile = await requireCds();
   if (!isUuid(woId)) return { error: "Work order not found." };
   const supabase = await createClient();
 
@@ -848,22 +849,28 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   // never an error.
   const parentId = payload.CustomerRef.value;
   const cachedSub = await cachedSubCustomer(supabase, invoice.target.locationId, parentId);
+  // A shop without a Class row gets its "CDS <city>" class picked from QuickBooks (see
+  // @/lib/qbo/shop-class); no match or a failed lookup sends the invoice without a class.
+  const affiliateId = invoice.affiliateId;
   const send = async (api: Awaited<ReturnType<typeof qboApi>>) => {
-    const r = await resolveInvoiceQbo(qboLookups(api), payload, invoice.target, cachedSub, itemText);
-    return { resolved: r, created: await createInvoice(api, r.payload, requestId) };
+    const cls = !payload.ClassRef && affiliateId ? await findShopClass(supabase, () => listClasses(api), affiliateId) : null;
+    const withClass = cls ? { ...payload, ClassRef: { value: cls.id } } : payload;
+    const r = await resolveInvoiceQbo(qboLookups(api), withClass, invoice.target, cachedSub, itemText);
+    return { resolved: r, created: await createInvoice(api, r.payload, requestId), shopClass: cls };
   };
 
   let created: CreatedInvoice;
   let resolved: ResolvedInvoice;
+  let shopClass: ShopClass | null;
   try {
     let api = await qboApi();
     try {
-      ({ created, resolved } = await send(api));
+      ({ created, resolved, shopClass } = await send(api));
     } catch (e) {
       if (!(e instanceof QboError && e.unauthorized)) throw e;
       // The access token was revoked or expired early: refresh once and send the same request.
       api = await qboApi({ forceRefresh: true });
-      ({ created, resolved } = await send(api));
+      ({ created, resolved, shopClass } = await send(api));
     }
   } catch (e) {
     const qbo = e instanceof QboError ? e : null;
@@ -886,6 +893,7 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   if (resolved.subCustomer && resolved.subCustomer.id !== cachedSub) {
     await saveSubCustomer(supabase, invoice.target.locationId, parentId, resolved.subCustomer);
   }
+  if (shopClass && affiliateId) await saveShopClass(supabase, affiliateId, shopClass, profile.id);
   // The tax and total QuickBooks calculated (Automated Sales Tax, from the ship-to address):
   // the work order page shows these once the invoice exists.
   const amounts = qbInvoiceAmounts(created);
