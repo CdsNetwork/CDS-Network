@@ -3,6 +3,7 @@ import {
   buildLabelRequest,
   buildPackage,
   buildRatesRequest,
+  labelTrackingUrl,
   mapLabel,
   mapRates,
   ratesFailureMessage,
@@ -387,6 +388,47 @@ describe("mapRates", () => {
     expect(problems).toEqual(["UPS rates are temporarily unavailable, try again in a minute."]);
   });
 
+  it("names UPS by Worldwide Express when its rates fail on the carrier side", () => {
+    const err = {
+      error_source: "carrier",
+      error_type: "system",
+      message: "Request failed with status code 500",
+      carrier_id: "se-7177883",
+      carrier_code: "wwex_parcel",
+      carrier_friendly_name: "UPS by Worldwide Express\u00ae",
+    };
+    const { problems } = mapRates({ rate_response: { rates: [], errors: [err] } });
+    expect(problems).toEqual(["UPS by Worldwide Express rates are temporarily unavailable, try again in a minute."]);
+  });
+
+  it("lists FedEx and UPS by Worldwide Express rates side by side, filtered by each carrier's services", () => {
+    const rate = (carrier_id: string, carrier_code: string, service_code: string, service_type: string, amount: number) => ({
+      rate_id: `se-${service_code}`,
+      carrier_id,
+      carrier_code,
+      service_code,
+      service_type,
+      shipping_amount: { currency: "usd", amount },
+      delivery_days: 3,
+    });
+    const { rates } = mapRates(
+      {
+        rate_response: {
+          rates: [
+            rate("se-7157832", "fedex", "fedex_ground", "FedEx Ground", 24.1),
+            rate("se-7177883", "wwex_parcel", "wwex_ups_ground", "UPS Ground", 19.4),
+            rate("se-7177883", "wwex_parcel", "wwex_ups_worldwide_saver", "UPS Worldwide Saver", 80),
+          ],
+        },
+      },
+      { "se-7157832": ["fedex_ground"], "se-7177883": ["wwex_ups_ground", "wwex_ups_next_day_air"] },
+    );
+    expect(rates.map((r) => [r.carrierId, r.serviceCode])).toEqual([
+      ["se-7177883", "wwex_ups_ground"],
+      ["se-7157832", "fedex_ground"],
+    ]);
+  });
+
   it("keeps validation messages that staff can act on", () => {
     const { problems, upstream } = mapRates({
       rate_response: { rates: [], errors: [{ error_source: "carrier", error_type: "validation", message: "Invalid postal code", carrier_code: "ups" }] },
@@ -462,6 +504,33 @@ describe("mapLabel", () => {
 
   it("refuses an answer without a label id", () => {
     expect(() => mapLabel({ status: "error" }, true)).toThrow(/label/i);
+  });
+});
+
+describe("labelTrackingUrl", () => {
+  const UPS_URL = "https://www.ups.com/track?loc=en_US&tracknum=1Z999AA10123456784";
+
+  it("gives a UPS by Worldwide Express label a UPS tracking link", () => {
+    expect(labelTrackingUrl({ carrierCode: "wwex_parcel", trackingNumber: "1Z999AA10123456784", trackingUrl: null }, "UPS")).toBe(UPS_URL);
+    expect(labelTrackingUrl({ carrierCode: "wwex_parcel", trackingNumber: "1Z999AA10123456784", trackingUrl: "" }, "UPS")).toBe(UPS_URL);
+  });
+
+  it("uses the UPS link for UPS by Worldwide Express even when ShipStation sends another link", () => {
+    expect(
+      labelTrackingUrl({ carrierCode: "wwex_parcel", trackingNumber: "1Z999AA10123456784", trackingUrl: "https://track.wwex.com/x?id=1" }, "UPS"),
+    ).toBe(UPS_URL);
+  });
+
+  it("keeps ShipStation's link for other carriers and falls back to UPS for a UPS row without one", () => {
+    expect(labelTrackingUrl({ carrierCode: "fedex", trackingNumber: "794600000000", trackingUrl: "https://www.fedex.com/fedextrack/?trknbr=794600000000" }, "FedEx")).toBe(
+      "https://www.fedex.com/fedextrack/?trknbr=794600000000",
+    );
+    expect(labelTrackingUrl({ carrierCode: "ups", trackingNumber: "1Z999AA10123456784", trackingUrl: null }, "UPS")).toBe(UPS_URL);
+    expect(labelTrackingUrl({ carrierCode: "fedex", trackingNumber: "794600000000", trackingUrl: null }, "FedEx")).toBeNull();
+  });
+
+  it("gives no link without a tracking number", () => {
+    expect(labelTrackingUrl({ carrierCode: "wwex_parcel", trackingNumber: null, trackingUrl: null }, "UPS")).toBeNull();
   });
 });
 

@@ -84,8 +84,8 @@ export async function ShippingSettings() {
 
       <h3 style={{ marginTop: 18 }}>Carriers and services</h3>
       <p className="small">
-        Rates come from the carriers that are on. A carrier with services listed offers only the services that are on. UPS by
-        Worldwide Express: connect it in ShipStation, then add its carrier id (se-...) here.
+        Rates come from the carriers that are on. A carrier with services listed offers only the services that are on. Another carrier:
+        connect it in ShipStation, then add its carrier id (se-...) here.
       </p>
       <div style={{ display: "grid", gap: 10 }}>
         {carriers.map((c) => (

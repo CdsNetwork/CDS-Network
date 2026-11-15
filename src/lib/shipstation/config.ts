@@ -4,7 +4,7 @@
  * CDS uses the ShipStation app account with the V2 API: base URL https://api.shipstation.com/v2,
  * authenticated with the API-Key header.
  * Carriers and services are data (public.shipping_carriers and public.shipping_services), never
- * code: UPS by Worldwide Express is added later as one more carrier row.
+ * code: UPS by Worldwide Express (se-7177883) is one more carrier row (migration 20261115010000).
  */
 
 export const SHIPSTATION_API_BASE = "https://api.shipstation.com/v2";

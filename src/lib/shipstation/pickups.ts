@@ -48,14 +48,23 @@ export async function schedulePickupForLabel(db: Db, labelId: string, form: Pick
 
   const { data: l, error } = await db
     .from("shipment_labels")
-    .select("id, shipment_id, shipstation_label_id, is_test, status, ship_from_summary")
+    .select("id, shipment_id, shipstation_label_id, shipstation_carrier_id, is_test, status, ship_from_summary")
     .eq("id", labelId)
     .maybeSingle();
   if (error) return { ok: false, error: "The label could not be read. Try again." };
   if (!l) return { ok: false, error: "Label not found." };
   if (l.status !== "active") return { ok: false, error: "This label is voided." };
-  // Never call ShipStation for a test label or while the portal makes test labels.
-  const refusal = pickupRefusal(l, config.testLabels);
+  // Never call ShipStation for a test label, while the portal makes test labels, or for a
+  // carrier ShipStation cannot book pickups for.
+  const early = pickupRefusal(l, config.testLabels);
+  if (early) return { ok: false, error: early };
+  const { data: carrier, error: carrierError } = await db
+    .from("shipping_carriers")
+    .select("name, api_pickups")
+    .eq("shipstation_carrier_id", l.shipstation_carrier_id)
+    .maybeSingle();
+  if (carrierError) return { ok: false, error: "The label's carrier could not be read. Try again." };
+  const refusal = pickupRefusal(l, config.testLabels, carrier);
   if (refusal) return { ok: false, error: refusal };
 
   const [existing, settings] = await Promise.all([

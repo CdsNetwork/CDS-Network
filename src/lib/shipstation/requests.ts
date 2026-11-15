@@ -263,7 +263,14 @@ type RawRateError = {
   carrier_friendly_name?: string;
 };
 
-const CARRIER_NAMES: Record<string, string> = { ups: "UPS", fedex: "FedEx", usps: "USPS", stamps_com: "USPS", dhl_express: "DHL Express" };
+const CARRIER_NAMES: Record<string, string> = {
+  ups: "UPS",
+  wwex_parcel: "UPS by Worldwide Express",
+  fedex: "FedEx",
+  usps: "USPS",
+  stamps_com: "USPS",
+  dhl_express: "DHL Express",
+};
 
 /**
  * A carrier failing on its side (seen 2026-10-20: UPS answered "A shipping carrier error occurred:
@@ -373,6 +380,27 @@ type RawLabel = {
   insurance_cost?: Money;
   label_download?: { pdf?: string; href?: string } | null;
 };
+
+/** UPS's public tracking page for a tracking number. */
+export const upsTrackingUrl = (trackingNumber: string) => `https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(trackingNumber)}`;
+
+/**
+ * The tracking link to keep for a new label. UPS by Worldwide Express (carrier code
+ * wwex_parcel) labels carry UPS 1Z numbers that UPS tracks, so they always get UPS's page,
+ * whatever ShipStation sends. Other carriers keep ShipStation's link; a UPS carrier row
+ * without one falls back to UPS's page.
+ */
+export function labelTrackingUrl(
+  label: { carrierCode: string | null; trackingNumber: string | null; trackingUrl: string | null },
+  carrier: string,
+): string | null {
+  const number = label.trackingNumber?.trim();
+  if (!number) return label.trackingUrl?.trim() || null;
+  if (label.carrierCode === "wwex_parcel") return upsTrackingUrl(number);
+  const given = label.trackingUrl?.trim();
+  if (given) return given;
+  return carrier === "UPS" ? upsTrackingUrl(number) : null;
+}
 
 /** The portal's view of a POST /v2/labels answer. */
 export function mapLabel(body: unknown, testRequested: boolean): CreatedLabel {

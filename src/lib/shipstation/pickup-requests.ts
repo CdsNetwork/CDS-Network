@@ -79,10 +79,21 @@ export function stateFromSummary(summary: string | null | undefined): string | n
   return m ? m[1] : null;
 }
 
-/** What a pickup cannot be booked for, or null. Test labels never reach a carrier. */
-export function pickupRefusal(label: { is_test: boolean }, testLabels: boolean): string | null {
+/** The label's carrier row (public.shipping_carriers), as far as pickups go. */
+export type PickupCarrier = { name: string; api_pickups: boolean };
+
+/**
+ * What a pickup cannot be booked for, or null. Test labels never reach a carrier. A carrier
+ * row with api_pickups off (UPS by Worldwide Express: ShipStation's guide says to ask
+ * Worldwide Express about pickups and cannot cancel them) is booked outside the portal.
+ */
+export function pickupRefusal(label: { is_test: boolean }, testLabels: boolean, carrier: PickupCarrier | null = null): string | null {
   if (testLabels) return "Pickups can only be booked for real labels (the portal is making test labels).";
   if (label.is_test) return "Pickups can only be booked for real labels (this is a test label).";
+  if (carrier && !carrier.api_pickups) {
+    const where = /worldwide express/i.test(carrier.name) ? "with Worldwide Express or UPS directly" : "with the carrier directly";
+    return `Pickups for ${carrier.name} cannot be booked through ShipStation. Book the pickup ${where}.`;
+  }
   return null;
 }
 

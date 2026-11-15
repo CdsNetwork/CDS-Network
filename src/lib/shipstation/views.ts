@@ -4,11 +4,13 @@ import type { LabelView } from "@/components/shipping/LabelPanel";
 import type { PickupView } from "@/components/shipping/PickupPanel";
 import { shipStationConfig } from "./config";
 import type { DefaultPackage } from "./package";
-import { pickupRefusal } from "./pickup-requests";
+import { pickupRefusal, type PickupCarrier } from "./pickup-requests";
+import { upsTrackingUrl } from "./requests";
 
 type Row = {
   id: string;
   shipment_id: string;
+  shipstation_carrier_id: string;
   carrier: string;
   service_name: string | null;
   tracking_number: string | null;
@@ -34,7 +36,7 @@ export async function activeLabels(
   by: { workOrderId: string } | { shipmentIds: string[] },
   withCost: boolean,
 ): Promise<Map<string, LabelView>> {
-  const cols = "id, shipment_id, carrier, service_name, tracking_number, tracking_url, is_test";
+  const cols = "id, shipment_id, shipstation_carrier_id, carrier, service_name, tracking_number, tracking_url, is_test";
   const select = () => db.from("shipment_labels").select(withCost ? `${cols}, shop_affiliate_id, affiliates(display_name), shipment_label_costs(label_cost, insurance_cost)` : cols).eq("status", "active");
   // At most one active label per leg, so each request returns no more rows than ids asked for.
   const groups: string[][] = [];
@@ -43,11 +45,19 @@ export async function activeLabels(
   const results = await Promise.all(
     groups.map((ids) => ("workOrderId" in by ? select().eq("work_order_id", by.workOrderId) : select().in("shipment_id", ids))),
   );
-  // CDS pages: the carrier pickup booked for each label (shops cannot read shipment_pickups).
+  // CDS pages: the carrier pickup booked for each label (shops cannot read shipment_pickups)
+  // and whether ShipStation can book pickups for the label's carrier.
   const pickups = new Map<string, PickupView>();
+  const carriers = new Map<string, PickupCarrier>();
   const config = withCost ? shipStationConfig() : null;
   if (withCost) {
-    const labelIds = results.flatMap((res) => (res.data ?? []) as unknown as Row[]).map((r) => r.id);
+    const rows = results.flatMap((res) => (res.data ?? []) as unknown as Row[]);
+    const labelIds = rows.map((r) => r.id);
+    const carrierIds = [...new Set(rows.map((r) => r.shipstation_carrier_id))];
+    if (carrierIds.length) {
+      const { data } = await db.from("shipping_carriers").select("shipstation_carrier_id, name, api_pickups").in("shipstation_carrier_id", carrierIds);
+      for (const c of (data ?? []) as (PickupCarrier & { shipstation_carrier_id: string })[]) carriers.set(c.shipstation_carrier_id, c);
+    }
     const chunks: string[][] = [];
     for (let i = 0; i < labelIds.length; i += 100) chunks.push(labelIds.slice(i, i + 100));
     const found = await Promise.all(
@@ -73,13 +83,14 @@ export async function activeLabels(
       carrier: r.carrier,
       service_name: r.service_name,
       tracking_number: r.tracking_number,
-      tracking_url: r.tracking_url,
+      // Labels from before UPS links were kept: a UPS label without a link gets UPS's page.
+      tracking_url: r.tracking_url ?? (r.carrier === "UPS" && r.tracking_number ? upsTrackingUrl(r.tracking_number) : null),
       is_test: r.is_test,
       cost: withCost && c ? Math.round((Number(c.label_cost) + Number(c.insurance_cost)) * 100) / 100 : null,
       ...(withCost
         ? {
             pickup: pickups.get(r.id) ?? null,
-            pickupRefusal: pickupRefusal(r, config?.testLabels ?? false),
+            pickupRefusal: pickupRefusal(r, config?.testLabels ?? false, carriers.get(r.shipstation_carrier_id) ?? null),
             shop: r.shop_affiliate_id ? { id: r.shop_affiliate_id, name: shop?.display_name ?? null } : null,
           }
         : {}),

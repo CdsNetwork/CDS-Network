@@ -9,6 +9,7 @@ import { packageForShipment, type ShipmentPackage } from "./package";
 import {
   buildLabelRequest,
   buildRatesRequest,
+  labelTrackingUrl,
   mapLabel,
   mapRates,
   ratesFailureMessage,
@@ -350,7 +351,7 @@ export async function createLabelForShipment(db: Db, shipmentId: string, choice:
       service_code: choice.serviceCode,
       service_name: serviceName ?? choice.serviceCode,
       tracking_number: label.trackingNumber,
-      tracking_url: label.trackingUrl,
+      tracking_url: labelTrackingUrl(label, carrier.carrier),
       is_test: label.isTest,
       label_url: label.pdfUrl,
       label_file_path: filePath,

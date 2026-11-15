@@ -178,6 +178,22 @@ describe("test labels", () => {
   });
 });
 
+describe("carriers ShipStation cannot book pickups for", () => {
+  const WWEX = { name: "UPS by Worldwide Express", api_pickups: false };
+
+  it("refuses with a plain message naming the carrier (UPS by Worldwide Express)", () => {
+    expect(pickupRefusal({ is_test: false }, false, WWEX)).toBe(
+      "Pickups for UPS by Worldwide Express cannot be booked through ShipStation. Book the pickup with Worldwide Express or UPS directly.",
+    );
+  });
+
+  it("still names test labels first, and allows carriers that take pickups or are unknown", () => {
+    expect(pickupRefusal({ is_test: true }, false, WWEX)).toMatch(/this is a test label/);
+    expect(pickupRefusal({ is_test: false }, false, { name: "FedEx (CDS account)", api_pickups: true })).toBeNull();
+    expect(pickupRefusal({ is_test: false }, false, null)).toBeNull();
+  });
+});
+
 describe("pickupWindowText", () => {
   it("shows the window in the pickup address's zone", () => {
     expect(pickupWindowText("2026-11-11T16:00:00.000Z", "2026-11-12T00:00:00.000Z", PHOENIX)).toBe("Wed, Nov 11, 2026, 9:00 AM to 5:00 PM MST");
