@@ -81,11 +81,17 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
+  "function public.qbo_claim_shop_bill(uuid)": {
+    "service_role": "EXECUTE"
+  },
   "function public.qbo_connection_status()": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
   "function public.qbo_delete_connection(uuid)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.qbo_finish_shop_bill(uuid,uuid,text,text,text,numeric,text,text)": {
     "service_role": "EXECUTE"
   },
   "function public.qbo_get_connection()": {
@@ -269,12 +275,20 @@
     "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
+  "table public.qbo_affiliate_vendor": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
   "table public.qbo_customer_division": {
     "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "table public.qbo_affiliate_class": {
     "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.qbo_shop_bills": {
+    "authenticated": "SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "table public.sell_prices": {

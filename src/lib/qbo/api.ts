@@ -1,5 +1,7 @@
 import "server-only";
 import { qboRequest, type QboApi } from "./client";
+import type { QboBillPayload, QboVendor } from "./bill";
+import type { CreatedBill, FoundBill } from "./bill-run";
 import type { QboInvoicePayload } from "./invoice";
 import type { QboLookups } from "./invoice-qbo";
 import type { QboClass } from "./shop-class";
@@ -21,7 +23,7 @@ const PAGE = 1000;
 /** Upper bound so a very large company cannot make a page hang. */
 const MAX_ROWS = 10_000;
 
-async function queryAll<T>(api: QboApi, entity: "Item" | "Customer", where: string): Promise<T[]> {
+async function queryAll<T>(api: QboApi, entity: "Item" | "Customer" | "Vendor" | "Account" | "Term", where: string): Promise<T[]> {
   const rows: T[] = [];
   for (let start = 1; start <= MAX_ROWS; start += PAGE) {
     const res = await qboRequest<{ QueryResponse?: Record<string, T[] | undefined> }>(api, "GET", "query", {
@@ -150,4 +152,45 @@ export async function createInvoice(api: QboApi, payload: QboInvoicePayload, req
 export async function getInvoice(api: QboApi, id: string): Promise<CreatedInvoice | null> {
   const res = await qboRequest<{ Invoice?: CreatedInvoice }>(api, "GET", `invoice/${encodeURIComponent(id)}`);
   return res.Invoice ?? null;
+}
+
+// ---------------------------------------------------------------- shop bills (./bill)
+
+/** Account entity (only the fields used): https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/account */
+export type QboAccount = { Id: string; Name: string; FullyQualifiedName?: string; AccountType?: string; AcctNum?: string; Active?: boolean };
+/** Term entity: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/term */
+export type QboTerm = { Id: string; Name: string; Active?: boolean };
+
+/** The active vendors, for linking each shop to its vendor. */
+export function listVendors(api: QboApi): Promise<QboVendor[]> {
+  return queryAll<QboVendor>(api, "Vendor", "Active = true");
+}
+
+/** Account types a bill line can be booked to (expense side of the chart of accounts). */
+export const BILL_ACCOUNT_TYPES = ["Expense", "Cost of Goods Sold", "Other Expense"];
+
+/** The active expense accounts, for the account every bill line goes to. */
+export async function listBillAccounts(api: QboApi): Promise<QboAccount[]> {
+  const rows = await queryAll<QboAccount>(api, "Account", "Active = true");
+  return rows.filter((a) => BILL_ACCOUNT_TYPES.includes(a.AccountType ?? ""));
+}
+
+/** The active payment terms (Net 30 and the like). */
+export function listTerms(api: QboApi): Promise<QboTerm[]> {
+  return queryAll<QboTerm>(api, "Term", "Active = true");
+}
+
+/** Bills with this bill number (any vendor; the caller checks VendorRef). */
+export async function findBillsByNumber(api: QboApi, docNumber: string): Promise<FoundBill[]> {
+  const res = await qboRequest<{ QueryResponse?: { Bill?: FoundBill[] } }>(api, "GET", "query", {
+    query: { query: `select * from Bill where DocNumber = ${qboQuoted(docNumber)} maxresults 100` },
+  });
+  return res.QueryResponse?.Bill ?? [];
+}
+
+/** Creates the bill. The same requestId never creates a second bill. */
+export async function createBill(api: QboApi, payload: QboBillPayload, requestId: string): Promise<CreatedBill> {
+  const res = await qboRequest<{ Bill?: CreatedBill }>(api, "POST", "bill", { body: payload, requestId });
+  if (!res.Bill?.Id) throw new Error("QuickBooks did not return the new bill");
+  return res.Bill;
 }

@@ -36,11 +36,12 @@ const TABLE_LABEL: Record<string, string> = {
   qbo_location_customer_map: "QuickBooks sub-customer for a location",
   qbo_item_descriptions: "QuickBooks item invoice text",
   customer_item_aliases: "Customer part number",
+  qbo_affiliate_vendor: "QuickBooks vendor for a shop",
 };
 
 const ACTION_LABEL: Record<string, string> = { insert: "Added", update: "Changed", delete: "Removed" };
 // Fields that best name a row, in order of preference.
-const NAME_FIELDS = ["sku", "display_name", "full_name", "name", "code", "email", "key", "short_code", "billing_email", "qbo_display_name", "qbo_item_name", "customer_part_number", "company_name"];
+const NAME_FIELDS = ["sku", "display_name", "full_name", "name", "code", "email", "key", "short_code", "billing_email", "qbo_display_name", "qbo_item_name", "qbo_vendor_name", "customer_part_number", "company_name"];
 
 function show(value: unknown): string {
   if (value === null || value === undefined || value === "") return "empty";

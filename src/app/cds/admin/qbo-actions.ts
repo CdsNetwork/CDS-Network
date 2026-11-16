@@ -5,6 +5,7 @@ import type { ActionState } from "@/components/cds-admin/ActionForm";
 import { dbMessage, text } from "@/components/cds-admin/server-utils";
 import { isUuid } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
+import { BILL_SETTING_KEY, billSettingValue, parseBillSetting } from "@/lib/qbo/bill";
 import { disconnect } from "@/lib/qbo/tokens";
 import { createClient } from "@/lib/supabase/server";
 
@@ -182,4 +183,71 @@ export async function removeAlias(id: string): Promise<ActionState> {
   const { error } = await supabase.from("customer_item_aliases").delete().eq("id", id);
   if (error) return { error: dbMessage(error) };
   return done("Customer part number removed.");
+}
+
+// ---------------------------------------------------------------- shop bills
+
+/** Links a shop to its QuickBooks vendor (picked from the list, or the suggested one). */
+async function linkVendor(affiliateId: string, choice: { id: string; name: string } | null): Promise<ActionState> {
+  const me = await requireCds();
+  if (!isUuid(affiliateId)) return { error: "Choose a shop." };
+  if (!validChoice(choice)) return { error: "Choose the QuickBooks vendor (or enter its numeric id and name)." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("qbo_affiliate_vendor")
+    .upsert({ affiliate_id: affiliateId, qbo_vendor_id: choice.id, qbo_vendor_name: choice.name, updated_by: me.id }, { onConflict: "affiliate_id" });
+  if (error) return { error: dbMessage(error) };
+  return done(`Linked to QuickBooks vendor ${choice.name}.`);
+}
+
+export async function saveVendorMap(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return linkVendor(text(formData, "affiliate_id"), qboChoice(formData, "qbo_vendor"));
+}
+
+export async function linkSuggestedVendor(affiliateId: string, vendorId: string, vendorName: string): Promise<ActionState> {
+  return linkVendor(affiliateId, { id: vendorId, name: vendorName });
+}
+
+export async function removeVendorMap(affiliateId: string): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(affiliateId)) return { error: "Link not found." };
+  const supabase = await createClient();
+  const { error } = await supabase.from("qbo_affiliate_vendor").delete().eq("affiliate_id", affiliateId);
+  if (error) return { error: dbMessage(error) };
+  return done("Vendor link removed.");
+}
+
+/**
+ * The one expense account or product/service item every bill line goes to, and optional
+ * terms (app_settings qbo_bill_line, see @/lib/qbo/bill). The list value is
+ * "account::<id>::<name>" or "item::<id>::<name>"; by hand: kind, id and name. Bills start
+ * with the first save: orders completed before then get no automatic bill.
+ */
+export async function saveBillSetting(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const me = await requireCds();
+  let kind = text(formData, "bill_kind");
+  let choice: { id: string; name: string } | null = null;
+  const picked = text(formData, "bill_target");
+  if (picked) {
+    const [k, id, ...name] = picked.split("::");
+    kind = k;
+    choice = { id: (id ?? "").trim(), name: name.join("::").trim() };
+  } else {
+    const id = text(formData, "bill_target_id");
+    const name = text(formData, "bill_target_name");
+    choice = id && name ? { id, name } : null;
+  }
+  if (kind !== "account" && kind !== "item") return { error: "Choose an expense account or a product or service item." };
+  if (!validChoice(choice)) return { error: "Choose the QuickBooks account or item (or enter its numeric id and name)." };
+  const terms = qboChoice(formData, "bill_terms");
+  if (terms && !validChoice(terms)) return { error: "Choose the terms from the list, or leave them empty." };
+
+  const supabase = await createClient();
+  const { data: current, error: readError } = await supabase.from("app_settings").select("value").eq("key", BILL_SETTING_KEY).maybeSingle();
+  if (readError) return { error: dbMessage(readError) };
+  const since = parseBillSetting((current as { value: unknown } | null)?.value)?.since ?? new Date().toISOString();
+  const value = billSettingValue({ kind, id: choice.id, name: choice.name, termsId: terms?.id ?? null, termsName: terms?.name ?? null, since });
+  const { error } = await supabase.from("app_settings").upsert({ key: BILL_SETTING_KEY, value, updated_by: me.id }, { onConflict: "key" });
+  if (error) return { error: dbMessage(error) };
+  return done(`Bill lines go to QuickBooks ${kind === "account" ? "account" : "item"} ${choice.name}${terms ? `, terms ${terms.name}` : ""}.`);
 }

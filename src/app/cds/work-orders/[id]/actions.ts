@@ -12,6 +12,7 @@ import { emailCdsAfter } from "@/lib/portal-email-send";
 import { INTERNAL_STATUS_LABEL, parseInternalStatus } from "@/lib/internal-status";
 import { invoiceBlockReason, invoicedOutcome, invoiceLocked, qbInvoiceIdOf } from "@/lib/invoice-lock";
 import { createInvoice, getInvoice, listClasses, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
+import { createShopBill, createShopBillAfter } from "@/lib/qbo/bill-server";
 import { QboError } from "@/lib/qbo/client";
 import { loadInvoice } from "@/lib/qbo/invoice-input";
 import { cachedSubCustomer, resolveInvoiceQbo, saveSubCustomer, type ResolvedInvoice } from "@/lib/qbo/invoice-qbo";
@@ -686,6 +687,7 @@ export async function addPricedLine(woId: string, _prev: ActionState, formData: 
       return { error: `Line added, but the shop rate was not saved: ${rate.error.message}` };
     }
   }
+  if (input.shopRate !== null) createShopBillAfter(woId);
   const later = [input.amount === null ? "customer price" : "", input.shopRate === null ? "shop rate" : ""].filter(Boolean);
   return done(woId, later.length ? `Line added. Enter the ${later.join(" and ")} on the line when it is known.` : "Line added.");
 }
@@ -711,6 +713,8 @@ export async function setLineShopRate(woId: string, lineId: string, _prev: Actio
   const supabase = await createClient();
   const { error } = await supabase.rpc("cds_set_line_shop_rate", { p_line: lineId, p_amount: input.amount });
   if (error) return { error: error.message };
+  // The last TBD rate of a completed order: its shop bill can now be created.
+  createShopBillAfter(woId);
   return done(woId, "Shop rate saved.");
 }
 
@@ -966,6 +970,21 @@ async function readInvoiceAmounts(id: string): Promise<QbInvoiceAmounts> {
   } catch {
     return { taxTotal: null, total: null };
   }
+}
+
+// ---------------------------------------------------------------- QuickBooks shop bill
+
+/**
+ * Creates the shop's bill in QuickBooks now, or retries after a failure (@/lib/qbo/bill-run).
+ * Never creates a second bill for a work order.
+ */
+export async function createQuickBooksBill(woId: string): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const r = await createShopBill(woId, "manual");
+  revalidatePath(`/cds/work-orders/${woId}`);
+  if (r.status === "created") return { ok: r.message, at: Date.now() };
+  return { error: r.status === "failed" ? r.message : "No bill was created." };
 }
 
 type DeletedWorkOrder = {

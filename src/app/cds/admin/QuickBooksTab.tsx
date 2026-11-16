@@ -26,6 +26,7 @@ import {
   saveItemMap,
   saveMeasurementMap,
 } from "./qbo-actions";
+import { ShopBillsSection } from "./ShopBillsSection";
 
 type Customer = { id: string; code: string; name: string };
 type Item = { id: string; sku: string; name: string };
@@ -165,7 +166,7 @@ export async function QuickBooksTab() {
         <h3>QuickBooks mappings</h3>
         <p className="small">
           Every customer and every item on a work order must be linked to its QuickBooks record before the invoice can be
-          created. Links point into the connected QuickBooks company; after switching companies (for example from sandbox to
+          created; every shop to its QuickBooks vendor before its bill can be created (Shop bills, below). Links point into the connected QuickBooks company; after switching companies (for example from sandbox to
           production) check them again.
         </p>
         {!status.connected && (
@@ -543,6 +544,9 @@ export async function QuickBooksTab() {
           </table>
         </div>
       </div>
+
+      {/* ---------------------------------------------------------- shop bills */}
+      <ShopBillsSection connected={status.connected} />
     </>
   );
 }

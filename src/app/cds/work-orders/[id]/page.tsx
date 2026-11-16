@@ -55,6 +55,9 @@ import { NotesList } from "@/components/WorkOrderNotes";
 import { AttachmentForm } from "@/components/shop/AttachmentForm";
 import { cdsCanDelete, uploaderLabel } from "@/lib/attachments";
 import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
+import { billState, type BillState } from "@/lib/qbo/bill";
+import { loadBillInputs } from "@/lib/qbo/bill-input";
+import { ShopBillPanel } from "@/components/cds-wo/ShopBillPanel";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteConfirmText } from "@/lib/work-order-delete";
@@ -601,6 +604,16 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     } catch {
       invoiceLoadError = true;
     }
+  }
+
+  // The shop's bill in QuickBooks (M3): created after the shop completes the job.
+  let shopBill: BillState | null = null;
+  let shopBillLoadError = false;
+  try {
+    const bill = await loadBillInputs(supabase, id);
+    shopBill = bill ? billState(bill.inputs, bill.record) : null;
+  } catch {
+    shopBillLoadError = true;
   }
 
   const internal = internalRes.data as unknown as Internal | null;
@@ -1832,6 +1845,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
           {showInvoice && (
             <InvoicePanel woId={wo.id} status={wo.status} qbo={qbo} invoice={invoice} loadError={invoiceLoadError} />
           )}
+          <ShopBillPanel woId={wo.id} status={wo.status} state={shopBill} loadError={shopBillLoadError} />
 
           <section className="section">
             <h3>Status</h3>

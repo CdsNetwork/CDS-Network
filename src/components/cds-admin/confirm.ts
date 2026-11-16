@@ -26,3 +26,7 @@ export function removeMeasurementItemConfirm(customer: string, componentType: st
 export function removePartNumberConfirm(customer: string, item: string, partNumber: string): string {
   return `Remove customer part number ${partNumber} for ${item} (${customer})?`;
 }
+
+export function removeVendorLinkConfirm(shop: string, vendor: string): string {
+  return `Remove the link between ${shop} and QuickBooks vendor "${vendor}"? Bills for this shop cannot be created until it is linked again.`;
+}

@@ -6,6 +6,7 @@ import { requireShop } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { emailCdsAfter } from "@/lib/portal-email-send";
+import { createShopBillAfter } from "@/lib/qbo/bill-server";
 import { PICKUP_WINDOWS, SHIP_STATUS_LABEL } from "@/lib/format";
 import {
   checkFile,
@@ -274,7 +275,11 @@ export async function completeJob(workOrderId: string, _prev: ActionState, fd: F
   const ref = text(fd, "invoice_ref");
   const supabase = await createClient();
   const { error } = await supabase.rpc("shop_complete_work_order", { p_work_order: workOrderId, p_invoice_ref: ref });
-  if (!error) emailCdsAfter("finished", workOrderId);
+  if (!error) {
+    emailCdsAfter("finished", workOrderId);
+    // The shop's bill in CDS's QuickBooks, after the answer: never blocks or undoes completion.
+    createShopBillAfter(workOrderId);
+  }
   return done(error);
 }
 
