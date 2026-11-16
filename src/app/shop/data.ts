@@ -1,9 +1,9 @@
 import "server-only";
-import { SHOP_DEDUCTION_COLUMNS, toShopDeductions, type ShopDeduction } from "@/lib/shop-deductions";
+import { loadShopDeductions, type ShopDeduction } from "@/lib/shop-deductions";
 import { createClient } from "@/lib/supabase/server";
 import { CATEGORY_LABEL, money } from "@/lib/format";
 import { pacificToday } from "@/lib/dates";
-import { fetchAllSettled } from "@/lib/supabase/fetch-all";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { pickShopRatesByItem } from "@/lib/shop-rates";
 import { isCustomerItem, lineItemFor } from "@/lib/customer-items";
 import type { NoteView } from "@/lib/notes";
@@ -22,6 +22,16 @@ import {
 
 // Every read here uses the signed-in shop's own client, so RLS limits rows to this shop.
 // Only shop-visible tables are queried; no customer prices, margins or CDS notes.
+//
+// A failed read throws (the page then shows an error) instead of reading as "no rows": a
+// failed queue read is not an empty queue, and a failed line or deduction read must never
+// give a settlement total from partly loaded inputs.
+
+/** The rows of a required read, or an error naming what could not be loaded. */
+function required<T>(res: { data: T; error: { message: string } | null }, what: string): T {
+  if (res.error) throw new Error(`Could not load ${what}: ${res.error.message}`);
+  return res.data;
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -60,7 +70,10 @@ export async function loadQueue(
     const parts = [`unit_number.ilike.${like}`, `po_number.ilike.${like}`, `location_label.ilike.${like}`];
     const woNumber = search.replace(/^wo[\s-]*/i, "");
     if (/^\d{1,9}$/.test(woNumber)) parts.push(`wo_number.eq.${Number(woNumber)}`);
-    const { data: customers } = await supabase.from("customers").select("id").ilike("name", `%${search}%`).limit(200);
+    const customers = required(
+      await supabase.from("customers").select("id").ilike("name", `%${search}%`).limit(200),
+      "the customers for the search",
+    );
     const ids = (customers ?? []).map((c) => c.id as string);
     if (ids.length) parts.push(`customer_id.in.(${ids.join(",")})`);
     filter = parts.join(",");
@@ -69,7 +82,7 @@ export async function loadQueue(
 
   const [open, done, doneCount] = await Promise.all([
     // Every open job (no cap): read in pages past the 1000 row API limit.
-    fetchAllSettled((from, to) =>
+    fetchAll((from, to) =>
       where(
         supabase
           .from("work_orders")
@@ -101,7 +114,9 @@ export async function loadQueue(
     customer_name: (r.customers as Named)?.name ?? "",
   });
 
-  const openJobs = (open.data ?? []).map(toJob);
+  required(done, "the completed jobs");
+  required(doneCount, "the completed job count");
+  const openJobs = open.map(toJob);
   const jobs: Record<QueueTab, QueueJob[]> = {
     awaiting: openJobs.filter((j) => TAB_STATUSES.awaiting.includes(j.status)),
     active: openJobs.filter((j) => TAB_STATUSES.active.includes(j.status)),
@@ -144,14 +159,17 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
   if (!isUuid(id)) return null;
   const supabase = await createClient();
 
-  const { data: wo } = await supabase
-    .from("work_orders")
-    .select(
-      "id, wo_number, status, market, fulfillment, location_label, site_address, unit_number, po_number, " +
-        "requested_work, pickup_window, shop_ship_status, affiliate_invoice_ref, completed_at, customer_id, affiliate_id, request_type, customers(name)",
-    )
-    .eq("id", id)
-    .maybeSingle();
+  const wo = required(
+    await supabase
+      .from("work_orders")
+      .select(
+        "id, wo_number, status, market, fulfillment, location_label, site_address, unit_number, po_number, " +
+          "requested_work, pickup_window, shop_ship_status, affiliate_invoice_ref, completed_at, customer_id, affiliate_id, request_type, customers(name)",
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    "the job",
+  );
   if (!wo) return null;
   const w = wo as unknown as Omit<JobRow, "customer_name"> & {
     customers: Named;
@@ -196,8 +214,15 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
       .eq("work_order_id", id)
       .order("created_at"),
     supabase.from("work_order_notes").select("id, author_name, created_at, body").eq("work_order_id", id).order("created_at"),
-    supabase.from("work_order_shop_deductions").select(SHOP_DEDUCTION_COLUMNS).eq("work_order_id", id),
+    // The shared loader: it throws when the deduction read fails.
+    loadShopDeductions(supabase, id),
   ]);
+  required(lines, "the job lines");
+  required(components, "the components");
+  required(auths, "the extra work requests");
+  required(files, "the attachments");
+  required(ships, "the shipments");
+  required(notes, "the notes");
 
   const lineRows: LineRow[] = (lines.data ?? []).map((r) => {
     const item = r.catalog_items as unknown as Item;
@@ -261,13 +286,16 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
   }));
 
   // Labels CDS created for this job: shops print them (the return leg) and see the ship-to.
-  const { data: labelRows } = (ships.data ?? []).length
-    ? await supabase
-        .from("shipment_labels")
-        .select("id, shipment_id, service_name, tracking_number, is_test")
-        .eq("work_order_id", id)
-        .eq("status", "active")
-    : { data: [] };
+  const labelRows = (ships.data ?? []).length
+    ? required(
+        await supabase
+          .from("shipment_labels")
+          .select("id, shipment_id, service_name, tracking_number, is_test")
+          .eq("work_order_id", id)
+          .eq("status", "active"),
+        "the shipping labels",
+      )
+    : [];
   const labelByShipment = new Map((labelRows ?? []).map((l) => [l.shipment_id as string, l]));
 
   const shipments: ShipmentRow[] = (ships.data ?? []).map((s) => {
@@ -283,9 +311,9 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
   });
 
   // RLS: a shop reads its own affiliate row only.
-  const { data: shopRow } = w.affiliate_id
-    ? await supabase.from("affiliates").select("is_in_house").eq("id", w.affiliate_id).maybeSingle()
-    : { data: null };
+  const shopRow = w.affiliate_id
+    ? required(await supabase.from("affiliates").select("is_in_house").eq("id", w.affiliate_id).maybeSingle(), "the shop")
+    : null;
   const inHouse = Boolean((shopRow as { is_in_house?: boolean } | null)?.is_in_house);
 
   let partOptions: CatalogOption[] = [];
@@ -306,7 +334,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     authOptions,
     inHouse,
     partsSale: inHouse && w.request_type === "parts_only",
-    deductions: toShopDeductions(deductions.data as Record<string, unknown>[] | null),
+    deductions,
   };
 }
 
@@ -322,7 +350,7 @@ async function loadCatalogOptions(market: string, shop: string | null, customer:
       .order("sku"),
     // RLS returns the default rows plus this shop's own rows only (each with or without a
     // customer). Paged so a larger catalog never passes the 1000 row cap.
-    fetchAllSettled((from, to) =>
+    fetchAll((from, to) =>
       supabase
         .from("shop_rates")
         .select("catalog_item_id, affiliate_id, customer_id, amount, effective_from, effective_to")
@@ -336,9 +364,9 @@ async function loadCatalogOptions(market: string, shop: string | null, customer:
 
   // Same rule as the database: the most specific rate for this shop and this order's customer
   // (for the in-house shop, only its own rows: CDS's own cost).
-  const best = pickShopRatesByItem(rates.data ?? [], shop, customer, inHouse);
+  const best = pickShopRatesByItem(rates, shop, customer, inHouse);
 
-  const all = items.data ?? [];
+  const all = required(items, "the catalog") ?? [];
   // Only shop-safe text: SKU, name, category, OE cross reference and the shop's own rate.
   const base = (i: (typeof all)[number]) => ({
     id: i.id as string,

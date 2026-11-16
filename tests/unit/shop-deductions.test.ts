@@ -97,8 +97,10 @@ describe("pages show the deduction and use it in the shop total", () => {
     const page = read("components/shop/JobDetail.tsx");
     expect(page).toContain("shopPayable(lines, deductions)");
     expect(page).toContain("deductionLabel(");
+    // Through the shared loader, which reads work_order_shop_deductions and throws on a failed read.
     const data = read("app/shop/data.ts");
-    expect(data).toContain("work_order_shop_deductions");
+    expect(data).toContain("loadShopDeductions(supabase, id)");
+    expect(read("lib/shop-deductions.ts")).toContain('.from("work_order_shop_deductions")');
   });
 
   it("the CDS preview of the shop page", () => {
