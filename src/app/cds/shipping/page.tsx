@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchAllSettled } from "@/lib/supabase/fetch-all";
 import { createShipment, setShipmentStatus, updateShipment } from "./actions";
 import { LABEL_STATUSES, NEW_SHIPMENT_STATUS, PACKAGE_TYPES, SERVICE_LEVELS, labelStatusLabel } from "./options";
+import { mergeShipmentQueue, openShipmentFilter } from "./queue";
 
 type Internal = { notes: string | null; quoted_cost: string | null; actual_cost: string | null };
 type ShipmentRow = {
@@ -42,7 +43,7 @@ type OpenWo = WoRef & { id: string };
 
 const IN_TRANSIT = ["picked_up", "in_transit", "out_for_delivery"];
 const OPEN_LABEL = ["needed", "error"];
-/** Newest legs listed; open legs (OPEN_LABEL, IN_TRANSIT) are added however old they are. */
+/** Newest legs listed, finished ones included; open legs (not delivered, or OPEN_LABEL) are added however old they are. */
 const RECENT = 300;
 const SHIPMENT_COLUMNS =
   "id, work_order_id, direction, carrier, service_level, tracking_number, label_status, status, package_type, weight_lb, length_in, width_in, height_in, ship_from, ship_to, eta_text, delivered_at, created_at, work_orders(wo_number, location_label, customers(name)), shipment_internal(notes, quoted_cost, actual_cost)";
@@ -55,12 +56,13 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
 
   const [recentRes, openRes, woRes] = await Promise.all([
     supabase.from("shipments").select(SHIPMENT_COLUMNS).order("created_at", { ascending: false }).limit(RECENT),
-    // Legs that still need attention stay listed however old: label needed or failed, and legs in transit.
+    // Legs that still need attention stay listed however old: every leg not yet delivered
+    // (including delayed, exception, address problem and no scan), and any leg whose label is needed or failed.
     fetchAllSettled((from, to) =>
       supabase
         .from("shipments")
         .select(SHIPMENT_COLUMNS)
-        .or(`label_status.in.(${OPEN_LABEL.join(",")}),status.in.(${IN_TRANSIT.join(",")})`)
+        .or(openShipmentFilter(OPEN_LABEL))
         .order("created_at", { ascending: false })
         .order("id")
         .range(from, to),
@@ -76,11 +78,10 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
     ),
   ]);
   const error = recentRes.error ?? openRes.error;
-  const byId = new Map<string, ShipmentRow>();
-  for (const s of [...((openRes.data ?? []) as unknown as ShipmentRow[]), ...((recentRes.data ?? []) as unknown as ShipmentRow[])]) {
-    byId.set(s.id, s);
-  }
-  const shipments = [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id));
+  const shipments = mergeShipmentQueue(
+    (openRes.data ?? []) as unknown as ShipmentRow[],
+    (recentRes.data ?? []) as unknown as ShipmentRow[],
+  );
   const openWos = (woRes.data ?? []) as unknown as OpenWo[];
   const editing = typeof edit === "string" ? shipments.find((s) => s.id === edit) : undefined;
   const canShip = shipStationConfigured();
