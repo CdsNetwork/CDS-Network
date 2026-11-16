@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { comboboxKey } from "@/lib/combobox-keys";
 
 export type SearchOption = {
   value: string;
@@ -26,13 +27,16 @@ type Props = {
   /** Rows shown at once. */
   limit?: number;
   emptyText?: string;
+  /** Enter on an already chosen value, for example to add the chosen catalog item. */
+  onEnterPicked?: () => void;
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
 /**
  * Type-to-search picker for long lists (catalog, parts, shops). Every word typed must match
- * the label, hint or keywords. Arrow keys move, Enter picks, Escape closes.
+ * the label, hint or keywords. Arrow keys move, Enter picks, Escape closes. Enter never
+ * submits the form around the picker.
  */
 export function SearchSelect({
   options,
@@ -46,6 +50,7 @@ export function SearchSelect({
   id,
   limit = 60,
   emptyText = "No matches",
+  onEnterPicked,
 }: Props) {
   const autoId = useId();
   const inputId = id ?? `search-${autoId}`;
@@ -84,17 +89,26 @@ export function SearchSelect({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "ArrowDown") {
+    const act = comboboxKey(e.key, { open, active, count: matches.length, picked: !!selectedOption, typed: query !== "" });
+    if (act.type === "move") {
       e.preventDefault();
       setOpen(true);
-      setActive((a) => Math.min(a + 1, matches.length - 1));
-    } else if (e.key === "ArrowUp") {
+      setActive(act.active);
+    } else if (act.type === "pick") {
       e.preventDefault();
-      setActive((a) => Math.max(a - 1, 0));
-    } else if (e.key === "Enter" && open) {
+      choose(matches[act.index]);
+    } else if (act.type === "enter-picked") {
+      // Without onEnterPicked, Enter submits the small form the box sits in (e.g. "+ Add Item").
+      // Boxes inside a larger form pass onEnterPicked so Enter never submits that form.
+      setOpen(false);
+      setQuery("");
+      if (onEnterPicked) {
+        e.preventDefault();
+        onEnterPicked();
+      }
+    } else if (act.type === "block") {
       e.preventDefault();
-      if (matches[active]) choose(matches[active]);
-    } else if (e.key === "Escape") {
+    } else if (act.type === "close") {
       setOpen(false);
       setQuery("");
     }
@@ -111,6 +125,7 @@ export function SearchSelect({
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
+        aria-activedescendant={open && active >= 0 && active < matches.length ? `${listId}-${active}` : undefined}
         autoComplete="off"
         disabled={disabled}
         placeholder={selectedOption ? selectedOption.label : placeholder}
@@ -140,13 +155,15 @@ export function SearchSelect({
             matches.map((o, i) => (
               <button
                 key={o.value}
+                id={`${listId}-${i}`}
                 type="button"
                 role="option"
                 aria-selected={o.value === selected}
                 disabled={o.disabled}
                 className={`suggestion${i === active || o.value === selected ? " active" : ""}`}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                // Keeps the focus in the box so the list stays open; the click then picks.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
                   if (blurTimer.current) clearTimeout(blurTimer.current);
                   choose(o);
                 }}

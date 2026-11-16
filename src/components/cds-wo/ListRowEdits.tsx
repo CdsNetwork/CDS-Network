@@ -65,18 +65,43 @@ export function ListStatusSelect({ woId, moves }: { woId: string; moves: StatusM
 }
 
 /**
- * Sets the CDS-only internal status from the work order list, as on the order page (same
- * server action; logged on the order as a CDS-only event). Shops never see it.
+ * Sets the CDS-only internal status on change, in the work order list and on the order page
+ * (same server action; logged on the order as a CDS-only event). Shops never see it.
+ * Pass `id` and `className` when a visible label points at the select.
  */
-export function ListInternalStatusSelect({ woId, value }: { woId: string; value: string | null }) {
+export function ListInternalStatusSelect({
+  woId,
+  value,
+  id,
+  className,
+}: {
+  woId: string;
+  value: string | null;
+  id?: string;
+  className?: string;
+}) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  // The page keys this select by the saved value, so a saved change from elsewhere resets it.
+  const [saved, setSaved] = useState(false);
   const [shown, setShown] = useState(value ?? "");
+  // A saved change from elsewhere (the page reloads with a new value) resets the select.
+  const [lastValue, setLastValue] = useState(value);
+  if (value !== lastValue) {
+    setLastValue(value);
+    setShown(value ?? "");
+  }
+
+  useEffect(() => {
+    if (!saved) return;
+    const t = setTimeout(() => setSaved(false), 2500);
+    return () => clearTimeout(t);
+  }, [saved]);
+
   return (
     <div>
       <select
-        className={`${styles.cellSelect} ${shown ? styles.cellSelectSet : ""}`}
+        id={id}
+        className={className ?? `${styles.cellSelect} ${shown ? styles.cellSelectSet : ""}`}
         value={shown}
         disabled={pending}
         aria-label="Internal status (CDS only)"
@@ -86,6 +111,7 @@ export function ListInternalStatusSelect({ woId, value }: { woId: string; value:
           const before = shown;
           setShown(next);
           setError(null);
+          setSaved(false);
           const fd = new FormData();
           fd.set("internal_status", next);
           startTransition(async () => {
@@ -93,17 +119,22 @@ export function ListInternalStatusSelect({ woId, value }: { woId: string; value:
             if (res.error) {
               setShown(before);
               setError(res.error);
+            } else {
+              setSaved(true);
             }
           });
         }}
       >
-        <option value="">Internal: blank</option>
+        <option value="">No internal status</option>
         {INTERNAL_STATUSES.map((v) => (
           <option key={v} value={v}>
             {INTERNAL_STATUS_LABEL[v]}
           </option>
         ))}
       </select>
+      <div role="status" className="small" style={saved && !pending ? { color: "#3b6d12", fontWeight: 700 } : undefined}>
+        {pending ? "Saving..." : saved ? "Saved" : null}
+      </div>
       {error && (
         <p className={`error ${styles.cellError}`} role="alert">
           {error}

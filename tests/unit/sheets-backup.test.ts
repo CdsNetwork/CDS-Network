@@ -139,7 +139,7 @@ describe("toRow", () => {
     const row = Object.fromEntries(HEADER.map((h, i) => [h, toRow(o)[i]]));
     expect(row["WO #"]).toBe(100123);
     expect(row["DATE"]).toBe("2026-10-20");
-    expect(row["STATUS"]).toBe("Awaiting Affiliate Acceptance");
+    expect(row["STATUS"]).toBe("Awaiting Acceptance");
     expect(row["LICENSEE"]).toBe("Divine Heat Transfer");
     expect(row["Service/ Parts"]).toBe("1 x SVC-DPF DPF Cleaning");
     expect(row["PART NUMBER"]).toBe("A123; B456");

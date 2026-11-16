@@ -13,7 +13,7 @@ export type WoStatus =
 
 export const STATUS_LABEL: Record<WoStatus, string> = {
   pending_review: "Pending Review",
-  awaiting_acceptance: "Awaiting Affiliate Acceptance",
+  awaiting_acceptance: "Awaiting Acceptance",
   accepted: "Accepted",
   picked_up: "Picked Up",
   in_process: "In Process",

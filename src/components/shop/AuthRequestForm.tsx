@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ActionForm } from "./ActionForm";
 import { CatalogPicker } from "./CatalogPicker";
+import styles from "./shop.module.css";
 import type { ActionState, CatalogOption } from "./types";
 
 export function AuthRequestForm({
@@ -46,7 +47,8 @@ export function AuthRequestForm({
               />
             </div>
             <div className="field">
-              <label>Request type</label>
+              {/* Not a form control: the type follows the picked item. */}
+              <span className={styles.fieldLabel}>Request type</span>
               <span className="pill">{kind === "service" ? "Service" : kind === "part" ? "Part" : "Pick an item"}</span>
             </div>
           </div>

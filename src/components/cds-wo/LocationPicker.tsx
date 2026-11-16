@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { comboboxKey } from "@/lib/combobox-keys";
 import { FULFILLMENT_LABEL } from "@/lib/format";
 import { matchLocations, orderLocationSuggestions } from "./location-match";
 import type { LocationOption } from "./NewWorkOrderForm";
@@ -34,6 +35,7 @@ export function LocationPicker({
   inputId = "location_text",
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestions = useMemo(() => orderLocationSuggestions(locations, query, candidateIds), [locations, query, candidateIds]);
   const candidates = useMemo(() => new Set(candidateIds), [candidateIds]);
@@ -42,6 +44,24 @@ export function LocationPicker({
   function choose(l: LocationOption) {
     onChoose(l);
     setOpen(false);
+  }
+
+  // Arrow keys move, Enter picks, Escape closes. Enter never submits the form around the picker.
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    const shown = open && !!customerId;
+    const act = comboboxKey(e.key, { open: shown, active, count: suggestions.length, picked: !!location, typed: true });
+    if (act.type === "move") {
+      e.preventDefault();
+      setOpen(true);
+      setActive(act.active);
+    } else if (act.type === "pick") {
+      e.preventDefault();
+      choose(suggestions[act.index]);
+    } else if (act.type === "enter-picked" || act.type === "block") {
+      e.preventDefault();
+    } else if (act.type === "close") {
+      setOpen(false);
+    }
   }
 
   let helper: ReactNode = "Start typing a location number, name, address, city, state or ZIP. Location number matches come first, sorted numerically.";
@@ -85,7 +105,12 @@ export function LocationPicker({
         role="combobox"
         aria-expanded={open}
         aria-controls={listId}
-        onFocus={() => setOpen(true)}
+        aria-autocomplete="list"
+        aria-activedescendant={open && active >= 0 && active < suggestions.length ? `${listId}-${active}` : undefined}
+        onFocus={() => {
+          setOpen(true);
+          setActive(location ? suggestions.findIndex((l) => l.id === location.id) : -1);
+        }}
         onBlur={() => {
           blurTimer.current = setTimeout(() => setOpen(false), 120);
         }}
@@ -94,26 +119,30 @@ export function LocationPicker({
           onQueryChange(value);
           onClear();
           setOpen(true);
+          setActive(value.trim() ? 0 : -1);
           const exact = matchLocations(locations, value).filter((l) => l.code.toLowerCase().startsWith(value.trim().toLowerCase()));
           if (value.trim() && exact.length === 1 && exact[0].code.toLowerCase() === value.trim().toLowerCase()) {
             choose(exact[0]);
           }
         }}
+        onKeyDown={onKeyDown}
       />
       {open && customerId && (
         <div className="suggestions" id={listId} role="listbox">
           {suggestions.length === 0 ? (
             <div className="suggestion small">No matching locations</div>
           ) : (
-            suggestions.map((l) => (
+            suggestions.map((l, i) => (
               <button
                 type="button"
                 key={l.id}
+                id={`${listId}-${i}`}
                 role="option"
                 aria-selected={location?.id === l.id}
-                className={`suggestion${location?.id === l.id ? " active" : ""}`}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                className={`suggestion${i === active || location?.id === l.id ? " active" : ""}`}
+                // Keeps the focus in the box so the list stays open; the click then picks.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
                   if (blurTimer.current) clearTimeout(blurTimer.current);
                   choose(l);
                 }}

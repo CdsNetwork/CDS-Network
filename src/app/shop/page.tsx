@@ -56,7 +56,7 @@ export default async function ShopQueuePage({ searchParams }: PageProps<"/shop">
         </div>
         <div style={{ minWidth: 0 }}>
           {detail ? (
-            <JobDetail data={detail} backHref={queueHref(tab, search)} />
+            <JobDetail data={detail} backHref={queueHref(tab, search)} search={search} done={one(params.done)} />
           ) : jobId ? (
             <div className="section" style={{ marginTop: 0 }}>
               <div className="notice warning">

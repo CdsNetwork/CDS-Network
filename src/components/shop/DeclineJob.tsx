@@ -2,14 +2,29 @@
 
 import { useState } from "react";
 import { ActionForm } from "./ActionForm";
+import styles from "./shop.module.css";
 import type { ActionState } from "./types";
 
-/** Decline with a required reason and a confirm step. The job goes back to CDS. */
-export function DeclineJob({ action }: { action: (prev: ActionState, fd: FormData) => Promise<ActionState> }) {
+/**
+ * Decline with a required reason and a confirm step. The job goes back to CDS.
+ * `small` shows a quiet text button, for accepted jobs where Decline is no longer the main choice.
+ */
+export function DeclineJob({
+  action,
+  small = false,
+}: {
+  action: (prev: ActionState, fd: FormData) => Promise<ActionState>;
+  small?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   if (!open) {
     return (
-      <button type="button" className="btn btn-danger" style={{ minHeight: 44 }} onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className={small ? styles.textButton : "btn btn-danger"}
+        style={{ minHeight: 44 }}
+        onClick={() => setOpen(true)}
+      >
         Decline Job
       </button>
     );

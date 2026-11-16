@@ -4,6 +4,7 @@ import { one } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { dateTime, FULFILLMENT_LABEL, woLabel, wrapCell } from "@/lib/format";
 import { INTAKE_MAILBOX } from "@/lib/intake/config";
+import { parsedView, type ParsedView } from "@/lib/intake/parsed-view";
 import type { ParsedEmail } from "@/lib/intake/types";
 import { createClient } from "@/lib/supabase/server";
 import { addSenderDomain, ignoreEmail, pasteEmail, removeSenderDomain, retryEmail } from "./actions";
@@ -32,8 +33,8 @@ const STATUS: Record<EmailRow["status"], { label: string; className: string }> =
 };
 const FILTERS = ["all", "parsed", "failed", "converted", "ignored"] as const;
 
-function Confidence({ parsed }: { parsed: ParsedEmail | null }) {
-  if (!parsed) return <span className="small">-</span>;
+function Confidence({ parsed }: { parsed: ParsedView | null }) {
+  if (!parsed || parsed.confidence == null) return <span className="small">-</span>;
   const pct = Math.round(parsed.confidence * 100);
   const color = parsed.confidence_label === "high" ? "#3b6d12" : parsed.confidence_label === "medium" ? "#7a5200" : "#a1261d";
   return (
@@ -61,12 +62,12 @@ const TEMPLATE_LABEL: Record<string, string> = {
   website_form: "Website fleet request form",
 };
 
-function Details({ p }: { p: ParsedEmail }) {
+function Details({ p }: { p: ParsedView }) {
   const f = p.fields;
   // Extra fields read from the request templates (and XPO's meter), shown only when found.
   const extra: [string, string | null | undefined, string | undefined][] = [
     ["Requested date", f.requested_date?.value, f.requested_date?.source],
-    ["Mileage", f.mileage?.value != null ? f.mileage.value.toLocaleString("en-US") : null, f.mileage?.source],
+    ["Mileage", f.mileage?.value != null ? f.mileage?.value.toLocaleString("en-US") : null, f.mileage?.source],
     ["Region", f.region?.value, f.region?.source],
     ["Order type", f.order_type?.value, f.order_type?.source],
     ["Manufacturer", f.manufacturer?.value, f.manufacturer?.source],
@@ -91,13 +92,13 @@ function Details({ p }: { p: ParsedEmail }) {
             ? `${p.location.code} (${p.location.via.replace("_", " ")})`
             : p.location_candidates.length
               ? `one of ${p.location_candidates.map((c) => c.code).join(", ")}`
-              : [f.location_number.value, f.location_name.value, f.location_address.value].filter(Boolean).join(", ") || null
+              : [f.location_number?.value, f.location_name?.value, f.location_address?.value].filter(Boolean).join(", ") || null
         }
       />
-      <Field label="Unit" value={f.unit_number.value} source={f.unit_number.source} />
-      <Field label="PO" value={f.po_number.value} source={f.po_number.source} />
-      {f.vin.value && <Field label="VIN" value={f.vin.value} source={f.vin.source} />}
-      <Field label="Method" value={f.fulfillment.value ? FULFILLMENT_LABEL[f.fulfillment.value] ?? f.fulfillment.value : null} source={f.fulfillment.source} />
+      <Field label="Unit" value={f.unit_number?.value} source={f.unit_number?.source} />
+      <Field label="PO" value={f.po_number?.value} source={f.po_number?.source} />
+      {f.vin?.value && <Field label="VIN" value={f.vin?.value} source={f.vin?.source} />}
+      <Field label="Method" value={f.fulfillment?.value ? FULFILLMENT_LABEL[f.fulfillment?.value] ?? f.fulfillment?.value : null} source={f.fulfillment?.source} />
       {extra.filter(([, value]) => value).map(([label, value, source]) => (
         <Field key={label} label={label} value={value} source={source} />
       ))}
@@ -123,7 +124,7 @@ function Details({ p }: { p: ParsedEmail }) {
           </div>
         ))}
       </div>
-      {f.notes.value && <Field label="Notes" value={f.notes.value} />}
+      {f.notes?.value && <Field label="Notes" value={f.notes?.value} />}
       {p.warnings.length > 0 && (
         <ul className="small" style={{ margin: "4px 0 0", paddingLeft: 18 }}>
           {p.warnings.map((w, n) => (
@@ -211,6 +212,7 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
             {emails.map((e) => {
               const wo = one(e.work_orders);
               const s = STATUS[e.status];
+              const parsed = parsedView(e.parsed);
               return (
                 <tr key={e.id}>
                   <td className="nowrap">
@@ -230,15 +232,15 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
                         {e.error}
                       </div>
                     )}
-                    {e.status === "ignored" && e.parsed?.ignore_reason && (
+                    {e.status === "ignored" && parsed?.ignore_reason && (
                       <div className="small" style={{ marginTop: 4 }}>
-                        {e.parsed.ignore_reason}
+                        {parsed.ignore_reason}
                       </div>
                     )}
                   </td>
-                  <td style={{ minWidth: 260 }}>{e.parsed ? <Details p={e.parsed} /> : <span className="small">Not read yet</span>}</td>
+                  <td style={{ minWidth: 260 }}>{parsed ? <Details p={parsed} /> : <span className="small">Not read yet</span>}</td>
                   <td>
-                    <Confidence parsed={e.parsed} />
+                    <Confidence parsed={parsed} />
                   </td>
                   <td>
                     {e.work_order_id ? (

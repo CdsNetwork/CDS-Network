@@ -13,6 +13,23 @@ export const TAB_STATUSES: Record<QueueTab, WoStatus[]> = {
 
 export const EDITABLE_STATUSES: WoStatus[] = ["accepted", "picked_up", "in_process"];
 
+/** What a status change sends back in the URL (?done=), so the outcome is still shown after the page re-renders. */
+export type DoneKey = "accepted" | "picked_up" | "in_process" | "completed";
+
+const DONE_TEXT: Record<DoneKey, string> = {
+  accepted: "Job accepted. CDS was notified.",
+  picked_up: "Marked picked up.",
+  in_process: "Marked in process.",
+  completed: "Job completed. CDS was notified.",
+};
+
+/** The confirmation for ?done=, or null when the value is unknown or no longer matches the job. */
+export function doneNotice(done: string | undefined, status: WoStatus): string | null {
+  if (!done || !Object.hasOwn(DONE_TEXT, done) || status === "awaiting_acceptance") return null;
+  if (done === "completed" && EDITABLE_STATUSES.includes(status)) return null;
+  return DONE_TEXT[done as DoneKey];
+}
+
 export function tabForStatus(status: WoStatus): QueueTab {
   if (TAB_STATUSES.awaiting.includes(status)) return "awaiting";
   if (TAB_STATUSES.active.includes(status)) return "active";

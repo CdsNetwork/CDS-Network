@@ -150,8 +150,38 @@
   overflow-wrap: anywhere;
 }
 
-/* Phones: list first, then the selected job on its own screen. */
+/* Matches the look of a field label, for a caption that has no form control. */
+.fieldLabel {
+  display: block;
+  font-size: 12px;
+  font-weight: 750;
+  color: #5e6a72;
+  margin-bottom: 5px;
+}
+
+/* A quiet button for a secondary choice (Decline after the job was accepted). */
+.textButton {
+  border: 0;
+  background: none;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--red);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Phones: list first, then the selected job on its own screen. Buttons and fields are at
+   least 44px tall so they are easy to tap, also with gloves. */
 @media (max-width: 950px) {
+  .shopPage :global(.btn),
+  .shopPage button,
+  .shopPage :global(.input),
+  .shopPage select {
+    min-height: 44px;
+  }
+
   .hideOnPhone {
     display: none;
   }

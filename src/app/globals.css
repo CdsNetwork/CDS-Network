@@ -38,7 +38,7 @@ aside.sidebar { background: #fff; border-right: 1px solid var(--line); padding: 
 .navbtn.active { background: #e8f1ff; color: var(--blue); box-shadow: inset 4px 0 0 var(--blue); }
 .navbtn span { font-size: 18px; min-width: 22px; text-align: center; }
 .mobile-nav { display: none; }
-.main { padding: 26px; max-width: 1500px; width: 100%; margin: auto; min-width: 0; }
+.main { padding: 26px; max-width: 1500px; width: 100%; margin: 0 auto; min-width: 0; }
 /* Long unbroken text (serial numbers, notes, pasted links) wraps instead of widening the
    page. Tables keep normal word sizing, so WO numbers, IDs and short values never break. */
 .main { overflow-wrap: anywhere; }

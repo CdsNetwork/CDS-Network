@@ -89,17 +89,3 @@ export function ActionForm({
     </form>
   );
 }
-
-/** A Milestone 2 feature: shown, but not usable yet. */
-export function M2Button({ label, className = "btn btn-secondary btn-small" }: { label: string; className?: string }) {
-  return (
-    <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
-      <button className={className} type="button" disabled title="Milestone 2">
-        {label}
-      </button>
-      <span className="small" style={{ fontSize: 11 }}>
-        Milestone 2
-      </span>
-    </span>
-  );
-}

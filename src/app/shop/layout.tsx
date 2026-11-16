@@ -1,5 +1,6 @@
 import { Brand } from "@/components/Brand";
 import { SignOutButton } from "@/components/SignOutButton";
+import styles from "@/components/shop/shop.module.css";
 import { requireShop } from "@/lib/auth";
 
 export default async function ShopLayout({ children }: LayoutProps<"/shop">) {
@@ -14,7 +15,7 @@ export default async function ShopLayout({ children }: LayoutProps<"/shop">) {
           <SignOutButton />
         </div>
       </header>
-      <main className="main">{children}</main>
+      <main className={`main ${styles.shopPage}`}>{children}</main>
     </>
   );
 }

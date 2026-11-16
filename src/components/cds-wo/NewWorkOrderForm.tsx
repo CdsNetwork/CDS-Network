@@ -130,7 +130,7 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
 
   const fulfillmentHelper: Record<string, string> = {
     pickup: "Pickup jobs need a pickup window from the shop when it accepts.",
-    shipping: "Shipping labels are added on the work order page. Label buying is Milestone 2.",
+    shipping: "Make the shipping labels on the work order page after you create it.",
     supplier_direct: "Parts only: location routing is bypassed. The supplier ships directly to the customer.",
     unspecified: "Choose how the part moves between the customer and the shop.",
   };
@@ -241,6 +241,7 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
                   options={catalogOptions}
                   value={pickItem}
                   onChange={(v) => setPickItem(v)}
+                  onEnterPicked={addLine}
                   placeholder="Type SKU, name or OE number..."
                   limit={150}
                 />

@@ -11,10 +11,11 @@ const TABS: { key: QueueTab; label: string; empty: string }[] = [
 ];
 
 /** Queue URL that keeps the search while switching tabs or opening a job. */
-export function queueHref(tab: QueueTab, search: string, job?: string): string {
+export function queueHref(tab: QueueTab, search: string, job?: string, done?: string): string {
   const p = new URLSearchParams({ tab });
   if (search) p.set("q", search);
   if (job) p.set("job", job);
+  if (done) p.set("done", done);
   return `/shop?${p.toString()}`;
 }
 

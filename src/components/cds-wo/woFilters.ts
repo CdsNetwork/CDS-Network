@@ -197,12 +197,6 @@ export async function financialsFor(supabase: Supabase, ids: string[]): Promise<
   return out;
 }
 
-/** Table status labels: short enough for the dashboard table; the full label goes in a title. */
-export const TABLE_STATUS_LABEL: Partial<Record<WoStatus, string>> = {
-  awaiting_acceptance: "Awaiting Acceptance",
-  rejected_by_affiliate: "Declined by Shop",
-};
-
 // ---------------------------------------------------------------- Pacific periods
 
 const TZ = "America/Los_Angeles";

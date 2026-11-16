@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ListInternalStatusSelect, ListNotesButton, ListStatusSelect } from "@/components/cds-wo/ListRowEdits";
 import { listStatusMoves } from "@/components/cds-wo/list-edits";
 import { PeriodSelect } from "@/components/cds-wo/PeriodSelect";
+import { SubmitOnChange } from "@/components/cds-wo/SubmitOnChange";
 import { isQuestionPending, QUESTION_PARAM, questionTitle } from "@/components/cds-wo/question-pending";
 import { failedMark, isNewFromShop } from "@/components/cds-wo/shop-updates";
 import styles from "@/components/cds-wo/cds-wo.module.css";
@@ -20,7 +21,6 @@ import {
   parsePeriod,
   periodRange,
   PERIODS,
-  TABLE_STATUS_LABEL,
   TO_INVOICE,
   type Financials,
 } from "@/components/cds-wo/woFilters";
@@ -222,43 +222,45 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
             placeholder="Search WO, PO, unit, customer, location, tracking #..."
             aria-label="Search work orders"
           />
-          <select name="status" defaultValue={statusParam} style={{ maxWidth: 260 }} aria-label="Status">
-            <option value="">All statuses</option>
-            <optgroup label="Groups">
-              {Object.entries(GROUPS).map(([value, g]) => (
-                <option key={value} value={value}>
-                  {g.label}
+          <SubmitOnChange>
+            <select name="status" defaultValue={statusParam} style={{ maxWidth: 260 }} aria-label="Status">
+              <option value="">All statuses</option>
+              <optgroup label="Groups">
+                {Object.entries(GROUPS).map(([value, g]) => (
+                  <option key={value} value={value}>
+                    {g.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Status">
+                {ALL_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {STATUS_LABEL[s]}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Component result">
+                <option value={CONDEMNED}>Condemned</option>
+              </optgroup>
+            </select>
+            <select name="shop" defaultValue={shopParam} style={{ maxWidth: 240 }} aria-label="Shop">
+              <option value="">All shops</option>
+              <option value={IN_HOUSE}>In-house sales (CDS Inc)</option>
+              {shopChoices.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
                 </option>
               ))}
-            </optgroup>
-            <optgroup label="Status">
-              {ALL_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_LABEL[s]}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Component result">
-              <option value={CONDEMNED}>Condemned</option>
-            </optgroup>
-          </select>
-          <select name="shop" defaultValue={shopParam} style={{ maxWidth: 240 }} aria-label="Shop">
-            <option value="">All shops</option>
-            <option value={IN_HOUSE}>In-house sales (CDS Inc)</option>
-            {shopChoices.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-          <label className="small nowrap" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <input type="checkbox" name="from_shop" value="1" defaultChecked={fromShop} />
-            New from shop
-          </label>
-          <label className="small nowrap" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <input type="checkbox" name={QUESTION_PARAM} value="1" defaultChecked={question} />
-            Question Pending
-          </label>
+            </select>
+            <label className="small nowrap" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" name="from_shop" value="1" defaultChecked={fromShop} />
+              New from shop
+            </label>
+            <label className="small nowrap" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" name={QUESTION_PARAM} value="1" defaultChecked={question} />
+              Question Pending
+            </label>
+          </SubmitOnChange>
           {period !== "month" && <input type="hidden" name="period" value={period} />}
           <button className="btn btn-secondary" type="submit">
             Search
@@ -310,8 +312,6 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   const customer = one(r.customers)?.name ?? "-";
                   const shop = one(r.affiliates)?.display_name ?? null;
                   const inHouse = Boolean(one(r.affiliates)?.is_in_house);
-                  const fullStatus = STATUS_LABEL[r.status] ?? r.status;
-                  const shortStatus = TABLE_STATUS_LABEL[r.status] ?? fullStatus;
                   const fromShopNew = isNewFromShop(r.work_order_shop_activity);
                   const failed = failedMark(r.work_order_components);
                   const questionOpen = isQuestionPending(r.work_order_questions);
@@ -356,8 +356,8 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                         {logisticsLabel(r.fulfillment)}
                       </td>
                       <td>
-                        <span className={`status ${r.status}`} title={shortStatus !== fullStatus ? fullStatus : undefined}>
-                          {shortStatus}
+                        <span className={`status ${r.status}`}>
+                          {STATUS_LABEL[r.status] ?? r.status}
                         </span>
                         {failed && (
                           <div>
@@ -373,7 +373,6 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                         )}
                         <ListStatusSelect woId={r.id} moves={moves} />
                         <ListInternalStatusSelect
-                          key={internal?.internal_status ?? ""}
                           woId={r.id}
                           value={internal?.internal_status ?? null}
                         />

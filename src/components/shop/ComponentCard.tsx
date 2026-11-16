@@ -64,6 +64,8 @@ export function ComponentCard({
   const measured = measurementsRequired(c.component_type, result);
   const [wBefore, setWBefore] = useState(fmt(c.weight_before_g));
   const [wAfter, setWAfter] = useState(fmt(c.weight_after_g));
+  // True once a field was edited and not yet saved, so the shop sees that Save is still needed.
+  const [dirty, setDirty] = useState(false);
 
   const removed =
     wBefore !== "" && wAfter !== "" && Number.isFinite(Number(wBefore) - Number(wAfter))
@@ -84,7 +86,15 @@ export function ComponentCard({
           confirmText={`Remove ${componentLabel(c)} and its entered data?`}
         />
       </div>
-      <ActionForm action={saveAction} submitLabel="Save" submitClass="btn btn-secondary">
+      <ActionForm
+        action={saveAction}
+        submitLabel="Save"
+        submitClass="btn btn-secondary"
+        successText="Saved."
+        onChange={() => setDirty(true)}
+        onSuccess={() => setDirty(false)}
+        footer={dirty ? <span className="small" style={{ fontWeight: 700 }}>Not saved yet</span> : null}
+      >
         <input type="hidden" name="component_type" value={c.component_type} />
         <div className="grid3">
           {(
@@ -109,7 +119,7 @@ export function ComponentCard({
                 label="Differential Pressure: Before"
                 required={measured}
                 value={fmt(c.dp_before)}
-                step="0.01"
+                step="any"
                 min="0"
                 suffix="e.g. 2.5"
               />
@@ -119,7 +129,7 @@ export function ComponentCard({
                 label="Differential Pressure: After"
                 required={measured}
                 value={fmt(c.dp_after)}
-                step="0.01"
+                step="any"
                 min="0"
                 suffix="e.g. 0.8"
               />
@@ -129,8 +139,8 @@ export function ComponentCard({
                 label="Weight Before (g)"
                 required={measured}
                 value={wBefore}
-                step="0.1"
-                min="0.1"
+                step="any"
+                min="0"
                 suffix="grams"
                 onChange={setWBefore}
               />
@@ -140,8 +150,8 @@ export function ComponentCard({
                 label="Weight After (g)"
                 required={measured}
                 value={wAfter}
-                step="0.1"
-                min="0.1"
+                step="any"
+                min="0"
                 suffix="grams"
                 onChange={setWAfter}
               />

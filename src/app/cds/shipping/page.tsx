@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SearchSelect } from "@/components/SearchSelect";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
+import { SubmitOnChange } from "@/components/cds-wo/SubmitOnChange";
 import { LabelPanel } from "@/components/shipping/LabelPanel";
 import { ShippingSettings } from "@/components/shipping/ShippingSettings";
 import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/shipstation/views";
@@ -54,7 +55,7 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
 
   const [recentRes, openRes, woRes] = await Promise.all([
     supabase.from("shipments").select(SHIPMENT_COLUMNS).order("created_at", { ascending: false }).limit(RECENT),
-    // Legs that still need attention stay listed however old: label exceptions and legs in transit.
+    // Legs that still need attention stay listed however old: label needed or failed, and legs in transit.
     fetchAllSettled((from, to) =>
       supabase
         .from("shipments")
@@ -114,7 +115,7 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
           <div className="v">{shipments.length}</div>
         </div>
         <div className="card metric">
-          <div className="k">Label exceptions</div>
+          <div className="k">Label needed or failed</div>
           <div className="v">{exceptions}</div>
         </div>
         <div className="card metric">
@@ -247,20 +248,16 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
                     <span className={STATUS_TAG[s.status] ?? "tag"}>{SHIPMENT_STATUS_LABEL[s.status] ?? s.status}</span>
                     {s.delivered_at && <div className="small">Delivered {dateTime(s.delivered_at)}</div>}
                     <div style={{ marginTop: 6 }}>
-                      <ActionForm
-                        key={`${s.id}-${s.status}`}
-                        action={setShipmentStatus.bind(null, s.id)}
-                        submitLabel="Set"
-                        submitClassName="btn btn-secondary btn-small"
-                        inline
-                      >
-                        <select name="status" defaultValue={s.status} aria-label="Shipment status" style={{ padding: "5px 6px", fontSize: 12 }}>
-                          {Object.entries(SHIPMENT_STATUS_LABEL).map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
+                      <ActionForm key={`${s.id}-${s.status}`} action={setShipmentStatus.bind(null, s.id)} inline>
+                        <SubmitOnChange>
+                          <select name="status" defaultValue={s.status} aria-label="Shipment status" style={{ padding: "5px 6px", fontSize: 12 }}>
+                            {Object.entries(SHIPMENT_STATUS_LABEL).map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </SubmitOnChange>
                       </ActionForm>
                     </div>
                   </td>
@@ -282,29 +279,6 @@ export default async function ShippingPage({ searchParams }: PageProps<"/cds/shi
       </div>
       <div className="row small" style={{ marginTop: 8 }}>
         Statuses of legs with a ShipStation label follow the carrier (tracking webhook). Legs without one are set by hand.
-      </div>
-
-      <div className="section">
-        <h3>Shipping flows</h3>
-        <div className="notice">
-          Parts-only orders can ship straight from the supplier to the customer (Supplier → Customer), bypassing the service
-          affiliate.
-        </div>
-        <h3 style={{ marginTop: 16 }}>Typical DPF shipping flow</h3>
-        <div className="grid3">
-          <div className="summarybox">
-            <b>1. Customer → Affiliate</b>
-            <p className="small">CDS sends the customer a label so the part can ship to the assigned shop.</p>
-          </div>
-          <div className="summarybox">
-            <b>2. Affiliate performs service</b>
-            <p className="small">The shop receives, cleans and tests the part, then marks it ready to ship.</p>
-          </div>
-          <div className="summarybox">
-            <b>3. Affiliate → Customer</b>
-            <p className="small">CDS provides the return label and the cleaned part ships back to the customer.</p>
-          </div>
-        </div>
       </div>
     </>
   );

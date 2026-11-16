@@ -37,11 +37,12 @@ import { AttachmentForm } from "./AttachmentForm";
 import { AuthRequestForm } from "./AuthRequestForm";
 import { ComponentCard } from "./ComponentCard";
 import { DeclineJob } from "./DeclineJob";
+import { queueHref } from "./JobQueue";
 import { TestBadge } from "@/components/shipping/TestBadge";
 import { NotesList } from "@/components/WorkOrderNotes";
 import { NOTE_MAX_LENGTH } from "@/lib/notes";
 import styles from "./shop.module.css";
-import { EDITABLE_STATUSES, componentLabel, type ComponentRow, type LineRow } from "./types";
+import { EDITABLE_STATUSES, componentLabel, doneNotice, type ComponentRow, type DoneKey, type LineRow } from "./types";
 
 const ORIGIN_LABEL: Record<LineRow["origin"], string> = {
   cds_order: "Ordered by CDS",
@@ -58,7 +59,18 @@ const AUTH_STATUS_LABEL: Record<string, string> = {
 
 const qtyText = (n: number) => String(n);
 
-export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: string }) {
+export function JobDetail({
+  data,
+  backHref,
+  search = "",
+  done,
+}: {
+  data: JobDetailData;
+  backHref: string;
+  search?: string;
+  /** Set after a status change (?done=), so its confirmation shows on the re-rendered page. */
+  done?: string;
+}) {
   const { job, lines, components, authRequests, attachments, shipments, notes, deductions } = data;
   const id = job.id;
   const editable = EDITABLE_STATUSES.includes(job.status);
@@ -75,12 +87,22 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
   const photoCount = (componentId: string) => attachments.filter((a) => a.component_id === componentId).length;
   const componentOptions = components.map((c) => ({ id: c.id, label: componentLabel(c) }));
   const componentName = new Map(components.map((c) => [c.id, componentLabel(c)]));
+  const notice = doneNotice(done, job.status);
+  const doneHref = (key: DoneKey) => queueHref(key === "completed" ? "completed" : "active", search, id, key);
+  // On a pickup job the next step after accepting is Picked Up, then In Process.
+  const nextIsPickup = isPickup && job.status === "accepted";
 
   return (
     <div>
       <Link href={backHref} className={`link ${styles.back}`}>
         ← Back to queue
       </Link>
+
+      {notice && (
+        <div className="notice" role="status">
+          {notice}
+        </div>
+      )}
 
       {/* ------------------------------------------------ hero */}
       <div className="hero">
@@ -96,9 +118,13 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
         {job.site_address && <div className="small" style={{ marginTop: 4 }}>{job.site_address}</div>}
         <div className="row" style={{ marginTop: 10 }}>
           {isShipping ? (
-            <span className="tag blue">📦 Shipping</span>
+            <span className="tag blue">
+              <span aria-hidden="true">📦</span> Shipping
+            </span>
           ) : isPickup ? (
-            <span className="tag green">🚚 Pickup / Delivery</span>
+            <span className="tag green">
+              <span aria-hidden="true">🚚</span> Pickup / Delivery
+            </span>
           ) : (
             <span className="tag">{FULFILLMENT_LABEL[job.fulfillment]}</span>
           )}
@@ -154,7 +180,14 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
 
           {awaiting && (
             <div style={{ marginTop: 12 }}>
-              <ActionForm action={acceptJob.bind(null, id)} submitLabel="Accept Work" pendingLabel="Accepting..." submitClass="btn btn-primary">
+              <ActionForm
+                action={acceptJob.bind(null, id)}
+                submitLabel="Accept Work"
+                pendingLabel="Accepting..."
+                submitClass="btn btn-primary"
+                successText="Job accepted. CDS was notified."
+                successHref={doneHref("accepted")}
+              >
                 {isPickup && (
                   <div className="field">
                     <label htmlFor="pickup-window">
@@ -182,12 +215,26 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
 
           {(job.status === "accepted" || job.status === "picked_up") && (
             <div className="row" style={{ marginTop: 12, alignItems: "flex-start" }}>
-              {isPickup && job.status === "accepted" && (
-                <ActionForm action={setProgress.bind(null, id)} submitLabel="Picked Up" submitClass="btn btn-secondary">
+              {nextIsPickup && (
+                <ActionForm
+                  action={setProgress.bind(null, id)}
+                  submitLabel="Picked Up"
+                  pendingLabel="Marking picked up..."
+                  submitClass="btn btn-primary"
+                  successText="Marked picked up."
+                  successHref={doneHref("picked_up")}
+                >
                   <input type="hidden" name="status" value="picked_up" />
                 </ActionForm>
               )}
-              <ActionForm action={setProgress.bind(null, id)} submitLabel="In Process" submitClass="btn btn-blue">
+              <ActionForm
+                action={setProgress.bind(null, id)}
+                submitLabel="In Process"
+                pendingLabel="Marking in process..."
+                successText="Marked in process."
+                submitClass={nextIsPickup ? "btn btn-secondary" : "btn btn-primary"}
+                successHref={doneHref("in_process")}
+              >
                 <input type="hidden" name="status" value="in_process" />
               </ActionForm>
             </div>
@@ -216,7 +263,7 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
 
           {(awaiting || job.status === "accepted") && (
             <div className="row" style={{ marginTop: 14 }}>
-              <DeclineJob action={declineJob.bind(null, id)} />
+              <DeclineJob action={declineJob.bind(null, id)} small={!awaiting} />
             </div>
           )}
         </section>
@@ -229,278 +276,283 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
         </section>
       </div>
 
-      {/* ------------------------------------------------ notes */}
-      <section className="section" id="notes">
-        <h3>Notes</h3>
-        <p className="small">Notes between your shop and CDS for this job. CDS sees everything you add here.</p>
-        <NotesList notes={notes} />
-        <ActionForm action={addNote.bind(null, id)} submitLabel="Add note" pendingLabel="Adding..." resetOnSuccess>
-          <div className="field" style={{ marginTop: 10 }}>
-            <label htmlFor="note-body">New note</label>
-            <textarea id="note-body" name="body" rows={3} required maxLength={NOTE_MAX_LENGTH} />
-          </div>
-        </ActionForm>
-      </section>
-
-      {/* ------------------------------------------------ services and parts */}
-      <section className="section">
-        <h3>Services & Parts Used</h3>
-        <p className="small">
-          Services and parts ordered by CDS are listed here. Add any catalog parts actually used on the job.
-        </p>
-        {lines.length === 0 && <p className="small">No services or parts on this job yet.</p>}
-        {lines.map((l) => (
-          <div key={l.id} className={styles.lineRow}>
-            <div style={{ minWidth: 0 }}>
-              <strong>{l.sku}</strong>
-              <div>{l.name}</div>
-              {l.description && <div className="small">{l.description}</div>}
-              <div className="small">{ORIGIN_LABEL[l.origin]}</div>
-            </div>
-            <div className={styles.lineMoney}>
-              <div>
-                <div className="small">
-                  {qtyText(l.qty)} x {shopMoney(l.shop_unit_rate)}
-                </div>
-                <div className="money">{shopMoney(l.shop_unit_rate === null ? null : l.shop_unit_rate * l.qty)}</div>
+      {/* Work sections stay hidden until the shop accepts, so Accept and Decline are the first things on the page. */}
+      {!awaiting && (
+        <>
+          {/* ------------------------------------------------ notes */}
+          <section className="section" id="notes">
+            <h3>Notes</h3>
+            <p className="small">Notes between your shop and CDS for this job. CDS sees everything you add here.</p>
+            <NotesList notes={notes} />
+            <ActionForm action={addNote.bind(null, id)} submitLabel="Add note" pendingLabel="Adding..." successText="Note added." resetOnSuccess>
+              <div className="field" style={{ marginTop: 10 }}>
+                <label htmlFor="note-body">New note</label>
+                <textarea id="note-body" name="body" rows={3} required maxLength={NOTE_MAX_LENGTH} />
               </div>
-              {editable && l.origin === "shop_added" && (
-                <ActionButton
-                  action={removePart.bind(null, id, l.id)}
-                  label="Remove"
-                  pendingLabel="Removing..."
-                  className="remove"
-                />
-              )}
-            </div>
-          </div>
-        ))}
-        {deductions.map((d) => (
-          <div key={d.kind} className={styles.lineRow}>
-            <div style={{ minWidth: 0 }}>
-              <strong>Shipping deduction</strong>
-              <div>{deductionLabel(d)}</div>
-              <div className="small">Automatic on shipped orders</div>
-            </div>
-            <div className={styles.lineMoney}>
-              <div>
-                <div className="small">
-                  {qtyText(d.filters)} x {money(d.unit_amount)}
+            </ActionForm>
+          </section>
+
+          {/* ------------------------------------------------ services and parts */}
+          <section className="section">
+            <h3>Services & Parts Used</h3>
+            <p className="small">
+              Services and parts ordered by CDS are listed here. Add any catalog parts actually used on the job.
+            </p>
+            {lines.length === 0 && <p className="small">No services or parts on this job yet.</p>}
+            {lines.map((l) => (
+              <div key={l.id} className={styles.lineRow}>
+                <div style={{ minWidth: 0 }}>
+                  <strong>{l.sku}</strong>
+                  <div>{l.name}</div>
+                  {l.description && <div className="small">{l.description}</div>}
+                  <div className="small">{ORIGIN_LABEL[l.origin]}</div>
                 </div>
-                <div className="money">{money(d.amount)}</div>
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {editable && (
-          <div className="uploadBox" style={{ marginTop: 14 }}>
-            <h4 style={{ margin: "0 0 8px" }}>Add Parts</h4>
-            <AddPartForm action={addPart.bind(null, id)} options={data.partOptions} />
-          </div>
-        )}
-      </section>
-
-      {/* ------------------------------------------------ extra work */}
-      <section className="section">
-        <h3>Request Additional Authorization</h3>
-        <p className="small">
-          Use this only when unexpected repairs, parts or services are needed beyond the original authorization. Do not
-          perform the added work until CDS approves it.
-        </p>
-        {editable && <AuthRequestForm action={requestAuthorization.bind(null, id)} options={data.authOptions} />}
-        {authRequests.length === 0 && <p className="small">No additional authorization requests.</p>}
-        {authRequests.map((r) => (
-          <div key={r.id} className={`authCard ${r.status === "withdrawn" ? "rejected" : r.status}`}>
-            <div className="row between" style={{ alignItems: "center" }}>
-              <strong>
-                AR-{job.wo_number}-{r.seq}
-              </strong>
-              <span className={`badge ${r.status}`}>{AUTH_STATUS_LABEL[r.status] ?? r.status}</span>
-            </div>
-            <div style={{ marginTop: 6 }}>
-              {r.kind === "service" ? "Service" : "Part"}: <strong>{r.sku}</strong> - {r.name} (Qty {qtyText(r.qty)})
-            </div>
-            <div className="small" style={{ whiteSpace: "pre-wrap" }}>
-              {r.note}
-            </div>
-            <div className="small">Requested {date(r.requested_at)}</div>
-          </div>
-        ))}
-      </section>
-
-      {/* ------------------------------------------------ attachments */}
-      <section className="section" id="attachments">
-        <h3>Photos & Attachments</h3>
-        <p className="small">
-          Attach condition photos, damaged components, part-number tags, shipping damage, or completed-unit photos. These
-          stay with the work-order history.
-        </p>
-        <div className={canUpload ? "grid2" : undefined}>
-          {canUpload && <AttachmentForm
-              workOrderId={id}
-              components={componentOptions}
-              actions={{ prepare: prepareUpload, register: registerUpload }}
-            />}
-          <div>
-            {attachments.length === 0 && <p className="small">No attachments yet.</p>}
-            <div className="attachmentGrid">
-              {attachments.map((a) => {
-                const isImage = (a.mime_type ?? "").startsWith("image/");
-                return (
-                  <div key={a.id} className={styles.attachment}>
-                    {a.url && isImage ? (
-                      <a href={a.url} target="_blank" rel="noopener noreferrer">
-                        {/* Signed storage URLs expire, so next/image caching does not fit here. */}
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img className="thumb" src={a.url} alt={a.file_name} loading="lazy" />
-                      </a>
-                    ) : (
-                      <a
-                        href={a.url ?? undefined}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`thumb ${styles.fileIcon}`}
-                      >
-                        {isImage ? "Photo" : "PDF"}
-                      </a>
-                    )}
-                    <div className="small" style={{ marginTop: 6 }}>
-                      {ATTACHMENT_CATEGORY_LABEL[a.category] ?? a.category}
-                      {a.from_cds && (
-                        <>
-                          {" "}
-                          <span className="tag blue">From CDS</span>
-                        </>
-                      )}
+                <div className={styles.lineMoney}>
+                  <div>
+                    <div className="small">
+                      {qtyText(l.qty)} x {shopMoney(l.shop_unit_rate)}
                     </div>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>
-                      {a.url ? (
-                        <a className="link" href={a.url} target="_blank" rel="noopener noreferrer">
-                          {a.file_name}
-                        </a>
-                      ) : (
-                        a.file_name
-                      )}
-                    </div>
-                    {a.component_id && componentName.get(a.component_id) && (
-                      <div className="small">For {componentName.get(a.component_id)}</div>
-                    )}
-                    {a.note && <div className="small">{a.note}</div>}
+                    <div className="money">{shopMoney(l.shop_unit_rate === null ? null : l.shop_unit_rate * l.qty)}</div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ------------------------------------------------ components */}
-      <section className="section">
-        <h3>Components Received</h3>
-        <p className="small">
-          Add every DPF, DOC, SCR or EGR actually received, one item per component. DPF and DOC need pressure and weight
-          before and after; EGR coolers are Pass / Condemned only. Every required field must be filled in before completion.
-        </p>
-        {editable && (
-          <ActionForm
-            action={addComponent.bind(null, id)}
-            submitLabel="+ Add Item"
-            pendingLabel="Adding..."
-            footer={<span className="small">Current items: {components.length}</span>}
-          >
-            <div className="field" style={{ maxWidth: 220 }}>
-              <label htmlFor="component-type">Component type</label>
-              <select id="component-type" name="component_type" defaultValue="DPF">
-                <option value="DPF">DPF</option>
-                <option value="DOC">DOC</option>
-                <option value="SCR">SCR</option>
-                <option value="EGR">EGR</option>
-              </select>
-            </div>
-          </ActionForm>
-        )}
-        {components.length === 0 && <p className="small">No components added yet.</p>}
-        {components.map((c) =>
-          editable ? (
-            <ComponentCard
-              key={c.id}
-              component={c}
-              photoCount={photoCount(c.id)}
-              saveAction={saveComponent.bind(null, id, c.id)}
-              deleteAction={deleteComponent.bind(null, id, c.id)}
-            />
-          ) : (
-            <ComponentSummary key={c.id} component={c} />
-          ),
-        )}
-      </section>
-
-      {/* ------------------------------------------------ complete */}
-      <section className="section">
-        <h3>Complete work</h3>
-        {editable ? (
-          <ActionForm
-            action={completeJob.bind(null, id)}
-            submitLabel="Complete Work"
-            pendingLabel="Completing..."
-            submitClass="btn btn-primary"
-          >
-            {data.inHouse ? (
-              <p className="small">
-                {data.partsSale
-                  ? "CDS parts sale: no components are needed."
-                  : "Work cannot be completed until all required component data is entered. Save each component first."}{" "}
-                CDS in-house job: the reference number is filled in for you ({job.affiliate_invoice_ref || `IN-HOUSE-${job.wo_number}`}).
-              </p>
-            ) : (
-              <>
-                <p className="small">
-                  Work cannot be completed until all required component data and the affiliate invoice/reference number are
-                  entered. Save each component first.
-                </p>
-                <div className="field" style={{ maxWidth: 420 }}>
-                  <label htmlFor="invoice-ref">
-                    Affiliate Invoice / Reference # <span className="req">*</span>
-                  </label>
-                  <input
-                    className="input"
-                    id="invoice-ref"
-                    name="invoice_ref"
-                    required
-                    maxLength={100}
-                    placeholder="Enter invoice or billing reference #"
-                    defaultValue={job.affiliate_invoice_ref ?? ""}
-                  />
+                  {editable && l.origin === "shop_added" && (
+                    <ActionButton
+                      action={removePart.bind(null, id, l.id)}
+                      label="Remove"
+                      pendingLabel="Removing..."
+                      className="remove"
+                    />
+                  )}
                 </div>
-              </>
+              </div>
+            ))}
+            {deductions.map((d) => (
+              <div key={d.kind} className={styles.lineRow}>
+                <div style={{ minWidth: 0 }}>
+                  <strong>Shipping deduction</strong>
+                  <div>{deductionLabel(d)}</div>
+                  <div className="small">Automatic on shipped orders</div>
+                </div>
+                <div className={styles.lineMoney}>
+                  <div>
+                    <div className="small">
+                      {qtyText(d.filters)} x {money(d.unit_amount)}
+                    </div>
+                    <div className="money">{money(d.amount)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {editable && (
+              <div className="uploadBox" style={{ marginTop: 14 }}>
+                <h4 style={{ margin: "0 0 8px" }}>Add Parts</h4>
+                <AddPartForm action={addPart.bind(null, id)} options={data.partOptions} />
+              </div>
             )}
-          </ActionForm>
-        ) : awaiting ? (
-          <p className="small">Accept the job to start work.</p>
-        ) : (
-          <div className="summarybox">
-            <div className="summaryrow">
-              <span>Affiliate Invoice / Reference #</span>
-              <strong>{job.affiliate_invoice_ref || "-"}</strong>
+          </section>
+
+          {/* ------------------------------------------------ extra work */}
+          <section className="section">
+            <h3>Request Additional Authorization</h3>
+            <p className="small">
+              Use this only when unexpected repairs, parts or services are needed beyond the original authorization. Do not
+              perform the added work until CDS approves it.
+            </p>
+            {editable && <AuthRequestForm action={requestAuthorization.bind(null, id)} options={data.authOptions} />}
+            {authRequests.length === 0 && <p className="small">No additional authorization requests.</p>}
+            {authRequests.map((r) => (
+              <div key={r.id} className={`authCard ${r.status === "withdrawn" ? "rejected" : r.status}`}>
+                <div className="row between" style={{ alignItems: "center" }}>
+                  <strong>
+                    AR-{job.wo_number}-{r.seq}
+                  </strong>
+                  <span className={`badge ${r.status}`}>{AUTH_STATUS_LABEL[r.status] ?? r.status}</span>
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  {r.kind === "service" ? "Service" : "Part"}: <strong>{r.sku}</strong> - {r.name} (Qty {qtyText(r.qty)})
+                </div>
+                <div className="small" style={{ whiteSpace: "pre-wrap" }}>
+                  {r.note}
+                </div>
+                <div className="small">Requested {date(r.requested_at)}</div>
+              </div>
+            ))}
+          </section>
+
+          {/* ------------------------------------------------ attachments */}
+          <section className="section" id="attachments">
+            <h3>Photos & Attachments</h3>
+            <p className="small">
+              Attach condition photos, damaged components, part-number tags, shipping damage, or completed-unit photos. These
+              stay with the work-order history.
+            </p>
+            <div className={canUpload ? "grid2" : undefined}>
+              {canUpload && <AttachmentForm
+                  workOrderId={id}
+                  components={componentOptions}
+                  actions={{ prepare: prepareUpload, register: registerUpload }}
+                />}
+              <div>
+                {attachments.length === 0 && <p className="small">No attachments yet.</p>}
+                <div className="attachmentGrid">
+                  {attachments.map((a) => {
+                    const isImage = (a.mime_type ?? "").startsWith("image/");
+                    return (
+                      <div key={a.id} className={styles.attachment}>
+                        {a.url && isImage ? (
+                          <a href={a.url} target="_blank" rel="noopener noreferrer">
+                            {/* Signed storage URLs expire, so next/image caching does not fit here. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img className="thumb" src={a.url} alt={a.file_name} loading="lazy" />
+                          </a>
+                        ) : (
+                          <a
+                            href={a.url ?? undefined}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`thumb ${styles.fileIcon}`}
+                          >
+                            {isImage ? "Photo" : "PDF"}
+                          </a>
+                        )}
+                        <div className="small" style={{ marginTop: 6 }}>
+                          {ATTACHMENT_CATEGORY_LABEL[a.category] ?? a.category}
+                          {a.from_cds && (
+                            <>
+                              {" "}
+                              <span className="tag blue">From CDS</span>
+                            </>
+                          )}
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>
+                          {a.url ? (
+                            <a className="link" href={a.url} target="_blank" rel="noopener noreferrer">
+                              {a.file_name}
+                            </a>
+                          ) : (
+                            a.file_name
+                          )}
+                        </div>
+                        {a.component_id && componentName.get(a.component_id) && (
+                          <div className="small">For {componentName.get(a.component_id)}</div>
+                        )}
+                        {a.note && <div className="small">{a.note}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-            <div className="summaryrow">
-              <span>Completed</span>
-              <strong>{date(job.completed_at)}</strong>
+          </section>
+
+          {/* ------------------------------------------------ components */}
+          <section className="section">
+            <h3>Components Received</h3>
+            <p className="small">
+              Add every DPF, DOC, SCR or EGR actually received, one item per component. DPF and DOC need pressure and weight
+              before and after; EGR coolers are Pass / Condemned only. Every required field must be filled in before completion.
+            </p>
+            {editable && (
+              <ActionForm
+                action={addComponent.bind(null, id)}
+                submitLabel="+ Add Item"
+                pendingLabel="Adding..."
+                footer={<span className="small">Current items: {components.length}</span>}
+              >
+                <div className="field" style={{ maxWidth: 220 }}>
+                  <label htmlFor="component-type">Component type</label>
+                  <select id="component-type" name="component_type" defaultValue="DPF">
+                    <option value="DPF">DPF</option>
+                    <option value="DOC">DOC</option>
+                    <option value="SCR">SCR</option>
+                    <option value="EGR">EGR</option>
+                  </select>
+                </div>
+              </ActionForm>
+            )}
+            {components.length === 0 && <p className="small">No components added yet.</p>}
+            {components.map((c) =>
+              editable ? (
+                <ComponentCard
+                  key={c.id}
+                  component={c}
+                  photoCount={photoCount(c.id)}
+                  saveAction={saveComponent.bind(null, id, c.id)}
+                  deleteAction={deleteComponent.bind(null, id, c.id)}
+                />
+              ) : (
+                <ComponentSummary key={c.id} component={c} />
+              ),
+            )}
+          </section>
+
+          {/* ------------------------------------------------ complete */}
+          <section className="section">
+            <h3>Complete work</h3>
+            {editable ? (
+              <ActionForm
+                action={completeJob.bind(null, id)}
+                submitLabel="Complete Work"
+                pendingLabel="Completing..."
+                submitClass="btn btn-primary"
+                successText="Job completed. CDS was notified."
+                successHref={doneHref("completed")}
+              >
+                {data.inHouse ? (
+                  <p className="small">
+                    {data.partsSale
+                      ? "CDS parts sale: no components are needed."
+                      : "Work cannot be completed until all required component data is entered. Save each component first."}{" "}
+                    CDS in-house job: the reference number is filled in for you ({job.affiliate_invoice_ref || `IN-HOUSE-${job.wo_number}`}).
+                  </p>
+                ) : (
+                  <>
+                    <p className="small">
+                      Work cannot be completed until all required component data and the affiliate invoice/reference number are
+                      entered. Save each component first.
+                    </p>
+                    <div className="field" style={{ maxWidth: 420 }}>
+                      <label htmlFor="invoice-ref">
+                        Affiliate Invoice / Reference # <span className="req">*</span>
+                      </label>
+                      <input
+                        className="input"
+                        id="invoice-ref"
+                        name="invoice_ref"
+                        required
+                        maxLength={100}
+                        placeholder="Enter invoice or billing reference #"
+                        defaultValue={job.affiliate_invoice_ref ?? ""}
+                      />
+                    </div>
+                  </>
+                )}
+              </ActionForm>
+            ) : (
+              <div className="summarybox">
+                <div className="summaryrow">
+                  <span>Affiliate Invoice / Reference #</span>
+                  <strong>{job.affiliate_invoice_ref || "-"}</strong>
+                </div>
+                <div className="summaryrow">
+                  <span>Completed</span>
+                  <strong>{date(job.completed_at)}</strong>
+                </div>
+                <p className="small" style={{ marginBottom: 0 }}>This job is read-only.</p>
+              </div>
+            )}
+            <div className="bottomTotal">
+              <div>
+                <div className="small" style={{ fontWeight: 800, letterSpacing: "0.05em" }}>
+                  CURRENT SETTLEMENT TOTAL
+                </div>
+                <div className="small">From the CDS affiliate rates for the services and parts above, less any deductions.</div>
+              </div>
+              <div className="amount money">{missingRate ? "TBD" : money(settlement)}</div>
             </div>
-            <p className="small" style={{ marginBottom: 0 }}>This job is read-only.</p>
-          </div>
-        )}
-        <div className="bottomTotal">
-          <div>
-            <div className="small" style={{ fontWeight: 800, letterSpacing: "0.05em" }}>
-              CURRENT SETTLEMENT TOTAL
-            </div>
-            <div className="small">From the CDS affiliate rates for the services and parts above, less any deductions.</div>
-          </div>
-          <div className="amount money">{missingRate ? "TBD" : money(settlement)}</div>
-        </div>
-      </section>
+          </section>
+        </>
+      )}
     </div>
   );
 }
