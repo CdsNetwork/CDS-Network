@@ -1,6 +1,6 @@
 /**
- * QuickBooks Division per customer (qbo_customer_division) and Class per shop
- * (qbo_affiliate_class) are CDS only, like the other QuickBooks mappings: a shop and an
+ * QuickBooks Division per customer (qbo_customer_division, and the COGS division of its shop
+ * bills, qbo_customer_cogs_division) and Class per shop (qbo_affiliate_class) are CDS only, like the other QuickBooks mappings: a shop and an
  * anonymous caller read nothing and cannot write, CDS reads and edits them.
  *
  * Fixtures are created with the service role under a per-run id and removed afterwards.
@@ -18,6 +18,7 @@ beforeAll(async () => {
   customer = (await must(admin.from("customers").insert({ code: `QCD-${runId}`, name: `Customer division ${runId}` }).select().single())).id;
   await must(admin.from("qbo_customer_division").insert({ customer_id: customer, qbo_department_id: "3", qbo_department_name: "RYDER INCOME" }));
   await must(admin.from("qbo_affiliate_class").insert({ affiliate_id: shopId, qbo_class_id: "12", qbo_class_name: "CDS Houston" }));
+  await must(admin.from("qbo_customer_cogs_division").insert({ customer_id: customer, qbo_department_id: "4", qbo_department_name: "RYDER COGS" }));
   cds = await createLogin("cds", null);
   shop = await createLogin("shop", shopId);
 }, 120_000);
@@ -31,6 +32,7 @@ afterAll(async () => {
   await must(admin.from("audit_log").delete().in("row_id", rowIds));
   for (const [table, column, id] of [
     ["qbo_customer_division", "customer_id", customer],
+    ["qbo_customer_cogs_division", "customer_id", customer],
     ["qbo_affiliate_class", "affiliate_id", shopId],
   ] as const) {
     const left = await must(admin.from(table).select(column).eq(column, id));
@@ -40,7 +42,7 @@ afterAll(async () => {
 
 describe("QuickBooks Division and Class mappings", () => {
   it("a shop reads nothing and cannot write", async () => {
-    for (const table of ["qbo_customer_division", "qbo_affiliate_class"]) {
+    for (const table of ["qbo_customer_division", "qbo_customer_cogs_division", "qbo_affiliate_class"]) {
       const { data, error } = await shop.client.from(table).select("*").limit(5);
       expect(error ? [] : data, table).toEqual([]);
     }
@@ -49,6 +51,10 @@ describe("QuickBooks Division and Class mappings", () => {
     await shop.client.from("qbo_affiliate_class").update({ qbo_class_id: "99" }).eq("affiliate_id", shopId);
     await shop.client.from("qbo_customer_division").update({ qbo_department_id: "99" }).eq("customer_id", customer);
     await shop.client.from("qbo_customer_division").delete().eq("customer_id", customer);
+    await shop.client.from("qbo_customer_cogs_division").update({ qbo_department_id: "99" }).eq("customer_id", customer);
+    const cogsInsert = await shop.client.from("qbo_customer_cogs_division").insert({ customer_id: customer, qbo_department_id: "99", qbo_department_name: "x" });
+    expect(cogsInsert.error).not.toBeNull();
+    expect((await must(admin.from("qbo_customer_cogs_division").select("qbo_department_id").eq("customer_id", customer).single())).qbo_department_id).toBe("4");
     expect((await must(admin.from("qbo_affiliate_class").select("qbo_class_id").eq("affiliate_id", shopId).single())).qbo_class_id).toBe("12");
     expect((await must(admin.from("qbo_customer_division").select("qbo_department_id").eq("customer_id", customer).single())).qbo_department_id).toBe(
       "3",
@@ -56,7 +62,7 @@ describe("QuickBooks Division and Class mappings", () => {
   });
 
   it("an anonymous caller reads nothing", async () => {
-    for (const table of ["qbo_customer_division", "qbo_affiliate_class"]) {
+    for (const table of ["qbo_customer_division", "qbo_customer_cogs_division", "qbo_affiliate_class"]) {
       const { data, error } = await anon().from(table).select("*").limit(5);
       expect(error ? [] : data, table).toEqual([]);
     }
@@ -89,6 +95,24 @@ describe("QuickBooks Division and Class mappings", () => {
       expect(byShop.error).not.toBeNull();
     } finally {
       await must(admin.from("affiliates").delete().eq("id", other));
+      await must(admin.from("audit_log").delete().eq("row_id", other));
+    }
+  });
+
+  it("CDS reads the COGS division; the bill run adds it insert only (an existing row wins)", async () => {
+    expect(await must(cds.client.from("qbo_customer_cogs_division").select("qbo_department_id, qbo_department_name").eq("customer_id", customer))).toEqual([
+      { qbo_department_id: "4", qbo_department_name: "RYDER COGS" },
+    ]);
+    // The bill run writes with the service role, the same upsert as src/lib/qbo/bill-server.ts.
+    const options = { onConflict: "customer_id", ignoreDuplicates: true };
+    await must(admin.from("qbo_customer_cogs_division").upsert({ customer_id: customer, qbo_department_id: "5", qbo_department_name: "OTHER COGS" }, options));
+    expect((await must(admin.from("qbo_customer_cogs_division").select("qbo_department_id").eq("customer_id", customer).single())).qbo_department_id).toBe("4");
+    const other = (await must(admin.from("customers").insert({ code: `QCD2-${runId}`, name: `Customer division two ${runId}` }).select().single())).id;
+    try {
+      await must(admin.from("qbo_customer_cogs_division").upsert({ customer_id: other, qbo_department_id: "5", qbo_department_name: "OTHER COGS" }, options));
+      expect(await must(admin.from("qbo_customer_cogs_division").select("qbo_department_id").eq("customer_id", other))).toEqual([{ qbo_department_id: "5" }]);
+    } finally {
+      await must(admin.from("customers").delete().eq("id", other));
       await must(admin.from("audit_log").delete().eq("row_id", other));
     }
   });

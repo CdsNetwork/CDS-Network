@@ -193,6 +193,40 @@ function mapped(m: ItemMapping | undefined): m is ItemMapping {
   return !!m?.qboItemId?.trim();
 }
 
+/**
+ * The QuickBooks item for a catalog item: this customer's own link first, else the link for
+ * all customers. Null when neither exists. The shop's bill uses the same item (./bill).
+ */
+export function linkedItem(itemMap: ItemMappings, catalogItemId: string): ItemMapping | null {
+  const forCustomer = itemMap.customer[catalogItemId];
+  const forAll = itemMap.default[catalogItemId];
+  return mapped(forCustomer) ? forCustomer : mapped(forAll) ? forAll : null;
+}
+
+/** What CDS is told when a catalog item has no QuickBooks item for this customer. */
+export function unlinkedItemMessage(itemMap: ItemMappings, line: { catalogItemId: string; sku: string; name: string }, customerName: string): string {
+  const who = customerName;
+  return itemMap.otherCustomers?.[line.catalogItemId]
+    ? `${line.sku} ${line.name} is not linked to a QuickBooks item for ${who} (it is linked for other customers only). Link it for ${who} or for all customers on Admin > QuickBooks mappings.`
+    : `${line.sku} ${line.name} is not linked to a QuickBooks item. Link it on Admin > QuickBooks mappings.`;
+}
+
+/** qbo_item_map rows for one work order's items, sorted into ItemMappings for its customer. */
+export function toItemMappings(
+  rows: { customer_id: string | null; catalog_item_id: string; qbo_item_id: string; qbo_item_name: string }[],
+  customerId: string,
+  invoiceDescription: (qboItemName: string) => string | null = () => null,
+): ItemMappings {
+  const itemMap: ItemMappings = { customer: {}, default: {}, otherCustomers: {} };
+  for (const m of rows) {
+    const mapping: ItemMapping = { qboItemId: m.qbo_item_id, qboItemName: m.qbo_item_name, invoiceDescription: invoiceDescription(m.qbo_item_name) };
+    if (m.customer_id === null) itemMap.default[m.catalog_item_id] = mapping;
+    else if (m.customer_id === customerId) itemMap.customer[m.catalog_item_id] = mapping;
+    else itemMap.otherCustomers![m.catalog_item_id] = true;
+  }
+  return itemMap;
+}
+
 /** A reading without trailing zeros (15250.0 -> "15250"); null when there is none. */
 function reading(n: number | null | undefined): string | null {
   if (n === null || n === undefined) return null;
@@ -318,18 +352,11 @@ export function buildInvoicePayload(
   const qboLines: QboInvoiceLine[] = [];
   const itemText: ItemTextLine[] = [];
   for (const l of lines) {
-    const forCustomer = itemMap.customer[l.catalogItemId];
-    const forAll = itemMap.default[l.catalogItemId];
-    const item = mapped(forCustomer) ? forCustomer : mapped(forAll) ? forAll : null;
+    const item = linkedItem(itemMap, l.catalogItemId);
     if (!item) {
       if (!unmapped.has(l.catalogItemId)) {
         unmapped.add(l.catalogItemId);
-        const who = workOrder.customerName;
-        problems.push(
-          itemMap.otherCustomers?.[l.catalogItemId]
-            ? `${l.sku} ${l.name} is not linked to a QuickBooks item for ${who} (it is linked for other customers only). Link it for ${who} or for all customers on Admin > QuickBooks mappings.`
-            : `${l.sku} ${l.name} is not linked to a QuickBooks item. Link it on Admin > QuickBooks mappings.`,
-        );
+        problems.push(unlinkedItemMessage(itemMap, l, workOrder.customerName));
       }
       continue;
     }

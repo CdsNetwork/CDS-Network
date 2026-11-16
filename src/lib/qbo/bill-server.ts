@@ -39,8 +39,21 @@ function deps(db: SupabaseClient, woId: string): BillRunDeps {
       const conn = await qboApi(options);
       return {
         findBills: (docNumber) => api.findBillsByNumber(conn, docNumber),
+        getItems: (ids) => api.getItems(conn, ids),
+        listDepartments: () => api.listDepartments(conn),
+        listTerms: () => api.listTerms(conn),
         createBill: (payload, requestId) => api.createBill(conn, payload, requestId),
       };
+    },
+    saveDivision: async (customerId, division) => {
+      // Insert only: a row CDS added or corrected meanwhile is kept.
+      const { error } = await db
+        .from("qbo_customer_cogs_division")
+        .upsert(
+          { customer_id: customerId, qbo_department_id: division.id, qbo_department_name: division.name },
+          { onConflict: "customer_id", ignoreDuplicates: true },
+        );
+      if (error) console.error(`qbo_customer_cogs_division: could not remember ${division.name} for customer ${customerId}: ${error.message}`);
     },
     log: async (status, externalId, note) => {
       await recordSync(db, {

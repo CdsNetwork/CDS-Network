@@ -25,7 +25,15 @@ vi.mock("@/lib/qbo/invoice-input", () => ({ loadInvoice }));
 
 type Call = { table: string; op: string; row?: unknown };
 const calls: Call[] = [];
-const rpc = vi.fn();
+/** Answers cds_mark_invoiced and other calls; the invoice claim (@/lib/qbo/invoice-claim) is always granted. */
+const rpcAnswer = vi.fn();
+const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+  if (name === "cds_claim_qbo_invoice") {
+    return { data: { state: "sending", claim_id: "c1", attempt: 0, request_id: String(args.p_work_order), snapshot: args.p_snapshot }, error: null };
+  }
+  if (name === "cds_finish_qbo_invoice") return { data: null, error: null };
+  return rpcAnswer(name, args);
+});
 /** What the work order read returns: its status and its QuickBooks invoice, if any. */
 let wo: { status: string; work_order_internal: { qb_invoice_id: string | null } | null };
 
@@ -83,7 +91,8 @@ const writes = (table: string) => calls.filter((c) => c.table === table && c.op 
 beforeEach(() => {
   calls.length = 0;
   createInvoice.mockReset();
-  rpc.mockReset();
+  rpc.mockClear();
+  rpcAnswer.mockReset();
   loadInvoice.mockReset();
   wo = { status: "in_process", work_order_internal: { qb_invoice_id: null } };
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -120,7 +129,7 @@ describe("createQuickBooksInvoice at any status", () => {
   it("creates the invoice for an order the shop is still working on, records it, and says the status stays", async () => {
     loadInvoice.mockResolvedValue(invoiceState({ status: "in_process" }));
     createInvoice.mockResolvedValue({ Id: "145", DocNumber: "1043" });
-    rpc.mockResolvedValue({ error: null });
+    rpcAnswer.mockResolvedValue({ error: null });
 
     const res = await actions.createQuickBooksInvoice(WO);
 
@@ -134,7 +143,7 @@ describe("createQuickBooksInvoice at any status", () => {
   it("still moves a Ready to Invoice order to Invoiced, as before", async () => {
     loadInvoice.mockResolvedValue(invoiceState({ status: "ready_to_invoice" }));
     createInvoice.mockResolvedValue({ Id: "145", DocNumber: "1043" });
-    rpc.mockResolvedValue({ error: null });
+    rpcAnswer.mockResolvedValue({ error: null });
     const res = await actions.createQuickBooksInvoice(WO);
     expect((res as { ok: string }).ok).toMatch(/The work order is now Invoiced/);
   });
@@ -144,7 +153,7 @@ describe("createQuickBooksInvoice at any status", () => {
       createInvoice.mockReset();
       loadInvoice.mockResolvedValue(invoiceState({ status }));
       createInvoice.mockResolvedValue({ Id: "145", DocNumber: "1043" });
-      rpc.mockResolvedValue({ error: null });
+      rpcAnswer.mockResolvedValue({ error: null });
       const res = await actions.createQuickBooksInvoice(WO);
       expect(createInvoice, status).toHaveBeenCalledTimes(1);
       expect((res as { ok: string }).ok, status).toMatch(/now Invoiced/);
@@ -179,7 +188,7 @@ describe("createQuickBooksInvoice at any status", () => {
 
   it("records an invoice QuickBooks already created for an in-progress order instead of refusing it", async () => {
     loadInvoice.mockResolvedValue(invoiceState({ status: "in_process", pendingQb: { id: "145", number: "1043", at: "2026-11-12T10:00:00Z" } }));
-    rpc.mockResolvedValue({ error: null });
+    rpcAnswer.mockResolvedValue({ error: null });
     const res = await actions.createQuickBooksInvoice(WO);
     expect(createInvoice).not.toHaveBeenCalled();
     expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", { p_work_order: WO, p_qb_invoice_id: "145", p_qb_invoice_number: "1043", p_qb_tax_total: null, p_qb_total: null });
@@ -207,6 +216,8 @@ describe("the lock on an in-progress order that has a QuickBooks invoice", () =>
   });
 
   it("refuses removing a shipment", async () => {
+    // The database refuses it (public.cds_remove_shipment, tests/rls/remove-shipment.test.ts).
+    rpcAnswer.mockResolvedValue({ data: null, error: { code: "P0001", message: "Shipments cannot be removed after the order is invoiced." } });
     const res = await actions.removeShipment(WO, LINE);
     expect((res as { error: string }).error).toMatch(/invoiced/i);
     expect(writes("shipments")).toEqual([]);

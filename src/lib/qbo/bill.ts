@@ -1,6 +1,7 @@
 import { money } from "@/lib/format";
 import { deductionLabel, shopPayable, type ShopDeduction } from "@/lib/shop-deductions";
-import { cents } from "./invoice";
+import type { CogsDivision } from "./cogs-division";
+import { cents, linkedItem, unlinkedItemMessage, type ItemMappings } from "./invoice";
 
 /**
  * The shop's bill in CDS Inc's QuickBooks (M3). Pure: no database, no network.
@@ -12,22 +13,33 @@ import { cents } from "./invoice";
  *     shop completes the job). QuickBooks allows 21 characters: a longer number is cut there
  *     and kept whole in the memo. Without one: "WO-<number>", said in the memo.
  *   * TxnDate: the California date the shop completed the job.
- *   * Line: one line per work order line at the shop rate, plus the (negative) deductions, so
- *     the bill total is exactly what the shop sees in the portal (shopPayable). Lines of $0
- *     are left off. Every line goes to the one expense account (AccountBasedExpenseLineDetail)
- *     or product/service item (ItemBasedExpenseLineDetail) CDS chose (app_settings
- *     qbo_bill_line), with the shop's Class (qbo_affiliate_class) on each line: bills carry
- *     the class per line.
- *   * SalesTermRef: the terms, when they are part of that setting; else the vendor's default.
+ *   * Line: CDS bills shops by item (CDS, 2026-11-16): each work order line with a shop amount
+ *     is an ItemBasedExpenseLineDetail with the QuickBooks item the customer's invoice uses for
+ *     that line (qbo_item_map, ./invoice linkedItem), Qty and UnitPrice = the shop rate, so
+ *     QuickBooks books it to that item's own expense account. The shipping deductions have no
+ *     item: they go to the one account CDS chose for them (app_settings qbo_bill_line), as
+ *     negative lines. The bill total is exactly what the shop sees in the portal
+ *     (shopPayable). Lines of $0 are left off. Every line carries the shop's Class
+ *     (qbo_affiliate_class).
+ *   * DepartmentRef: the customer's COGS division (qbo_customer_cogs_division, ./cogs-division),
+ *     found in QuickBooks on the customer's first bill (./bill-run); without one, none.
+ *   * SalesTermRef: the terms, when they are part of that setting; else the QuickBooks term
+ *     named Net 30 (all CDS vendors are Net 30, CDS 2026-11-16), added when sending
+ *     (defaultBillTerm, ./bill-run); without such a term, the vendor's own.
+ * A line whose item is not linked to a QuickBooks item stops the bill (the same message as the
+ * invoice); an item without an expense account in QuickBooks is checked right before sending
+ * (itemsWithoutExpenseAccount, ./bill-run).
  */
 
-/** app_settings key of the one account or item every bill line goes to. Unset: bills are off. */
+/** app_settings key of the shop bill setting. Unset: bills are off. */
 export const BILL_SETTING_KEY = "qbo_bill_line";
 
+/** The one QuickBooks account (or, as a fallback, item) the shipping deductions go to. */
+export type BillTarget = { kind: "account" | "item"; id: string; name: string };
+
 export type BillLineSetting = {
-  kind: "account" | "item";
-  id: string;
-  name: string;
+  /** Where the shipping deductions go. Null: orders with a deduction wait until CDS chooses. */
+  deduction: BillTarget | null;
   termsId?: string | null;
   termsName?: string | null;
   /**
@@ -40,33 +52,43 @@ export type BillLineSetting = {
 const QBO_ID = /^\d{1,50}$/;
 
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
-/** The stored setting, or null when it is missing or not a valid choice. */
-export function parseBillSetting(value: unknown): BillLineSetting | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const v = value as Record<string, unknown>;
+function parseTarget(v: unknown): BillTarget | null {
+  if (!isObject(v)) return null;
   const kind = v.kind;
   const id = str(v.id);
   const name = str(v.name);
-  if ((kind !== "account" && kind !== "item") || !QBO_ID.test(id) || !name) return null;
-  const termsId = str(v.terms_id);
-  const since = str(v.since);
+  return (kind === "account" || kind === "item") && QBO_ID.test(id) && name ? { kind, id, name } : null;
+}
+
+/**
+ * The stored setting, or null when bills are not turned on (no row, or nothing valid in it).
+ * Stored: { mode: "item", since, deduction?: { kind, id, name }, terms_id?, terms_name? }.
+ * The earlier shape { kind, id, name, since?, terms_id? } (one account or item for every line)
+ * is read as the deduction account.
+ */
+export function parseBillSetting(value: unknown): BillLineSetting | null {
+  if (!isObject(value)) return null;
+  const sinceRaw = str(value.since);
+  const since = sinceRaw && Number.isFinite(Date.parse(sinceRaw)) ? sinceRaw : null;
+  const legacy = parseTarget(value);
+  const deduction = parseTarget(value.deduction) ?? legacy;
+  if (!since && !legacy && value.mode !== "item") return null;
+  const termsId = str(value.terms_id);
   return {
-    kind,
-    id,
-    name,
+    deduction,
     termsId: QBO_ID.test(termsId) ? termsId : null,
-    termsName: QBO_ID.test(termsId) ? str(v.terms_name) || null : null,
-    since: since && Number.isFinite(Date.parse(since)) ? since : null,
+    termsName: QBO_ID.test(termsId) ? str(value.terms_name) || null : null,
+    since,
   };
 }
 
 /** The stored form of a setting (app_settings.value). */
-export function billSettingValue(s: BillLineSetting): Record<string, string> {
+export function billSettingValue(s: BillLineSetting): Record<string, unknown> {
   return {
-    kind: s.kind,
-    id: s.id,
-    name: s.name,
+    mode: "item",
+    ...(s.deduction ? { deduction: { kind: s.deduction.kind, id: s.deduction.id, name: s.deduction.name } } : {}),
     ...(s.termsId ? { terms_id: s.termsId, terms_name: s.termsName ?? "" } : {}),
     ...(s.since ? { since: s.since } : {}),
   };
@@ -77,6 +99,7 @@ export type BillWorkOrder = {
   woNumber: number;
   status: string;
   completedAt: string | null;
+  customerId: string;
   /** work_orders.affiliate_invoice_ref: the shop's invoice or reference number. */
   shopInvoiceRef: string | null;
   customerName: string;
@@ -86,7 +109,14 @@ export type BillWorkOrder = {
   shopInHouse: boolean;
 };
 
-export type BillLine = { sku: string; name: string; description: string | null; qty: number; shopUnitRate: number | null };
+export type BillLine = {
+  catalogItemId: string;
+  sku: string;
+  name: string;
+  description: string | null;
+  qty: number;
+  shopUnitRate: number | null;
+};
 
 export type VendorLink = { qboVendorId: string; qboVendorName: string };
 
@@ -98,6 +128,12 @@ export type BillInputs = {
   setting: BillLineSetting | null;
   /** qbo_affiliate_class.qbo_class_id of the shop. */
   classId: string | null;
+  /** qbo_customer_cogs_division of the customer: the bill's Division. Null: looked up when sending. */
+  division: CogsDivision | null;
+  /** qbo_customer_division.qbo_department_name (the invoice's INCOME division), to find the COGS one. */
+  incomeDivisionName: string | null;
+  /** The QuickBooks items of the order's catalog items, as the customer's invoice uses them. */
+  itemMap: ItemMappings;
 };
 
 type Ref = { value: string; name?: string };
@@ -121,11 +157,16 @@ export type QboBillPayload = {
   TxnDate: string;
   DocNumber: string;
   PrivateNote: string;
+  /** The customer's COGS division. */
+  DepartmentRef?: Ref;
   SalesTermRef?: Ref;
   Line: QboBillLine[];
 };
 
 export type BillBuild = { ok: true; payload: QboBillPayload; total: number } | { ok: false; problems: string[] };
+
+/** What CDS is told when an order has a shipping deduction and no account is chosen for it. */
+export const DEDUCTION_ACCOUNT_MISSING = "Choose the account for shipping deductions on Admin > QuickBooks mappings > Shop bills.";
 
 /** QuickBooks limits: Bill.DocNumber 21, PrivateNote 4000, line Description 4000. */
 const DOC_NUMBER_MAX = 21;
@@ -160,11 +201,17 @@ export function buildBillPayload(i: BillInputs): BillBuild {
   if (!i.vendor?.qboVendorId?.trim()) {
     problems.push(`${wo.shopName} is not linked to a QuickBooks vendor. Link it on Admin > QuickBooks mappings.`);
   }
+  const unlinked = new Set<string>();
   for (const l of i.lines) {
     if (l.shopUnitRate === null || !Number.isFinite(Number(l.shopUnitRate))) {
       problems.push(`The shop rate for ${l.sku} ${l.name} is not set yet (TBD). Enter it on the line.`);
+    } else if (cents(l.qty * Number(l.shopUnitRate)) !== 0 && !linkedItem(i.itemMap, l.catalogItemId) && !unlinked.has(l.catalogItemId)) {
+      // Never guessed: the line goes on the item the customer's invoice uses, or the bill waits.
+      unlinked.add(l.catalogItemId);
+      problems.push(unlinkedItemMessage(i.itemMap, l, wo.customerName));
     }
   }
+  if (setting && !setting.deduction && i.deductions.some((d) => cents(d.amount) !== 0)) problems.push(DEDUCTION_ACCOUNT_MISSING);
   if (!i.lines.length) problems.push("The work order has no lines to bill.");
   if (problems.length || !setting || !i.vendor) return { ok: false, problems };
 
@@ -174,32 +221,36 @@ export function buildBillPayload(i: BillInputs): BillBuild {
   }
 
   const classRef = i.classId?.trim() ? { ClassRef: { value: i.classId.trim() } } : {};
-  const line = (amount: number, description: string, qty: number, unitPrice: number): QboBillLine =>
-    setting.kind === "account"
-      ? {
-          DetailType: "AccountBasedExpenseLineDetail",
-          Amount: amount,
-          Description: clip(description, 4000),
-          AccountBasedExpenseLineDetail: { AccountRef: { value: setting.id, name: setting.name }, ...classRef, BillableStatus: "NotBillable" },
-        }
-      : {
-          DetailType: "ItemBasedExpenseLineDetail",
-          Amount: amount,
-          Description: clip(description, 4000),
-          ItemBasedExpenseLineDetail: { ItemRef: { value: setting.id, name: setting.name }, Qty: qty, UnitPrice: unitPrice, ...classRef, BillableStatus: "NotBillable" },
-        };
+  const itemLine = (item: Ref, amount: number, description: string, qty: number, unitPrice: number): QboBillLine => ({
+    DetailType: "ItemBasedExpenseLineDetail",
+    Amount: amount,
+    Description: clip(description, 4000),
+    ItemBasedExpenseLineDetail: { ItemRef: item, Qty: qty, UnitPrice: unitPrice, ...classRef, BillableStatus: "NotBillable" },
+  });
 
   const lines: QboBillLine[] = [];
   for (const l of i.lines) {
     const rate = Number(l.shopUnitRate);
     const amount = cents(l.qty * rate);
     if (amount === 0) continue;
+    const item = linkedItem(i.itemMap, l.catalogItemId)!;
     const text = [`${l.sku} ${l.name}`.trim(), l.description?.trim()].filter(Boolean).join(" - ");
-    lines.push(line(amount, `${text} (${l.qty} x ${money(rate)})`, l.qty, rate));
+    lines.push(itemLine({ value: item.qboItemId.trim(), name: item.qboItemName }, amount, `${text} (${l.qty} x ${money(rate)})`, l.qty, rate));
   }
+  const target = setting.deduction;
   for (const d of i.deductions) {
-    if (!d.amount) continue;
-    lines.push(line(cents(d.amount), deductionLabel(d), d.filters, d.unit_amount));
+    const amount = cents(d.amount);
+    if (!amount || !target) continue;
+    lines.push(
+      target.kind === "account"
+        ? {
+            DetailType: "AccountBasedExpenseLineDetail",
+            Amount: amount,
+            Description: clip(deductionLabel(d), 4000),
+            AccountBasedExpenseLineDetail: { AccountRef: { value: target.id, name: target.name }, ...classRef, BillableStatus: "NotBillable" },
+          }
+        : itemLine({ value: target.id, name: target.name }, amount, deductionLabel(d), d.filters, d.unit_amount),
+    );
   }
 
   const { doc, note } = docNumber(wo);
@@ -216,10 +267,54 @@ export function buildBillPayload(i: BillInputs): BillBuild {
         [`Portal WO-${wo.woNumber}`, note, wo.customerName, po && `PO ${po}`, unit && `Unit ${unit}`].filter(Boolean).join(" | "),
         4000,
       ),
+      ...(i.division ? { DepartmentRef: { value: i.division.id, name: i.division.name } } : {}),
       ...(setting.termsId ? { SalesTermRef: { value: setting.termsId, ...(setting.termsName ? { name: setting.termsName } : {}) } } : {}),
       Line: lines,
     },
   };
+}
+
+/** Term entity (only the fields used): https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/term */
+export type QboBillTerm = { Id: string; Name: string; Active?: boolean };
+
+/**
+ * The bill terms when CDS chose none: the one active QuickBooks term named Net 30 (ignoring
+ * case and spaces). Null when there is none or two: the vendor's own terms apply.
+ */
+export function defaultBillTerm(terms: QboBillTerm[]): { value: string; name: string } | null {
+  const hits = terms.filter((t) => t.Active !== false && t.Id?.trim() && (t.Name ?? "").toLowerCase().replace(/\s+/g, "") === "net30");
+  return hits.length === 1 ? { value: hits[0].Id.trim(), name: hits[0].Name } : null;
+}
+
+/** Item entity (only the fields used): https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/item */
+export type QboBillItem = { Id: string; Name?: string; ExpenseAccountRef?: { value?: string; name?: string } };
+
+/** The QuickBooks item ids on a bill's item lines. */
+export function billItemIds(payload: QboBillPayload): string[] {
+  const ids = payload.Line.flatMap((l) => (l.DetailType === "ItemBasedExpenseLineDetail" ? [l.ItemBasedExpenseLineDetail.ItemRef.value] : []));
+  return [...new Set(ids)];
+}
+
+/**
+ * The bill's items that QuickBooks has without an expense account (customer-only items, such
+ * as a fee CDS never pays a shop for): QuickBooks would refuse the bill, so CDS is told which
+ * item to fix. An item QuickBooks did not return is left to QuickBooks's own answer.
+ */
+export function itemsWithoutExpenseAccount(payload: QboBillPayload, items: QboBillItem[]): string[] {
+  const byId = new Map(items.map((it) => [it.Id, it]));
+  const problems = new Map<string, string>();
+  for (const l of payload.Line) {
+    if (l.DetailType !== "ItemBasedExpenseLineDetail") continue;
+    const ref = l.ItemBasedExpenseLineDetail.ItemRef;
+    const item = byId.get(ref.value);
+    if (!item || item.ExpenseAccountRef?.value?.trim() || problems.has(ref.value)) continue;
+    const portal = l.Description.replace(/ \([^()]*\)$/, "").split(" - ")[0];
+    problems.set(
+      ref.value,
+      `QuickBooks item ${item.Name ?? ref.name ?? ref.value} (${portal}) has no expense account, so it cannot go on a shop bill. Add its expense account in QuickBooks (Purchasing information), then Retry.`,
+    );
+  }
+  return [...problems.values()];
 }
 
 // ---------------------------------------------------------------- when
@@ -244,11 +339,20 @@ export const CLAIM_EXPIRES_MS = 5 * 60 * 1000;
 export type BillState =
   /** No bill for this order: not completed yet, cancelled, or CDS's own shop. */
   | { kind: "none" }
-  /** Completed, but CDS has not chosen the account or item yet. */
+  /** Completed, but CDS has not turned shop bills on yet. */
   | { kind: "not_set_up" }
   | { kind: "creating" }
-  | { kind: "created"; billId: string; number: string | null; total: number | null; at: string | null; changedTotal: number | null }
-  /** Completed, but something must be fixed first (vendor link, a TBD shop rate). */
+  | {
+      kind: "created";
+      billId: string;
+      number: string | null;
+      total: number | null;
+      at: string | null;
+      changedTotal: number | null;
+      /** The customer's remembered COGS division; null: no division matched, so the bill has none. */
+      division: CogsDivision | null;
+    }
+  /** Completed, but something must be fixed first (vendor link, a TBD shop rate, an item link, the deduction account). */
   | { kind: "blocked"; problems: string[]; lastError: string | null }
   | {
       kind: "ready";
@@ -270,6 +374,7 @@ export function billState(i: BillInputs, record: BillRecord | null, now: Date = 
       total: record.qbTotal,
       at: record.billCreatedAt,
       changedTotal: changed ? current : null,
+      division: i.division,
     };
   }
   const wo = i.workOrder;

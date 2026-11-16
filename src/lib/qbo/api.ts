@@ -4,6 +4,7 @@ import type { QboBillPayload, QboVendor } from "./bill";
 import type { CreatedBill, FoundBill } from "./bill-run";
 import type { QboInvoicePayload } from "./invoice";
 import type { QboLookups } from "./invoice-qbo";
+import type { QboDepartment } from "./cogs-division";
 import type { QboClass } from "./shop-class";
 import type { QboCustomerRecord } from "./sub-customer";
 
@@ -23,7 +24,7 @@ const PAGE = 1000;
 /** Upper bound so a very large company cannot make a page hang. */
 const MAX_ROWS = 10_000;
 
-async function queryAll<T>(api: QboApi, entity: "Item" | "Customer" | "Vendor" | "Account" | "Term", where: string): Promise<T[]> {
+async function queryAll<T>(api: QboApi, entity: "Item" | "Customer" | "Vendor" | "Account" | "Term" | "Department", where: string): Promise<T[]> {
   const rows: T[] = [];
   for (let start = 1; start <= MAX_ROWS; start += PAGE) {
     const res = await qboRequest<{ QueryResponse?: Record<string, T[] | undefined> }>(api, "GET", "query", {
@@ -98,13 +99,16 @@ export async function recentInvoiceCustomFields(api: QboApi): Promise<{ CustomFi
   return res.QueryResponse?.Invoice ?? [];
 }
 
+export type QboItemDetail = { Id: string; Name?: string; Description?: string; ExpenseAccountRef?: { value?: string; name?: string } };
+
 /**
- * The items with these ids, in one query, for their own sales description (Item.Description),
- * which QuickBooks puts on a line when CDS makes an invoice by hand.
+ * The items with these ids, in one query: their own sales description (Item.Description),
+ * which QuickBooks puts on a line when CDS makes an invoice by hand, and their expense
+ * account (a shop bill line needs one, ./bill itemsWithoutExpenseAccount).
  */
-export async function getItems(api: QboApi, ids: string[]): Promise<{ Id: string; Name?: string; Description?: string }[]> {
+export async function getItems(api: QboApi, ids: string[]): Promise<QboItemDetail[]> {
   if (!ids.length) return [];
-  const res = await qboRequest<{ QueryResponse?: { Item?: { Id: string; Name?: string; Description?: string }[] } }>(api, "GET", "query", {
+  const res = await qboRequest<{ QueryResponse?: { Item?: QboItemDetail[] } }>(api, "GET", "query", {
     query: { query: `select * from Item where Id in (${ids.map(qboQuoted).join(", ")}) maxresults ${PAGE}` },
   });
   return res.QueryResponse?.Item ?? [];
@@ -173,6 +177,11 @@ export const BILL_ACCOUNT_TYPES = ["Expense", "Cost of Goods Sold", "Other Expen
 export async function listBillAccounts(api: QboApi): Promise<QboAccount[]> {
   const rows = await queryAll<QboAccount>(api, "Account", "Active = true");
   return rows.filter((a) => BILL_ACCOUNT_TYPES.includes(a.AccountType ?? ""));
+}
+
+/** The active Departments ("Division" in CDS's company), for the customer's COGS division on bills. */
+export function listDepartments(api: QboApi): Promise<QboDepartment[]> {
+  return queryAll<QboDepartment>(api, "Department", "Active = true");
 }
 
 /** The active payment terms (Net 30 and the like). */

@@ -3,6 +3,7 @@ import { one } from "@/components/cds-wo/util";
 import type { createClient } from "@/lib/supabase/server";
 import {
   buildInvoicePayload,
+  toItemMappings,
   type BuildResult,
   type ComponentResult,
   type ComponentType,
@@ -13,7 +14,6 @@ import {
   type InvoiceLocation,
   type InvoiceRefs,
   type InvoiceWorkOrder,
-  type ItemMapping,
   type ItemMappings,
   type MeasurementMappings,
   type TaxClass,
@@ -155,22 +155,11 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
     descriptions.set(itemDescriptionKey(d.qbo_item_name), d.description);
   }
 
-  const itemMap: ItemMappings = { customer: {}, default: {}, otherCustomers: {} };
-  for (const m of (itemMapRes.data ?? []) as {
-    customer_id: string | null;
-    catalog_item_id: string;
-    qbo_item_id: string;
-    qbo_item_name: string;
-  }[]) {
-    const mapping: ItemMapping = {
-      qboItemId: m.qbo_item_id,
-      qboItemName: m.qbo_item_name,
-      invoiceDescription: descriptions.get(itemDescriptionKey(m.qbo_item_name)) ?? null,
-    };
-    if (m.customer_id === null) itemMap.default[m.catalog_item_id] = mapping;
-    else if (m.customer_id === wo.customer_id) itemMap.customer[m.catalog_item_id] = mapping;
-    else itemMap.otherCustomers![m.catalog_item_id] = true;
-  }
+  const itemMap: ItemMappings = toItemMappings(
+    (itemMapRes.data ?? []) as { customer_id: string | null; catalog_item_id: string; qbo_item_id: string; qbo_item_name: string }[],
+    wo.customer_id,
+    (name) => descriptions.get(itemDescriptionKey(name)) ?? null,
+  );
   const measurementMap: MeasurementMappings = { customer: {}, default: {} };
   for (const m of (measurementRes.data ?? []) as {
     customer_id: string | null;

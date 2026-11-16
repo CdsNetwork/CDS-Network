@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
-import { isUuid, LINES_LOCKED_STATUSES, REMOVABLE_LABEL_STATUSES, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
+import { isUuid, LINES_LOCKED_STATUSES, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
 import { requireCds } from "@/lib/auth";
 import { recordSync } from "@/lib/integration-sync";
 import { noteBody } from "@/lib/notes";
@@ -14,6 +14,7 @@ import { invoiceBlockReason, invoicedOutcome, invoiceLocked, qbInvoiceIdOf } fro
 import { createInvoice, getInvoice, listClasses, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
 import { createShopBill, createShopBillAfter } from "@/lib/qbo/bill-server";
 import { QboError } from "@/lib/qbo/client";
+import { changedSinceNote, claimInvoice, finishInvoice, invoiceSnapshot } from "@/lib/qbo/invoice-claim";
 import { loadInvoice } from "@/lib/qbo/invoice-input";
 import { cachedSubCustomer, resolveInvoiceQbo, saveSubCustomer, type ResolvedInvoice } from "@/lib/qbo/invoice-qbo";
 import { createdNote, type PendingQbInvoice } from "@/lib/qbo/pending";
@@ -283,50 +284,21 @@ export async function addShipment(woId: string, _prev: ActionState, formData: Fo
 
 /**
  * Removes a shipment leg added by mistake. Only while it has no active label, no tracking
- * number and its label status says no label (needed or voided): a leg with any of these is
- * real or has a label being made (void the label first). Its notes, costs and tracking events
- * go with it (cascade); voided labels on it too. The delete repeats the checks so a label
- * recorded meanwhile keeps the leg.
+ * number and its label status says no label (needed or voided), and the order is not
+ * invoiced: public.cds_remove_shipment checks this under a lock, deletes the leg and logs it
+ * (20261118040000_remove_shipment_rpc.sql). Its notes, costs and tracking events go with it
+ * (cascade); voided labels on it too.
  */
 export async function removeShipment(woId: string, shipmentId: string): Promise<ActionState> {
-  const profile = await requireCds();
+  await requireCds();
   if (!isUuid(woId) || !isUuid(shipmentId)) return { error: "Shipment not found." };
   const supabase = await createClient();
-  const [order, shipRes, labelRes] = await Promise.all([
-    orderState(supabase, woId),
-    supabase.from("shipments").select("carrier, tracking_number, label_status").eq("id", shipmentId).eq("work_order_id", woId).maybeSingle(),
-    supabase
-      .from("shipment_labels")
-      .select("id", { count: "exact", head: true })
-      .eq("shipment_id", shipmentId)
-      .eq("status", "active"),
-  ]);
-  if (shipRes.error || labelRes.error) return { error: "The shipment could not be read. Try again." };
-  if (!order || !shipRes.data) return { error: "Shipment not found." };
-  if (order.invoiced) return { error: "Shipments cannot be removed after the order is invoiced." };
-  if (labelRes.count) return { error: "This shipment has a label. Void the label first, then remove the shipment." };
-  if (shipRes.data.tracking_number) return { error: "This shipment has a tracking number, so it cannot be removed." };
-  if (!REMOVABLE_LABEL_STATUSES.includes(shipRes.data.label_status)) {
-    return { error: "This shipment has a label or one is being made. Void the label first, then remove the shipment." };
+  const { error } = await supabase.rpc("cds_remove_shipment", { p_work_order: woId, p_shipment: shipmentId });
+  if (error) {
+    // Raised by the function: written for users.
+    if (error.code === "P0001" || error.code === "P0002") return { error: error.message };
+    return { error: "The shipment could not be removed. Try again." };
   }
-
-  const { data, error } = await supabase
-    .from("shipments")
-    .delete()
-    .eq("id", shipmentId)
-    .eq("work_order_id", woId)
-    .is("tracking_number", null)
-    .in("label_status", REMOVABLE_LABEL_STATUSES)
-    .select("id");
-  if (error) return { error: error.message };
-  if (!data?.length) return { error: "The shipment changed meanwhile and was not removed. Reload the page." };
-  await supabase.from("work_order_events").insert({
-    work_order_id: woId,
-    actor_id: profile.id,
-    event_type: "shipment",
-    message: `Shipment removed: ${shipRes.data.carrier ?? "carrier not set"}`,
-    shop_visible: false,
-  });
   return done(woId, "Shipment removed.");
 }
 
@@ -823,11 +795,15 @@ async function logSync(
  *
  * Never creates a second invoice for a work order:
  *   * nothing is sent once the order has a QuickBooks invoice, is invoiced or is cancelled;
- *   * the request carries Intuit's requestid (the work order id), so a retry after a timeout,
- *     a lost response or a failed portal update gets the original invoice back instead of
- *     a new one. Only after QuickBooks has refused a request outright (HTTP 4xx, so nothing
- *     was created) does the next attempt use a new id ("<id>-r<n>"), because QuickBooks
- *     would otherwise answer the corrected request with the stored refusal.
+ *   * the order's invoice is claimed in the database before QuickBooks is called
+ *     (@/lib/qbo/invoice-claim): one request at a time, and while it runs, and until
+ *     QuickBooks has answered clearly, the invoice details (lines, prices, customer, PO, tax)
+ *     cannot change;
+ *   * the request carries Intuit's requestid, kept on the claim (the work order id), so a
+ *     retry after a timeout, a lost response or a failed portal update gets the original
+ *     invoice back instead of a new one. Only after QuickBooks has refused a request outright
+ *     (HTTP 4xx, so nothing was created) does the next attempt use a new id ("<id>-r<n>"),
+ *     because QuickBooks would otherwise answer the corrected request with the stored refusal.
  */
 export async function createQuickBooksInvoice(woId: string): Promise<ActionState> {
   const profile = await requireCds();
@@ -844,34 +820,59 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   if (invoice.qbInvoiceId) {
     return { error: `This work order already has QuickBooks invoice ${invoice.qbInvoiceNumber ?? invoice.qbInvoiceId}.` };
   }
-  if (invoice.pendingQb) return recordPendingInvoice(supabase, woId, invoice.status, invoice.pendingQb);
   const blocked = invoiceBlockReason(invoice.status, null);
+  if (invoice.pendingQb && blocked) return recordPendingInvoice(supabase, woId, invoice.status, invoice.pendingQb, null, null);
   if (blocked) return { error: blocked };
-  if (!invoice.result.ok) return { error: `Fix these first: ${invoice.result.problems.join(" ")}` };
-  const { payload, itemText } = invoice.result;
+  if (!invoice.pendingQb && !invoice.result.ok) return { error: `Fix these first: ${invoice.result.problems.join(" ")}` };
+  const readSnapshot = invoice.result.ok ? invoiceSnapshot(invoice.result) : null;
 
-  const { count, error: countError } = await supabase
-    .from("integration_sync")
-    .select("id", { count: "exact", head: true })
-    .eq("system", "quickbooks")
-    .eq("entity", "invoice")
-    .eq("entity_id", woId)
-    .eq("status", "rejected");
-  if (countError) return { error: "The QuickBooks history of this order could not be read. Try again." };
-  const requestId = count ? `${woId}-r${count}` : woId;
+  const claimed = await claimInvoice(supabase, woId, readSnapshot);
+  if (!claimed.ok) return { error: claimed.error };
+  const claim = claimed.claim;
+  if (claim.state === "created") {
+    // QuickBooks created the invoice; it is not recorded yet.
+    const pending = invoice.pendingQb?.id === claim.qbInvoiceId ? invoice.pendingQb : { id: claim.qbInvoiceId, number: null, at: "" };
+    return recordPendingInvoice(supabase, woId, invoice.status, pending, claim.snapshot, readSnapshot);
+  }
+  if (invoice.pendingQb) {
+    // Created before invoices were claimed: lock it on the claim, then record it.
+    await finishInvoice(supabase, woId, claim.claimId, "created", invoice.pendingQb.id);
+    return recordPendingInvoice(supabase, woId, invoice.status, invoice.pendingQb, claim.snapshot, readSnapshot);
+  }
+
+  // Read again under the claim: from now on the details cannot change, so what is sent is
+  // what the order says.
+  let current;
+  try {
+    current = await loadInvoice(supabase, woId);
+  } catch {
+    current = null;
+  }
+  const currentSnapshot = current?.result.ok ? invoiceSnapshot(current.result) : null;
+  if (!current || !current.result.ok || currentSnapshot !== readSnapshot) {
+    await finishInvoice(supabase, woId, claim.claimId, "not_sent");
+    return { error: "The work order changed while the invoice was being prepared. Click Create QuickBooks invoice again." };
+  }
+  const { payload, itemText } = current.result;
+  const requestId = claim.requestId;
+  // An earlier request with this id that QuickBooks did not confirm was built from other
+  // details: QuickBooks returns that invoice if it made one.
+  const changedSince = claim.snapshot !== null && claim.snapshot !== currentSnapshot;
 
   // The site's sub-customer, the custom fields and the items' own descriptions are looked up
   // in QuickBooks now (see @/lib/qbo/invoice-qbo); what is not found is left out with a note,
   // never an error.
   const parentId = payload.CustomerRef.value;
-  const cachedSub = await cachedSubCustomer(supabase, invoice.target.locationId, parentId);
+  const cachedSub = await cachedSubCustomer(supabase, current.target.locationId, parentId);
   // A shop without a Class row gets its "CDS <city>" class picked from QuickBooks (see
   // @/lib/qbo/shop-class); no match or a failed lookup sends the invoice without a class.
-  const affiliateId = invoice.affiliateId;
+  const affiliateId = current.affiliateId;
+  let sent = false;
   const send = async (api: Awaited<ReturnType<typeof qboApi>>) => {
     const cls = !payload.ClassRef && affiliateId ? await findShopClass(supabase, () => listClasses(api), affiliateId) : null;
     const withClass = cls ? { ...payload, ClassRef: { value: cls.id } } : payload;
-    const r = await resolveInvoiceQbo(qboLookups(api), withClass, invoice.target, cachedSub, itemText);
+    const r = await resolveInvoiceQbo(qboLookups(api), withClass, current.target, cachedSub, itemText);
+    sent = true;
     return { resolved: r, created: await createInvoice(api, r.payload, requestId), shopClass: cls };
   };
 
@@ -891,6 +892,10 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   } catch (e) {
     const qbo = e instanceof QboError ? e : null;
     const message = e instanceof Error ? e.message : "unknown error";
+    // Refused: nothing was created. Not called, or not signed in: nothing reached QuickBooks.
+    // Otherwise QuickBooks may have created it: the next attempt asks again with the same id.
+    await finishInvoice(supabase, woId, claim.claimId,
+      qbo?.rejected ? "refused" : !sent || qbo?.faultType === "Config" || qbo?.unauthorized ? "not_sent" : "unconfirmed");
     if (qbo?.faultType === "Config") return { error: message };
     await logSync(supabase, woId, qbo?.rejected ? "rejected" : "error", null,
       `${message}${qbo?.intuitTid ? ` (intuit_tid ${qbo.intuitTid})` : ""}`);
@@ -902,12 +907,15 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   }
 
   // Recorded before the work order is marked, so a failed update leaves the invoice findable
-  // (see @/lib/qbo/pending) and the next click records it instead of sending a new one.
+  // (see @/lib/qbo/pending and the claim) and the next click records it instead of sending a
+  // new one.
+  const name = created.DocNumber ?? created.Id;
   const billed = resolved.subCustomer ? [`Billed to ${resolved.subCustomer.name}.`] : [];
   const notes = [...billed, ...resolved.notes];
   await logSync(supabase, woId, "ok", created.Id, createdNote(created.DocNumber, notes));
+  await finishInvoice(supabase, woId, claim.claimId, "created", created.Id);
   if (resolved.subCustomer && resolved.subCustomer.id !== cachedSub) {
-    await saveSubCustomer(supabase, invoice.target.locationId, parentId, resolved.subCustomer);
+    await saveSubCustomer(supabase, current.target.locationId, parentId, resolved.subCustomer);
   }
   if (shopClass && affiliateId) await saveShopClass(supabase, affiliateId, shopClass, profile.id);
   // The tax and total QuickBooks calculated (Automated Sales Tax, from the ship-to address):
@@ -923,26 +931,37 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   if (error) {
     await logSync(supabase, woId, "error", created.Id, `Invoice created in QuickBooks, portal not updated: ${error.message}`);
     return {
-      error: `QuickBooks invoice ${created.DocNumber ?? created.Id} was created, but the work order could not be updated (${error.message}). Click again to finish; no second invoice is created.`,
+      error: `QuickBooks invoice ${name} was created, but the work order could not be updated (${error.message}). Click again to finish; no second invoice is created.`,
     };
   }
   return done(
     woId,
-    [`QuickBooks invoice ${created.DocNumber ?? created.Id} created.`, invoicedOutcome(invoice.status), ...notes].join(" "),
+    [`QuickBooks invoice ${name} created.`, invoicedOutcome(current.status), ...notes, ...(changedSince ? [changedSinceNote(name)] : [])].join(" "),
   );
 }
 
 /**
  * QuickBooks already created an invoice for this order but the work order was not marked
- * (see @/lib/qbo/pending). Records that invoice; never sends a new one.
+ * (see @/lib/qbo/pending). Records that invoice; never sends a new one. claimedSnapshot is the
+ * fingerprint of the details it was created from (@/lib/qbo/invoice-claim) and currentSnapshot
+ * the order's now: when they differ (or the order no longer builds an invoice) it is still
+ * recorded, since it exists in QuickBooks, and staff are told to check it there.
  */
-async function recordPendingInvoice(supabase: Supabase, woId: string, status: string, pending: PendingQbInvoice): Promise<ActionState> {
+async function recordPendingInvoice(
+  supabase: Supabase,
+  woId: string,
+  status: string,
+  pending: PendingQbInvoice,
+  claimedSnapshot: string | null,
+  currentSnapshot: string | null,
+): Promise<ActionState> {
   const name = pending.number ?? `id ${pending.id}`;
   if (invoiceBlockReason(status, null)) {
     return {
       error: `QuickBooks invoice ${name} was created for this work order but is not recorded on it, and the order is now ${status === "cancelled" ? "cancelled" : "invoiced"}. Check the invoice in QuickBooks and void it there if it should not exist.`,
     };
   }
+  const changed = claimedSnapshot !== null && claimedSnapshot !== currentSnapshot;
   const amounts = await readInvoiceAmounts(pending.id);
   const { error } = await supabase.rpc("cds_mark_invoiced", {
     p_work_order: woId,
@@ -957,7 +976,10 @@ async function recordPendingInvoice(supabase: Supabase, woId: string, status: st
       error: `QuickBooks invoice ${name} exists, but the work order could not be updated (${error.message}). Click again to finish; no second invoice is created.`,
     };
   }
-  return done(woId, `QuickBooks invoice ${name} (created earlier) is now recorded. ${invoicedOutcome(status)}`);
+  return done(
+    woId,
+    [`QuickBooks invoice ${name} (created earlier) is now recorded.`, invoicedOutcome(status), ...(changed ? [changedSinceNote(pending.number ?? pending.id)] : [])].join(" "),
+  );
 }
 
 /**

@@ -3,8 +3,8 @@ import { ActionForm } from "@/components/cds-admin/ActionForm";
 import { removeVendorLinkConfirm } from "@/components/cds-admin/confirm";
 import styles from "@/components/cds-admin/cds-admin.module.css";
 import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
-import { listBillAccounts, listItems, listTerms, listVendors, type QboAccount, type QboItem, type QboTerm } from "@/lib/qbo/api";
-import { BILL_SETTING_KEY, parseBillSetting, suggestVendor, type QboVendor } from "@/lib/qbo/bill";
+import { listBillAccounts, listTerms, listVendors, type QboAccount, type QboTerm } from "@/lib/qbo/api";
+import { BILL_SETTING_KEY, defaultBillTerm, parseBillSetting, suggestVendor, type QboVendor } from "@/lib/qbo/bill";
 import { qboApi } from "@/lib/qbo/tokens";
 import { dateTime, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -13,22 +13,23 @@ import { linkSuggestedVendor, removeVendorMap, saveBillSetting, saveVendorMap } 
 type Shop = { id: string; short_code: string; display_name: string; city: string | null; region: string | null };
 type VendorMap = { affiliate_id: string; qbo_vendor_id: string; qbo_vendor_name: string };
 
-type Lists = { vendors: QboVendor[]; accounts: QboAccount[]; items: QboItem[]; terms: QboTerm[] } | null;
+type Lists = { vendors: QboVendor[]; accounts: QboAccount[]; terms: QboTerm[] } | null;
 
 async function billLists(connected: boolean): Promise<{ lists: Lists; error: string | null }> {
   if (!connected) return { lists: null, error: null };
   try {
     const api = await qboApi();
-    const [vendors, accounts, items, terms] = await Promise.all([listVendors(api), listBillAccounts(api), listItems(api), listTerms(api)]);
-    return { lists: { vendors, accounts, items, terms }, error: null };
+    const [vendors, accounts, terms] = await Promise.all([listVendors(api), listBillAccounts(api), listTerms(api)]);
+    return { lists: { vendors, accounts, terms }, error: null };
   } catch (e) {
     return { lists: null, error: `QuickBooks vendors and accounts could not be loaded (${e instanceof Error ? e.message : "unknown error"}). Enter ids by hand or reload.` };
   }
 }
 
 /**
- * Shop bills (M3) on Admin > QuickBooks mappings: the account or item the bill lines go to,
- * and each shop's QuickBooks vendor (suggested by name, CDS confirms or picks another).
+ * Shop bills (M3) on Admin > QuickBooks mappings: each shop's QuickBooks vendor (suggested by
+ * name, CDS confirms or picks another), the account for shipping deductions, optional terms,
+ * and the switch that turns bills on. Bill lines use each item's own QuickBooks item.
  */
 export async function ShopBillsSection({ connected }: { connected: boolean }) {
   const supabase = await createClient();
@@ -58,20 +59,18 @@ export async function ShopBillsSection({ connected }: { connected: boolean }) {
       label: v.DisplayName,
       hint: `QuickBooks id ${v.Id}${v.CompanyName && v.CompanyName !== v.DisplayName ? ` - ${v.CompanyName}` : ""}`,
     })) ?? null;
-  const targetOptions: SearchOption[] | null = lists
-    ? [
-        ...lists.accounts.map((a) => ({
-          value: `account::${a.Id}::${a.FullyQualifiedName ?? a.Name}`,
-          label: `Account: ${a.FullyQualifiedName ?? a.Name}`,
-          hint: [a.AccountType, a.AcctNum && `No. ${a.AcctNum}`, `QuickBooks id ${a.Id}`].filter(Boolean).join(" - "),
-        })),
-        ...lists.items.map((i) => ({
-          value: `item::${i.Id}::${i.Name}`,
-          label: `Item: ${i.FullyQualifiedName ?? i.Name}`,
-          hint: [i.Type, `QuickBooks id ${i.Id}`].filter(Boolean).join(" - "),
-        })),
-      ]
+  const accountOptions: SearchOption[] | null = lists
+    ? lists.accounts.map((a) => ({
+        value: `account::${a.Id}::${a.FullyQualifiedName ?? a.Name}`,
+        label: a.FullyQualifiedName ?? a.Name,
+        hint: [a.AccountType, a.AcctNum && `No. ${a.AcctNum}`, `QuickBooks id ${a.Id}`].filter(Boolean).join(" - "),
+      }))
     : null;
+  const termsValue = setting?.termsId ? `${setting.termsId}::${setting.termsName ?? ""}` : "";
+  // CDS books freight deductions to GL 5030 (CDS, 2026-11-16): suggested until an account is saved.
+  const suggested5030 = !setting?.deduction ? lists?.accounts.filter((a) => a.AcctNum?.trim() === "5030") : null;
+  const deductionDefault = suggested5030?.length === 1 ? `account::${suggested5030[0].Id}::${suggested5030[0].FullyQualifiedName ?? suggested5030[0].Name}` : "";
+  const net30 = lists ? defaultBillTerm(lists.terms) : null;
   const unlinked = shops.filter((s) => !links.has(s.id)).length;
 
   return (
@@ -86,34 +85,49 @@ export async function ShopBillsSection({ connected }: { connected: boolean }) {
       {listError && <div className="notice danger">{listError}</div>}
       {loadError && <div className="notice danger">Some shop bill settings could not be loaded. Refresh the page to try again.</div>}
 
-      <h4 style={{ marginTop: 16 }}>Account or item for bill lines</h4>
+      <p className="small">Each bill line uses the item&apos;s own QuickBooks item, so QuickBooks books it to that item&apos;s expense account.</p>
       {setting ? (
         <p>
-          Bill lines go to QuickBooks {setting.kind === "account" ? "account" : "item"} <b>{setting.name}</b>{" "}
-          <span className="small">(id {setting.id})</span>
-          {setting.termsName ? `, terms ${setting.termsName}` : ""}.
+          Shop bills are on
           <span className="small">
             {" "}
-            Bills since {setting.since ? dateTime(setting.since) : "the start"}
-            {settingBy ? `, set by ${settingBy}` : ""}.
+            since {setting.since ? dateTime(setting.since) : "the start"}
+            {settingBy ? `, set by ${settingBy}` : ""}
           </span>
+          . Shipping deductions go to{" "}
+          {setting.deduction ? (
+            <>
+              <b>{setting.deduction.name}</b> <span className="small">(id {setting.deduction.id})</span>
+            </>
+          ) : (
+            "no account yet"
+          )}
+          {setting.termsName ? `, terms ${setting.termsName}` : ""}.
         </p>
       ) : (
-        <div className="notice warning">QuickBooks bills are not set up yet. Choose the account or item the bill lines go to.</div>
+        <div className="notice warning">QuickBooks bills are not turned on yet.</div>
       )}
-      <ActionForm action={saveBillSetting} submitLabel={setting ? "Change" : "Turn on shop bills"} resetOnSuccess>
-        {targetOptions ? (
+      {setting && !setting.deduction && (
+        <div className="notice warning">Choose the account for shipping deductions: orders with a shipping deduction wait for it.</div>
+      )}
+      <ActionForm action={saveBillSetting} submitLabel={setting ? "Save" : "Turn on shop bills"} resetOnSuccess>
+        {accountOptions ? (
           <div className="grid2">
             <div className="field">
-              <label htmlFor="bill-target">
-                Expense account or item <span className="req">*</span>
-              </label>
-              <FormSearchSelect id="bill-target" name="bill_target" options={targetOptions} required placeholder="Type the account or item name" limit={150} />
+              <label htmlFor="bill-target">Account for shipping deductions</label>
+              <FormSearchSelect
+                id="bill-target"
+                name="bill_target"
+                options={accountOptions}
+                defaultValue={deductionDefault}
+                placeholder={setting?.deduction ? `Keep ${setting.deduction.name}` : "Type the account name"}
+                limit={150}
+              />
             </div>
             <div className="field">
               <label htmlFor="bill-terms">Terms</label>
-              <select id="bill-terms" name="bill_terms" className="input" defaultValue="">
-                <option value="">The vendor&apos;s own terms</option>
+              <select id="bill-terms" name="bill_terms" className="input" defaultValue={termsValue}>
+                <option value="">{net30 ? `${net30.name} (the default)` : "The vendor's own terms"}</option>
                 {lists!.terms.map((t) => (
                   <option key={t.Id} value={`${t.Id}::${t.Name}`}>
                     {t.Name}
@@ -125,28 +139,19 @@ export async function ShopBillsSection({ connected }: { connected: boolean }) {
         ) : (
           <div className="grid3">
             <div className="field">
-              <label htmlFor="bill-kind">
-                Type <span className="req">*</span>
-              </label>
-              <select id="bill-kind" name="bill_kind" className="input" required defaultValue="">
-                <option value="" disabled>
-                  Choose
-                </option>
+              <label htmlFor="bill-kind">Shipping deductions go to</label>
+              <select id="bill-kind" name="bill_kind" className="input" defaultValue="account">
                 <option value="account">Expense account</option>
                 <option value="item">Product or service item</option>
               </select>
             </div>
             <div className="field">
-              <label htmlFor="bill-target-id">
-                QuickBooks id <span className="req">*</span>
-              </label>
-              <input id="bill-target-id" name="bill_target_id" className="input" required inputMode="numeric" pattern="[0-9]+" maxLength={50} />
+              <label htmlFor="bill-target-id">QuickBooks id</label>
+              <input id="bill-target-id" name="bill_target_id" className="input" inputMode="numeric" pattern="[0-9]+" maxLength={50} />
             </div>
             <div className="field">
-              <label htmlFor="bill-target-name">
-                Name <span className="req">*</span>
-              </label>
-              <input id="bill-target-name" name="bill_target_name" className="input" required maxLength={500} />
+              <label htmlFor="bill-target-name">Name</label>
+              <input id="bill-target-name" name="bill_target_name" className="input" maxLength={500} />
             </div>
           </div>
         )}

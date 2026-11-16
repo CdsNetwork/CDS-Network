@@ -43,6 +43,7 @@ export function ShopBillPanel({ woId, status, state, loadError }: { woId: string
           {state.total !== null ? ` (${money(state.total)})` : ""}
           {state.at ? <span className="small"> created {dateTime(state.at)}</span> : null}
         </p>
+        {!state.division && <p className="small">No Division: no COGS division in QuickBooks matched this customer.</p>}
         {state.changedTotal !== null && (
           <div className="notice warning" role="status">
             The shop total is now {money(state.changedTotal)}. Change the bill in QuickBooks to match.
@@ -85,7 +86,8 @@ export function ShopBillPanel({ woId, status, state, loadError }: { woId: string
       ) : (
         <>
           <p className="small">
-            Bill {state.payload.DocNumber} to {state.payload.VendorRef.name ?? "the shop's vendor"} for {money(state.total)}.
+            Bill {state.payload.DocNumber} to {state.payload.VendorRef.name ?? "the shop's vendor"} for {money(state.total)}
+            {state.payload.DepartmentRef ? `, Division ${state.payload.DepartmentRef.name}` : ""}.
             {state.beforeSince && !lastError
               ? " This order was completed before QuickBooks bills were turned on: create the bill only if it is not in QuickBooks yet."
               : ""}

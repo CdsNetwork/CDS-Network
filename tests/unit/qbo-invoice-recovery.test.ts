@@ -21,7 +21,15 @@ const loadInvoice = vi.fn();
 vi.mock("@/lib/qbo/invoice-input", () => ({ loadInvoice }));
 
 const inserts: Record<string, unknown>[] = [];
-const rpc = vi.fn();
+/** The answer of cds_mark_invoiced; the invoice claim (@/lib/qbo/invoice-claim) is always granted. */
+const markInvoiced = vi.fn();
+const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+  if (name === "cds_claim_qbo_invoice") {
+    return { data: { state: "sending", claim_id: "c1", attempt: 0, request_id: WO, snapshot: args.p_snapshot }, error: null };
+  }
+  if (name === "cds_finish_qbo_invoice") return { data: null, error: null };
+  return markInvoiced(name, args);
+});
 let rejectedCount = 0;
 function countQuery() {
   const q = {
@@ -63,7 +71,8 @@ beforeEach(() => {
   inserts.length = 0;
   rejectedCount = 0;
   createInvoice.mockReset();
-  rpc.mockReset();
+  rpc.mockClear();
+  markInvoiced.mockReset();
   loadInvoice.mockReset();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -94,7 +103,7 @@ describe("createQuickBooksInvoice when the portal update fails", () => {
   it("records the created invoice id and number before marking, and names it in the message", async () => {
     loadInvoice.mockResolvedValue(invoiceState());
     createInvoice.mockResolvedValue({ Id: "145", DocNumber: "1043" });
-    rpc.mockResolvedValue({ error: { message: "connection reset" } });
+    markInvoiced.mockResolvedValue({ error: { message: "connection reset" } });
 
     const res = await createQuickBooksInvoice(WO);
 
@@ -105,7 +114,7 @@ describe("createQuickBooksInvoice when the portal update fails", () => {
 
   it("records the invoice QuickBooks already created on the next click instead of sending a new one", async () => {
     loadInvoice.mockResolvedValue(invoiceState({ pendingQb: { id: "145", number: "1043", at: "2026-10-23T10:00:00Z" } }));
-    rpc.mockResolvedValue({ error: null });
+    markInvoiced.mockResolvedValue({ error: null });
 
     const res = await createQuickBooksInvoice(WO);
 
@@ -114,11 +123,14 @@ describe("createQuickBooksInvoice when the portal update fails", () => {
     expect(res).toMatchObject({ ok: expect.stringContaining("QuickBooks invoice 1043") });
   });
 
+  // An invoice created before invoices were claimed (no snapshot to compare with). With a
+  // claim the details cannot change until it is recorded, and a difference is reported
+  // (tests/unit/qbo-invoice-claim.test.ts). It is recorded either way: it exists in QuickBooks.
   it("records it even when the invoice details changed since and would no longer build", async () => {
     loadInvoice.mockResolvedValue(
       invoiceState({ pendingQb: { id: "145", number: null, at: "2026-10-23T10:00:00Z" }, result: { ok: false, problems: ["No price"], warnings: [] } }),
     );
-    rpc.mockResolvedValue({ error: null });
+    markInvoiced.mockResolvedValue({ error: null });
     await createQuickBooksInvoice(WO);
     expect(createInvoice).not.toHaveBeenCalled();
     expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", { p_work_order: WO, p_qb_invoice_id: "145", p_qb_invoice_number: null, p_qb_tax_total: null, p_qb_total: null });
@@ -128,7 +140,7 @@ describe("createQuickBooksInvoice when the portal update fails", () => {
     loadInvoice.mockResolvedValue(invoiceState({ status: "cancelled", pendingQb: { id: "145", number: "1043", at: "2026-10-23T10:00:00Z" } }));
     const res = await createQuickBooksInvoice(WO);
     expect(createInvoice).not.toHaveBeenCalled();
-    expect(rpc).not.toHaveBeenCalled();
+    expect(markInvoiced).not.toHaveBeenCalled();
     expect((res as { error: string }).error).toMatch(/QuickBooks invoice 1043 was created.*not recorded/);
   });
 });
@@ -143,7 +155,7 @@ describe("createQuickBooksInvoice with the QuickBooks lookups", () => {
       subCustomer: { id: "301", name: "Ryder Fleet Services:RYDER - 297-COLORADO SPRINGS CO" },
     });
     createInvoice.mockResolvedValue({ Id: "145", DocNumber: "1043" });
-    rpc.mockResolvedValue({ error: null });
+    markInvoiced.mockResolvedValue({ error: null });
 
     const res = await createQuickBooksInvoice(WO);
 

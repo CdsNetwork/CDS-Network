@@ -11,6 +11,9 @@
  * A failure ("failed") is keyed on its component_failures row ("failed:<id>"): the latest
  * failure of the saved component. Saving a failed component again records no new failure, so
  * it gets the same key and is emailed once.
+ *
+ * The earliest row of a key is its claim. A later attempt takes it over when it ended in error
+ * or was abandoned while sending (reclaimRow); a sent or skipped email stays as it is.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { pickupWindowLabel } from "@/lib/format";
@@ -49,6 +52,18 @@ export function componentLabel(c: { component_type: string; manufacturer?: strin
  */
 export function acceptedEta(pickupWindow: string | null | undefined): string | null {
   return pickupWindow ? pickupWindowLabel(pickupWindow) : null;
+}
+
+/**
+ * Takes over the claim row of an email that ended in error, or is still sending 5 minutes after
+ * it was claimed, within 24 hours of the change (public.portal_email_reclaim,
+ * 20261118050000_portal_email_retry.sql). With maxAttempts, only while it was tried fewer times.
+ * Atomic: true for one caller only.
+ */
+export async function reclaimRow(db: SupabaseClient, rowId: number, maxAttempts: number | null = null): Promise<boolean> {
+  const { data, error } = await db.rpc("portal_email_reclaim", { p_row: rowId, p_max_attempts: maxAttempts });
+  if (error) throw new Error(`integration_sync row ${rowId} not reclaimed: ${error.message}`);
+  return typeof data === "number" && data > 0;
 }
 
 export function supabasePortalEmailStore(db: SupabaseClient): PortalEmailStore {
@@ -153,8 +168,14 @@ export function supabasePortalEmailStore(db: SupabaseClient): PortalEmailStore {
         .maybeSingle();
       if (readError) throw new Error(`integration_sync claim not read: ${readError.message}`);
       if (earliest && earliest.id !== mine.id) {
-        await db.from("integration_sync").update({ status: "duplicate", error: `Already emailed (row ${earliest.id}).` }).eq("id", mine.id);
-        return null;
+        // The earliest claim failed or was abandoned while sending: take it over and send
+        // again (same Resend key). Sent, skipped or being sent: stand down.
+        const taken = await reclaimRow(db, earliest.id as number);
+        await db
+          .from("integration_sync")
+          .update({ status: "duplicate", error: taken ? `Retry of row ${earliest.id}.` : `Already emailed (row ${earliest.id}).` })
+          .eq("id", mine.id);
+        return taken ? { rowId: earliest.id as number } : null;
       }
       return { rowId: mine.id as number };
     },

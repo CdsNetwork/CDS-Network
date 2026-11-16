@@ -337,23 +337,19 @@ describe("removing a leg added by mistake", () => {
     await must(cds.client.rpc("cds_void_shipment_label", { p_label: labelId, p_message: null }));
     removedRowIds.push(leg.id, labelId as string);
 
-    const byShop = await shopA.client.from("shipments").delete().eq("id", leg.id).select("id");
-    expect(byShop.data ?? []).toEqual([]);
+    // Only through public.cds_remove_shipment (20261118040000_remove_shipment_rpc.sql).
+    const byShop = await shopA.client.rpc("cds_remove_shipment", { p_work_order: f.wo, p_shipment: leg.id });
+    expect(byShop.error).not.toBeNull();
     expect(await must(admin.from("shipments").select("id").eq("id", leg.id))).toHaveLength(1);
 
-    // The app's delete keeps a leg whose label status says a label exists or is being made.
+    // It keeps a leg whose label status says a label exists or is being made.
     const labelled = await insertOne("shipments", { work_order_id: f.wo, direction: "cds_to_customer", label_status: "ready" });
     removedRowIds.push(labelled.id);
-    const kept = await must(
-      cds.client.from("shipments").delete().eq("id", labelled.id).is("tracking_number", null).in("label_status", ["needed", "voided"]).select("id"),
-    );
-    expect(kept).toEqual([]);
+    const kept = await cds.client.rpc("cds_remove_shipment", { p_work_order: f.wo, p_shipment: labelled.id });
+    expect(kept.error?.message).toMatch(/label/);
     await must(admin.from("shipments").delete().eq("id", labelled.id));
 
-    const removed = await must(
-      cds.client.from("shipments").delete().eq("id", leg.id).is("tracking_number", null).in("label_status", ["needed", "voided"]).select("id"),
-    );
-    expect(removed).toHaveLength(1);
+    await must(cds.client.rpc("cds_remove_shipment", { p_work_order: f.wo, p_shipment: leg.id }));
     for (const [table, column, id] of [
       ["shipments", "id", leg.id],
       ["shipment_internal", "shipment_id", leg.id],

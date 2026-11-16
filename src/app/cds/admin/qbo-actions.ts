@@ -218,10 +218,11 @@ export async function removeVendorMap(affiliateId: string): Promise<ActionState>
 }
 
 /**
- * The one expense account or product/service item every bill line goes to, and optional
- * terms (app_settings qbo_bill_line, see @/lib/qbo/bill). The list value is
- * "account::<id>::<name>" or "item::<id>::<name>"; by hand: kind, id and name. Bills start
- * with the first save: orders completed before then get no automatic bill.
+ * Shop bills (app_settings qbo_bill_line, see @/lib/qbo/bill): turned on with the first save
+ * (orders completed before then get no automatic bill), the account for shipping deductions
+ * and optional terms. Bill lines themselves use each item's QuickBooks item. The deduction
+ * account comes from the list as "account::<id>::<name>" (or "item::<id>::<name>"), or by
+ * hand as kind, id and name; left empty, the account already chosen is kept.
  */
 export async function saveBillSetting(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const me = await requireCds();
@@ -235,19 +236,29 @@ export async function saveBillSetting(_prev: ActionState, formData: FormData): P
   } else {
     const id = text(formData, "bill_target_id");
     const name = text(formData, "bill_target_name");
-    choice = id && name ? { id, name } : null;
+    if (id || name) choice = { id, name };
   }
-  if (kind !== "account" && kind !== "item") return { error: "Choose an expense account or a product or service item." };
-  if (!validChoice(choice)) return { error: "Choose the QuickBooks account or item (or enter its numeric id and name)." };
+  if (choice) {
+    if (kind !== "account" && kind !== "item") return { error: "Choose an expense account for shipping deductions." };
+    if (!validChoice(choice)) return { error: "Choose the QuickBooks account for shipping deductions (or enter its numeric id and name)." };
+  }
   const terms = qboChoice(formData, "bill_terms");
   if (terms && !validChoice(terms)) return { error: "Choose the terms from the list, or leave them empty." };
 
   const supabase = await createClient();
   const { data: current, error: readError } = await supabase.from("app_settings").select("value").eq("key", BILL_SETTING_KEY).maybeSingle();
   if (readError) return { error: dbMessage(readError) };
-  const since = parseBillSetting((current as { value: unknown } | null)?.value)?.since ?? new Date().toISOString();
-  const value = billSettingValue({ kind, id: choice.id, name: choice.name, termsId: terms?.id ?? null, termsName: terms?.name ?? null, since });
+  const before = parseBillSetting((current as { value: unknown } | null)?.value);
+  const deduction = choice ? { kind: kind as "account" | "item", id: choice.id, name: choice.name } : (before?.deduction ?? null);
+  const value = billSettingValue({
+    deduction,
+    termsId: terms?.id ?? null,
+    termsName: terms?.name ?? null,
+    since: before?.since ?? new Date().toISOString(),
+  });
   const { error } = await supabase.from("app_settings").upsert({ key: BILL_SETTING_KEY, value, updated_by: me.id }, { onConflict: "key" });
   if (error) return { error: dbMessage(error) };
-  return done(`Bill lines go to QuickBooks ${kind === "account" ? "account" : "item"} ${choice.name}${terms ? `, terms ${terms.name}` : ""}.`);
+  return done(
+    `Shop bills are on${deduction ? `; shipping deductions go to ${deduction.name}` : ""}${terms ? `; terms ${terms.name}` : ""}.`,
+  );
 }

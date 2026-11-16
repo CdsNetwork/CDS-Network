@@ -29,7 +29,15 @@ vi.mock("@/lib/qbo/invoice-input", () => ({ loadInvoice }));
 /** Rows per table for reads; upserts are recorded. */
 let tables: Record<string, Record<string, unknown>[]> = {};
 const upserts: { table: string; row: unknown; options: unknown }[] = [];
-const rpc = vi.fn();
+/** Answers cds_mark_invoiced and other calls; the invoice claim (@/lib/qbo/invoice-claim) is always granted. */
+const rpcAnswer = vi.fn();
+const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+  if (name === "cds_claim_qbo_invoice") {
+    return { data: { state: "sending", claim_id: "c1", attempt: 0, request_id: String(args.p_work_order), snapshot: args.p_snapshot }, error: null };
+  }
+  if (name === "cds_finish_qbo_invoice") return { data: null, error: null };
+  return rpcAnswer(name, args);
+});
 const supabase = {
   rpc,
   from: vi.fn((table: string) => {
@@ -135,13 +143,14 @@ beforeEach(() => {
   createInvoice.mockReset();
   getInvoice.mockReset();
   listClasses.mockReset();
-  rpc.mockReset();
+  rpc.mockClear();
+  rpcAnswer.mockReset();
   loadInvoice.mockReset();
   qboApi.mockClear();
   upserts.length = 0;
   tables = { affiliates: [{ id: SHOP, display_name: "Gulf Coast Diesel", short_code: "GCD", city: "Houston" }] };
   createInvoice.mockResolvedValue({ Id: "145", DocNumber: "40126", TotalAmt: 100, TxnTaxDetail: { TotalTax: 0 } });
-  rpc.mockResolvedValue({ error: null });
+  rpcAnswer.mockResolvedValue({ error: null });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 

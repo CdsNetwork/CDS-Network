@@ -1,5 +1,17 @@
 import { money } from "@/lib/format";
-import { billState, shouldAutoCreate, type BillInputs, type BillRecord, type QboBillPayload } from "./bill";
+import {
+  billItemIds,
+  billState,
+  defaultBillTerm,
+  itemsWithoutExpenseAccount,
+  shouldAutoCreate,
+  type BillInputs,
+  type BillRecord,
+  type QboBillItem,
+  type QboBillPayload,
+  type QboBillTerm,
+} from "./bill";
+import { matchCogsDivision, type CogsDivision, type QboDepartment } from "./cogs-division";
 import { QboError } from "./client";
 
 /**
@@ -13,10 +25,15 @@ import { QboError } from "./client";
  *   2. Before sending, QuickBooks is asked for bills with this bill number from this vendor:
  *      one the portal made for this order (its memo names the order) is recorded instead of
  *      sending another; one made otherwise (CDS typed it by hand) stops the run with a note.
- *   3. The bill is sent with Intuit's requestid ("bill-<order id>"), so a retry after a
+ *   3. The bill's QuickBooks items are read in one query: an item without an expense account
+ *      (QuickBooks would refuse it) stops the run with the item named, recorded as a refusal
+ *      CDS retries after fixing the item in QuickBooks. Read alongside, and never stopping
+ *      the bill: the customer's COGS division when none is remembered yet (found by name,
+ *      ./cogs-division, then remembered), and the Net 30 term when CDS chose no terms.
+ *   4. The bill is sent with Intuit's requestid ("bill-<order id>"), so a retry after a
  *      timeout or a lost answer gets the same bill back. Only after QuickBooks refused the
  *      request outright (nothing created) does the next attempt use "bill-<id>-r<n>".
- *   4. public.qbo_finish_shop_bill records the bill, or the failure for CDS to see and retry.
+ *   5. public.qbo_finish_shop_bill records the bill, or the failure for CDS to see and retry.
  */
 
 export type BillClaim = { claimId: string; requestId: string };
@@ -31,6 +48,10 @@ export type FoundBill = { Id: string; DocNumber?: string; VendorRef?: { value?: 
 
 export type BillQbo = {
   findBills(docNumber: string): Promise<FoundBill[]>;
+  /** The items with these ids (one query), for their expense account. */
+  getItems(ids: string[]): Promise<QboBillItem[]>;
+  listDepartments(): Promise<QboDepartment[]>;
+  listTerms(): Promise<QboBillTerm[]>;
   createBill(payload: QboBillPayload, requestId: string): Promise<CreatedBill>;
 };
 
@@ -40,6 +61,8 @@ export type BillRunDeps = {
   claim(woId: string): Promise<BillClaim>;
   finish(woId: string, claimId: string, outcome: BillOutcome): Promise<void>;
   qbo(options?: { forceRefresh?: boolean }): Promise<BillQbo>;
+  /** Remembers the customer's COGS division, insert only (a row CDS added wins); never throws. */
+  saveDivision(customerId: string, division: CogsDivision): Promise<void>;
   /** integration_sync audit row; never throws. */
   log(status: "ok" | "rejected" | "error", externalId: string | null, note: string | null): Promise<void>;
 };
@@ -88,12 +111,37 @@ export async function runShopBill(deps: BillRunDeps, woId: string, mode: "auto" 
 
   const vendorId = payload.VendorRef.value;
   const vendorName = payload.VendorRef.name ?? `vendor ${vendorId}`;
-  const send = async (qbo: BillQbo): Promise<{ bill: CreatedBill; found: boolean } | { conflict: FoundBill }> => {
+  const findDivision = async (qbo: BillQbo): Promise<CogsDivision | null> => {
+    try {
+      const match = matchCogsDivision(
+        { incomeDivision: inputs.incomeDivisionName, customerName: inputs.workOrder.customerName },
+        await qbo.listDepartments(),
+      );
+      if (match) await deps.saveDivision(inputs.workOrder.customerId, match);
+      return match;
+    } catch {
+      return null;
+    }
+  };
+  const send = async (qbo: BillQbo): Promise<{ bill: CreatedBill; found: boolean } | { conflict: FoundBill } | { noExpenseAccount: string[] }> => {
     const same = (await qbo.findBills(payload.DocNumber)).filter((b) => b.VendorRef?.value === vendorId);
     const ours = same.find((b) => madeForOrder(b, inputs.workOrder.woNumber));
     if (ours) return { bill: ours, found: true };
     if (same.length) return { conflict: same[0] };
-    return { bill: await qbo.createBill(payload, claim.requestId), found: false };
+    const ids = billItemIds(payload);
+    const [items, division, term] = await Promise.all([
+      ids.length ? qbo.getItems(ids) : Promise.resolve([]),
+      payload.DepartmentRef ? Promise.resolve(null) : findDivision(qbo),
+      payload.SalesTermRef ? Promise.resolve(null) : qbo.listTerms().then(defaultBillTerm, () => null),
+    ]);
+    const missing = itemsWithoutExpenseAccount(payload, items);
+    if (missing.length) return { noExpenseAccount: missing };
+    const toSend: QboBillPayload = {
+      ...payload,
+      ...(division ? { DepartmentRef: { value: division.id, name: division.name } } : {}),
+      ...(term ? { SalesTermRef: term } : {}),
+    };
+    return { bill: await qbo.createBill(toSend, claim.requestId), found: false };
   };
 
   let result: Awaited<ReturnType<typeof send>>;
@@ -116,6 +164,14 @@ export async function runShopBill(deps: BillRunDeps, woId: string, mode: "auto" 
           : `QuickBooks did not confirm the bill (${why(e)}). Try again: a retry never creates a second bill.`;
     await deps.log(rejected ? "rejected" : "error", null, `${message}${qbo?.intuitTid ? ` (intuit_tid ${qbo.intuitTid})` : ""}`);
     await deps.finish(woId, claim.claimId, { outcome: rejected ? "rejected" : "error", error: message });
+    return { status: "failed", message };
+  }
+
+  if ("noExpenseAccount" in result) {
+    // Nothing was sent: recorded as a refusal, so CDS's retry uses a new request id.
+    const message = result.noExpenseAccount.join(" ");
+    await deps.log("rejected", null, message);
+    await deps.finish(woId, claim.claimId, { outcome: "rejected", error: message });
     return { status: "failed", message };
   }
 

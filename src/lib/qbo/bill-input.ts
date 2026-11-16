@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadShopDeductions } from "@/lib/shop-deductions";
 import { BILL_SETTING_KEY, parseBillSetting, type BillInputs, type BillLine, type BillRecord } from "./bill";
+import { toItemMappings } from "./invoice";
 
 /**
  * Reads what the shop's bill needs (./bill) for one work order. Works with the signed-in CDS
@@ -19,7 +20,7 @@ export async function loadBillInputs(
   const { data: woData, error } = await db
     .from("work_orders")
     .select(
-      "id, wo_number, status, completed_at, affiliate_invoice_ref, po_number, unit_number, affiliate_id, customers(name), affiliates(display_name, is_in_house)",
+      "id, wo_number, status, completed_at, affiliate_invoice_ref, po_number, unit_number, customer_id, affiliate_id, customers(name), affiliates(display_name, is_in_house)",
     )
     .eq("id", woId)
     .maybeSingle();
@@ -33,6 +34,7 @@ export async function loadBillInputs(
     affiliate_invoice_ref: string | null;
     po_number: string | null;
     unit_number: string | null;
+    customer_id: string;
     affiliate_id: string | null;
     customers: MaybeOne<{ name: string }>;
     affiliates: MaybeOne<{ display_name: string; is_in_house: boolean }>;
@@ -40,8 +42,8 @@ export async function loadBillInputs(
   const shop = one(wo.affiliates);
   const affiliateId = wo.affiliate_id ?? "00000000-0000-0000-0000-000000000000";
 
-  const [linesRes, vendorRes, classRes, settingRes, billRes, deductions] = await Promise.all([
-    db.from("work_order_lines").select("qty, shop_unit_rate, description, catalog_items(sku, name)").eq("work_order_id", woId).order("created_at"),
+  const [linesRes, vendorRes, classRes, settingRes, billRes, incomeRes, cogsRes, deductions] = await Promise.all([
+    db.from("work_order_lines").select("catalog_item_id, qty, shop_unit_rate, description, catalog_items(sku, name)").eq("work_order_id", woId).order("created_at"),
     db.from("qbo_affiliate_vendor").select("qbo_vendor_id, qbo_vendor_name").eq("affiliate_id", affiliateId).maybeSingle(),
     db.from("qbo_affiliate_class").select("qbo_class_id").eq("affiliate_id", affiliateId).maybeSingle(),
     db.from("app_settings").select("value").eq("key", BILL_SETTING_KEY).maybeSingle(),
@@ -50,21 +52,40 @@ export async function loadBillInputs(
       .select("status, qb_bill_id, qb_bill_number, qb_total, error, claimed_at, bill_created_at")
       .eq("work_order_id", woId)
       .maybeSingle(),
+    db.from("qbo_customer_division").select("qbo_department_name").eq("customer_id", wo.customer_id).maybeSingle(),
+    db.from("qbo_customer_cogs_division").select("qbo_department_id, qbo_department_name").eq("customer_id", wo.customer_id).maybeSingle(),
     loadShopDeductions(db, woId),
   ]);
-  for (const r of [linesRes, vendorRes, classRes, settingRes, billRes]) {
+  for (const r of [linesRes, vendorRes, classRes, settingRes, billRes, incomeRes, cogsRes]) {
     if (r.error) throw new Error(`Could not read the shop bill details: ${r.error.message}`);
   }
 
-  const lines: BillLine[] = ((linesRes.data ?? []) as unknown as {
+  const rawLines = (linesRes.data ?? []) as unknown as {
+    catalog_item_id: string;
     qty: number | string;
     shop_unit_rate: number | string | null;
     description: string | null;
     catalog_items: MaybeOne<{ sku: string; name: string }>;
-  }[]).map((l) => {
+  }[];
+  const lines: BillLine[] = rawLines.map((l) => {
     const item = one(l.catalog_items);
-    return { sku: item?.sku ?? "", name: item?.name ?? "", description: l.description ?? null, qty: Number(l.qty), shopUnitRate: num(l.shop_unit_rate) };
+    return {
+      catalogItemId: l.catalog_item_id,
+      sku: item?.sku ?? "",
+      name: item?.name ?? "",
+      description: l.description ?? null,
+      qty: Number(l.qty),
+      shopUnitRate: num(l.shop_unit_rate),
+    };
   });
+
+  // The QuickBooks item of each line, as the customer's invoice uses it (./invoice-input).
+  const itemIds = [...new Set(rawLines.map((l) => l.catalog_item_id))];
+  const itemMapRes = itemIds.length
+    ? await db.from("qbo_item_map").select("customer_id, catalog_item_id, qbo_item_id, qbo_item_name").in("catalog_item_id", itemIds)
+    : { data: [], error: null };
+  if (itemMapRes.error) throw new Error(`Could not read the item mappings: ${itemMapRes.error.message}`);
+  const cogs = cogsRes.data as { qbo_department_id: string; qbo_department_name: string } | null;
   const vendor = vendorRes.data as { qbo_vendor_id: string; qbo_vendor_name: string } | null;
   const bill = billRes.data as {
     status: BillRecord["status"];
@@ -83,6 +104,7 @@ export async function loadBillInputs(
         woNumber: wo.wo_number,
         status: wo.status,
         completedAt: wo.completed_at,
+        customerId: wo.customer_id,
         shopInvoiceRef: wo.affiliate_invoice_ref,
         customerName: one(wo.customers)?.name ?? "",
         poNumber: wo.po_number,
@@ -96,6 +118,12 @@ export async function loadBillInputs(
       vendor: vendor ? { qboVendorId: vendor.qbo_vendor_id, qboVendorName: vendor.qbo_vendor_name } : null,
       setting: parseBillSetting((settingRes.data as { value: unknown } | null)?.value),
       classId: (classRes.data as { qbo_class_id: string } | null)?.qbo_class_id ?? null,
+      division: cogs ? { id: cogs.qbo_department_id, name: cogs.qbo_department_name } : null,
+      incomeDivisionName: (incomeRes.data as { qbo_department_name: string } | null)?.qbo_department_name ?? null,
+      itemMap: toItemMappings(
+        (itemMapRes.data ?? []) as { customer_id: string | null; catalog_item_id: string; qbo_item_id: string; qbo_item_name: string }[],
+        wo.customer_id,
+      ),
     },
     record: bill
       ? {

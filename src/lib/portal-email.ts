@@ -19,8 +19,11 @@
  * Each status change is one integration_sync row (system 'email', entity 'portal_email',
  * entity_id the work order, external_id the change's key), claimed before sending, so a retry
  * or a double click emails once. The row ends as ok (the note holds Resend's email id),
- * skipped, error or duplicate. Nothing here ever throws into the status change: it already
- * happened, and an email failure is logged and recorded only.
+ * skipped, error or duplicate. An email that ended in error, or was abandoned while sending,
+ * is sent by the next attempt for the same change or by the cron retry
+ * (src/lib/portal-email-retry.ts), with the same Resend idempotency key, so Resend sends it
+ * once. Nothing here ever throws into the status change: it already happened, and an email
+ * failure is logged and recorded only.
  */
 import { dateTime } from "@/lib/format";
 
@@ -139,7 +142,11 @@ export type PortalEmailStore = {
     workOrderId: string,
     componentId?: string,
   ): Promise<(PortalEmailDetails & { key: string }) | null>;
-  /** Claims the key for this work order; null when it was claimed before (already emailed). */
+  /**
+   * Claims the key for this work order; null when it was emailed, skipped, or is being sent.
+   * An earlier claim that ended in error, or is still sending after 5 minutes, is taken over
+   * (its row id is returned).
+   */
   claim(event: PortalEvent, workOrderId: string, key: string): Promise<{ rowId: number } | null>;
   finish(rowId: number, status: "ok" | "skipped" | "error", note: string | null): Promise<void>;
 };
@@ -197,18 +204,43 @@ export async function notifyWorkOrderEvent(
     console.error(`Portal email (${event}, work order ${workOrderId}): ${message}`);
     return { status: "error", message };
   };
-  let rowId: number | null = null;
+  let rowId: number;
+  let found: { details: PortalEmailDetails; key: string };
   try {
-    const found = deps.componentId
+    const read = deps.componentId
       ? await deps.store.details(event, workOrderId, deps.componentId)
       : await deps.store.details(event, workOrderId);
-    if (!found) return fail("work order or its status change not found; nothing sent");
-    const { key, ...details } = found;
+    if (!read) return fail("work order or its status change not found; nothing sent");
+    const { key, ...details } = read;
+    found = { details, key };
 
     const claim = await deps.store.claim(event, workOrderId, key);
     if (!claim) return { status: "duplicate", message: "This status change was already emailed." };
     rowId = claim.rowId;
+  } catch (e) {
+    return fail(errorText(e).slice(0, 2000));
+  }
+  return sendClaimedEmail(event, workOrderId, found.details, found.key, rowId, deps);
+}
 
+/**
+ * Sends the email of a status change whose integration_sync row (rowId) this caller claimed,
+ * and records the outcome on that row. The Resend idempotency key depends only on the work
+ * order and the change's key, so a retry never sends a second email. Never throws.
+ */
+export async function sendClaimedEmail(
+  event: PortalEvent,
+  workOrderId: string,
+  details: PortalEmailDetails,
+  key: string,
+  rowId: number,
+  deps: { store: Pick<PortalEmailStore, "finish">; env?: Record<string, string | undefined>; fetchImpl?: typeof fetch },
+): Promise<NotifyResult> {
+  const fail = (message: string): NotifyResult => {
+    console.error(`Portal email (${event}, work order ${workOrderId}): ${message}`);
+    return { status: "error", message };
+  };
+  try {
     const config = portalEmailConfig(deps.env ?? process.env);
     if (!config.enabled) {
       await deps.store.finish(rowId, "skipped", "Not sent: PORTAL_EMAILS_ENABLED is not true.");
@@ -226,9 +258,7 @@ export async function notifyWorkOrderEvent(
     return { status: "ok", message: id };
   } catch (e) {
     const message = errorText(e).slice(0, 2000);
-    if (rowId !== null) {
-      await deps.store.finish(rowId, "error", message).catch((err) => console.error(`Portal email: could not record the error: ${errorText(err)}`));
-    }
+    await deps.store.finish(rowId, "error", message).catch((err) => console.error(`Portal email: could not record the error: ${errorText(err)}`));
     return fail(message);
   }
 }

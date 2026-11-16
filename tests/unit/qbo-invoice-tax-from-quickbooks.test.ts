@@ -27,7 +27,15 @@ vi.mock("@/lib/qbo/tokens", () => ({ qboApi }));
 const loadInvoice = vi.fn();
 vi.mock("@/lib/qbo/invoice-input", () => ({ loadInvoice }));
 
-const rpc = vi.fn();
+/** Answers cds_mark_invoiced and other calls; the invoice claim (@/lib/qbo/invoice-claim) is always granted. */
+const rpcAnswer = vi.fn();
+const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+  if (name === "cds_claim_qbo_invoice") {
+    return { data: { state: "sending", claim_id: "c1", attempt: 0, request_id: String(args.p_work_order), snapshot: args.p_snapshot }, error: null };
+  }
+  if (name === "cds_finish_qbo_invoice") return { data: null, error: null };
+  return rpcAnswer(name, args);
+});
 const supabase = {
   rpc,
   from: vi.fn(() => {
@@ -61,7 +69,8 @@ const invoiceState = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   createInvoice.mockReset();
   getInvoice.mockReset();
-  rpc.mockReset();
+  rpc.mockClear();
+  rpcAnswer.mockReset();
   loadInvoice.mockReset();
   qboApi.mockClear();
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -84,7 +93,7 @@ describe("createQuickBooksInvoice stores the QuickBooks tax and total", () => {
   it("passes Invoice.TxnTaxDetail.TotalTax and Invoice.TotalAmt to cds_mark_invoiced", async () => {
     loadInvoice.mockResolvedValue(invoiceState());
     createInvoice.mockResolvedValue({ Id: "145", DocNumber: "40126", TotalAmt: 1060, TxnTaxDetail: { TotalTax: 60 } });
-    rpc.mockResolvedValue({ error: null });
+    rpcAnswer.mockResolvedValue({ error: null });
 
     const res = await createQuickBooksInvoice(WO);
 
@@ -101,7 +110,7 @@ describe("createQuickBooksInvoice stores the QuickBooks tax and total", () => {
   it("records the invoice with no amounts when QuickBooks returned none", async () => {
     loadInvoice.mockResolvedValue(invoiceState());
     createInvoice.mockResolvedValue({ Id: "145", DocNumber: "40126" });
-    rpc.mockResolvedValue({ error: null });
+    rpcAnswer.mockResolvedValue({ error: null });
     await createQuickBooksInvoice(WO);
     expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", expect.objectContaining({ p_qb_tax_total: null, p_qb_total: null }));
   });
@@ -109,7 +118,7 @@ describe("createQuickBooksInvoice stores the QuickBooks tax and total", () => {
   it("reads the amounts of an invoice created earlier (recovered) from QuickBooks before recording it", async () => {
     loadInvoice.mockResolvedValue(invoiceState({ pendingQb: { id: "145", number: "40126", at: "2026-11-13T10:00:00Z" } }));
     getInvoice.mockResolvedValue({ Id: "145", DocNumber: "40126", TotalAmt: 1060, TxnTaxDetail: { TotalTax: 60 } });
-    rpc.mockResolvedValue({ error: null });
+    rpcAnswer.mockResolvedValue({ error: null });
 
     const res = await createQuickBooksInvoice(WO);
 
@@ -128,7 +137,7 @@ describe("createQuickBooksInvoice stores the QuickBooks tax and total", () => {
   it("still records a recovered invoice when QuickBooks cannot be read", async () => {
     loadInvoice.mockResolvedValue(invoiceState({ pendingQb: { id: "145", number: "40126", at: "2026-11-13T10:00:00Z" } }));
     getInvoice.mockRejectedValue(new Error("timeout"));
-    rpc.mockResolvedValue({ error: null });
+    rpcAnswer.mockResolvedValue({ error: null });
     const res = await createQuickBooksInvoice(WO);
     expect(rpc).toHaveBeenCalledWith("cds_mark_invoiced", expect.objectContaining({ p_qb_invoice_id: "145", p_qb_tax_total: null, p_qb_total: null }));
     expect(res).toMatchObject({ ok: expect.any(String) });

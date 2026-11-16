@@ -13,6 +13,10 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
+  "function public.cds_claim_qbo_invoice(uuid,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
   "function public.cds_claim_shipstation(text,uuid)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
@@ -34,6 +38,10 @@
     "service_role": "EXECUTE"
   },
   "function public.cds_edit_internal_note(uuid,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_finish_qbo_invoice(uuid,uuid,text,text)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
@@ -287,6 +295,10 @@
     "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
+  "table public.qbo_customer_cogs_division": {
+    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
   "table public.qbo_shop_bills": {
     "authenticated": "SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
@@ -320,7 +332,7 @@
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "table public.shipments": {
-    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "authenticated": "INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "table public.shipping_carriers": {
@@ -395,7 +407,15 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
+  "function public.cds_remove_shipment(uuid,uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
   "table public.component_failures": {
+    "authenticated": "SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.qbo_invoice_claims": {
     "authenticated": "SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
@@ -417,6 +437,9 @@
   },
   "function public.cds_set_line_price(uuid,numeric)": {
     "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.portal_email_reclaim(bigint,integer)": {
     "service_role": "EXECUTE"
   }
 }
