@@ -457,8 +457,11 @@ async function parseTemplate(email: NormalizedEmail, text: string, t: TemplateRe
     ...items.map((i) => (i.qty > 1 ? `${i.qty} x ` : "") + (i.name ?? i.description) + (i.return_to_location ? " (return to the location)" : "")),
     ...unchosenKits.map((k) => `${k} (kit to be chosen by CDS)`),
   ].join(", ");
+  // Shops see requested_work after dispatch, so it is built from the structured services only.
+  // The customer's free text comments can carry prices or notes meant for CDS: they stay in
+  // fields.notes / fields.comments, which the draft puts in the CDS-only internal notes.
   const requestedWork: Field<string> = work
-    ? { value: f.comments ? `${work}. Customer comments: ${f.comments}` : work, source: "template", confidence: TEMPLATE_CONFIDENCE }
+    ? { value: work, source: "template", confidence: TEMPLATE_CONFIDENCE }
     : { value: email.subject || null, source: email.subject ? "regex" : "none", confidence: 0.3 };
 
   const unit = exact(f.unit_number);
