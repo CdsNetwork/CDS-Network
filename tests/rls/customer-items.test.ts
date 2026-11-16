@@ -300,10 +300,11 @@ describe("Items priced on the order", () => {
     expect(await financials(wo)).toEqual({ customer_subtotal: 625, shop_subtotal: 450, margin_before_shipping: 175, supplier_cost_tbd: false });
   });
 
-  it("is never added without the price, by a shop, or as an ordinary line", async () => {
+  it("is added by CDS with no price until it is entered (20261117030000), never by a shop or at a price of zero", async () => {
     const wo = await workOrder(f.other, "in_process", "CI-9");
     const direct = await cds.client.from("work_order_lines").insert({ work_order_id: wo, catalog_item_id: f.recon, qty: 1 });
-    expect(direct.error?.message).toMatch(/customer price/);
+    expect(direct.error).toBeNull();
+    expect((await lines(wo)).map((l) => [l.catalog_item_id, l.price])).toEqual([[f.recon, null]]);
     const part = await shop.client.rpc("shop_add_part", { p_work_order: wo, p_catalog_item: f.recon, p_qty: 1 });
     expect(part.error).not.toBeNull();
     const byShop = await shop.client.rpc("cds_add_pass_through_line", {
@@ -315,7 +316,7 @@ describe("Items priced on the order", () => {
     expect(byShop.error).not.toBeNull();
     const noPrice = await cds.client.rpc("cds_add_pass_through_line", { p_work_order: wo, p_catalog_item: f.recon, p_description: null, p_amount: 0 });
     expect(noPrice.error?.message).toMatch(/customer price/);
-    expect(await must(admin.from("work_order_lines").select("id").eq("work_order_id", wo))).toEqual([]);
+    expect(await must(admin.from("work_order_lines").select("id").eq("work_order_id", wo))).toHaveLength(1);
   });
 
   it("Misc. hardware still needs a description and pays the shop the same amount", async () => {

@@ -20,9 +20,10 @@ describe("items priced on the order", () => {
     expect(pricedLineInput(" DPF 2871 ", "$625.00", "450")).toEqual({ ok: true, description: "DPF 2871", amount: 625, shopRate: 450 });
   });
 
-  it("needs a customer price above zero and a valid shop rate when one is typed", () => {
-    expect(pricedLineInput("", "", "")).toMatchObject({ ok: false, error: expect.stringMatching(/customer price/) });
-    expect(pricedLineInput("", "0", "")).toMatchObject({ ok: false });
+  it("takes a customer price above zero when one is typed, and a valid shop rate when one is typed", () => {
+    // Left empty: "No price" until CDS enters it on the line (20261117030000).
+    expect(pricedLineInput("", "", "")).toEqual({ ok: true, description: "", amount: null, shopRate: null });
+    expect(pricedLineInput("", "0", "")).toMatchObject({ ok: false, error: expect.stringMatching(/customer price/) });
     expect(pricedLineInput("", "625", "abc")).toMatchObject({ ok: false, error: expect.stringMatching(/shop rate/) });
     expect(pricedLineInput("x".repeat(501), "625", "")).toMatchObject({ ok: false, error: expect.stringMatching(/too long/) });
   });

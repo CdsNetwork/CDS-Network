@@ -206,7 +206,7 @@ describe("buildInvoicePayload", () => {
   it("reports a line without a customer price", () => {
     const r = build({ lines: [{ ...lines[0], customerUnitPrice: null }] });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.problems).toEqual(["SVC-DPF has no customer price."]);
+    if (!r.ok) expect(r.problems).toEqual(["Set a price for SVC-DPF before creating the invoice."]);
   });
 
   it("puts the PO in the internal note and the customer memo, and leaves both out when there is no PO", () => {

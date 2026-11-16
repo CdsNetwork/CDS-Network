@@ -1,3 +1,4 @@
+import { missingPriceSkus, setPriceMessage } from "@/lib/line-price";
 import { isTaxable, type TaxClass } from "@/lib/tax";
 import type { QboCustomField } from "./custom-fields";
 import type { QboAddress } from "./sub-customer";
@@ -307,6 +308,12 @@ export function buildInvoicePayload(
 
   if (!lines.length) problems.push("The work order has no lines to invoice.");
 
+  // A line added before its item had a price (20261117010000_work_order_without_price.sql).
+  const hasPrice = (l: InvoiceLine) =>
+    l.customerUnitPrice !== null && Number.isFinite(Number(l.customerUnitPrice)) && Number(l.customerUnitPrice) >= 0;
+  const unpriced = missingPriceSkus(lines.map((l) => ({ sku: l.sku, qty: l.qty, price: hasPrice(l) ? Number(l.customerUnitPrice) : null })));
+  if (unpriced.length) problems.push(setPriceMessage(unpriced));
+
   const unmapped = new Set<string>();
   const qboLines: QboInvoiceLine[] = [];
   const itemText: ItemTextLine[] = [];
@@ -326,10 +333,7 @@ export function buildInvoicePayload(
       }
       continue;
     }
-    if (l.customerUnitPrice === null || !Number.isFinite(Number(l.customerUnitPrice)) || Number(l.customerUnitPrice) < 0) {
-      problems.push(`${l.sku} has no customer price.`);
-      continue;
-    }
+    if (!hasPrice(l)) continue;
     if (!(l.qty > 0)) {
       problems.push(`${l.sku} has no quantity.`);
       continue;

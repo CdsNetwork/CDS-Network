@@ -59,9 +59,16 @@ export type CatalogRef = {
   pass_through?: boolean;
 };
 
-/** The catalog items intake may propose: everything except items priced per line. */
+/** Misc. hardware: the amount comes from the shop's invoice, so intake never proposes it. */
+const isPassThrough = (c: CatalogRef) => !!c.price_per_line && c.pass_through !== false;
+
+/**
+ * The catalog items intake may propose: everything except Misc. hardware. Items priced on the
+ * order (new filters) are added with no price; CDS enters it on the line
+ * (20261117030000_order_priced_without_amount.sql).
+ */
 export function matchableCatalog(catalog: CatalogRef[]): CatalogRef[] {
-  return catalog.filter((c) => !c.price_per_line);
+  return catalog.filter((c) => !isPassThrough(c));
 }
 
 /**
@@ -70,7 +77,7 @@ export function matchableCatalog(catalog: CatalogRef[]): CatalogRef[] {
  * for one. The Supabase store and the test fixtures both build their reference with it.
  */
 export function splitCatalog(all: CatalogRef[]): Pick<IntakeReference, "catalog" | "perLineItems"> {
-  return { catalog: matchableCatalog(all), perLineItems: all.filter((c) => c.price_per_line) };
+  return { catalog: matchableCatalog(all), perLineItems: all.filter(isPassThrough) };
 }
 export type AliasRef = { customer_id: string; catalog_item_id: string; customer_part_number: string };
 
@@ -78,9 +85,9 @@ export type AliasRef = { customer_id: string; catalog_item_id: string; customer_
 export type IntakeReference = {
   customers: CustomerRef[];
   domains: DomainRef[];
-  /** Items intake may propose (never items priced per line). */
+  /** Items intake may propose (never Misc. hardware). */
   catalog: CatalogRef[];
-  /** Items priced per line (Misc. hardware): never proposed, only warned about. */
+  /** Misc. hardware (priced per line, pass-through): never proposed, only warned about. */
   perLineItems: CatalogRef[];
   aliases: AliasRef[];
   locationsFor: (customerId: string) => Promise<LocationRef[]>;

@@ -81,6 +81,7 @@ export async function GET(request: Request) {
   for (const r of rows) {
     const f = fin.get(r.id);
     const tbd = f?.supplier_cost_tbd ?? false;
+    const noPrice = f?.customer_price_missing ?? false;
     lines.push(
       [
         field(woLabel(r.wo_number)),
@@ -93,8 +94,8 @@ export async function GET(request: Request) {
         field(STATUS_LABEL[r.status] ?? r.status),
         field(internalStatusLabel(one(r.work_order_internal)?.internal_status)),
         tbd ? "TBD" : field(amount(f?.shop_subtotal), false),
-        field(amount(f?.customer_subtotal), false),
-        tbd ? "TBD" : field(amount(f?.margin), false),
+        noPrice ? "TBD" : field(amount(f?.customer_subtotal), false),
+        tbd || noPrice ? "TBD" : field(amount(f?.margin), false),
       ].join(","),
     );
   }

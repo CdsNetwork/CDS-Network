@@ -2,6 +2,7 @@
 
 import { startTransition, useActionState, useMemo, useState, type FormEvent } from "react";
 import { CATEGORY_LABEL, FULFILLMENT_LABEL, money } from "@/lib/format";
+import { customerSubtotal, missingPriceSkus } from "@/lib/line-price";
 import { SearchSelect, type SearchOption } from "@/components/SearchSelect";
 import type { ActionState } from "./ActionForm";
 import { LocationPicker } from "./LocationPicker";
@@ -28,6 +29,8 @@ export type CatalogOption = {
   name: string;
   category: string;
   oe_cross: string | null;
+  /** Priced on the order (new filters): no price here, CDS enters it on the line. */
+  pricedOnOrder: boolean;
   fleetPrice: number | null;
 };
 
@@ -60,6 +63,7 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
   const customerOverrides = overrides[customerId] ?? {};
 
   function priceFor(itemId: string): { price: number | null; source: string } {
+    if (catalogById.get(itemId)?.pricedOnOrder) return { price: null, source: "Price set on this order" };
     const o = customerOverrides[itemId];
     if (o !== undefined) return { price: o, source: "Customer price" };
     return { price: catalogById.get(itemId)?.fleetPrice ?? null, source: "Fleet price" };
@@ -104,8 +108,8 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
   }
 
   const catalogOptions: SearchOption[] = catalog.map((c) => {
-    const p = customerId ? priceFor(c.id) : { price: c.fleetPrice, source: "Fleet price" };
-    const price = p.price === null ? "no price" : `${money(p.price)}${customerId && p.source === "Customer price" ? " (customer price)" : ""}`;
+    const p = customerId || c.pricedOnOrder ? priceFor(c.id) : { price: c.fleetPrice, source: "Fleet price" };
+    const price = c.pricedOnOrder ? "price set on this order" : p.price === null ? "no price" : `${money(p.price)}${customerId && p.source === "Customer price" ? " (customer price)" : ""}`;
     return {
       value: c.id,
       label: `${c.sku} - ${c.name}`,
@@ -114,8 +118,15 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
     };
   });
 
-  const linesTotal = lines.reduce((sum, l) => sum + (priceFor(l.catalog_item_id).price ?? 0) * l.qty, 0);
-  const missingPrice = lines.some((l) => priceFor(l.catalog_item_id).price === null);
+  // An item with no price yet does not stop the order: the line is created without a price,
+  // the subtotal is TBD and the invoice waits until the price is set.
+  const linePrices = lines.map((l) => ({
+    sku: catalogById.get(l.catalog_item_id)?.sku ?? "item",
+    qty: l.qty,
+    price: priceFor(l.catalog_item_id).price,
+  }));
+  const linesTotal = customerSubtotal(linePrices);
+  const missingSkus = missingPriceSkus(linePrices);
 
   const fulfillmentHelper: Record<string, string> = {
     pickup: "Pickup jobs need a pickup window from the shop when it accepts.",
@@ -299,15 +310,18 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
                     <td colSpan={3}>
                       <b>Customer subtotal (before tax)</b>
                     </td>
-                    <td className="num money">{money(linesTotal)}</td>
+                    <td className="num money">{linesTotal === null ? "TBD" : money(linesTotal)}</td>
                     <td />
                   </tr>
                 </tbody>
               </table>
             </div>
           )}
-          {missingPrice && (
-            <div className="notice danger">An item has no price for this customer. Set a fleet price before creating the order.</div>
+          {missingSkus.length > 0 && (
+            <div className="notice">
+              {missingSkus.join(", ")} {missingSkus.length === 1 ? "has" : "have"} no price yet. You can create the order; set the
+              price before invoicing.
+            </div>
           )}
 
           <h3 style={{ marginTop: 22 }}>Assignment</h3>
@@ -322,7 +336,7 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
             </p>
           )}
           <div className="row" style={{ justifyContent: "flex-end" }}>
-            <button className="btn btn-primary" type="submit" disabled={pending || missingPrice}>
+            <button className="btn btn-primary" type="submit" disabled={pending}>
               {pending ? "Creating..." : "Create Work Order"}
             </button>
           </div>

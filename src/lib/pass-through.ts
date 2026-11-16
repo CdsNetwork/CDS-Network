@@ -45,22 +45,37 @@ export function shopRateInput(amount: string, label = "shop rate"): Amount {
 }
 
 export type PricedLineInput =
-  | { ok: true; description: string; amount: number; shopRate: number | null }
+  | { ok: true; description: string; amount: number | null; shopRate: number | null }
   | { ok: false; error: string };
 
 /**
+ * The customer price CDS enters on a line priced on the order. Above zero. Checked again by
+ * the database function cds_set_line_price.
+ */
+export function customerPriceInput(amount: string): Amount {
+  const price = dollars(amount);
+  if (price === null) return { ok: false, error: "Enter the customer price in dollars and cents." };
+  if (!(price > 0)) return { ok: false, error: "The customer price must be more than zero." };
+  if (price > PASS_THROUGH_AMOUNT_MAX) return { ok: false, error: "The customer price is too large." };
+  return { ok: true, amount: price };
+}
+
+/**
  * An item priced on the order (reconditioned and new filters): the customer price CDS
- * quoted, an optional description, and the shop rate when it is known (else TBD).
+ * quoted (or empty: "No price" until it is entered on the line), an optional description,
+ * and the shop rate when it is known (else TBD).
  */
 export function pricedLineInput(description: string, amount: string, shopRate: string, rateLabel = "shop rate"): PricedLineInput {
   const text = description.trim();
   if (text.length > PASS_THROUGH_DESCRIPTION_MAX) {
     return { ok: false, error: `Description is too long (max ${PASS_THROUGH_DESCRIPTION_MAX} characters).` };
   }
-  const price = dollars(amount);
-  if (price === null) return { ok: false, error: "Enter the customer price in dollars and cents." };
-  if (!(price > 0)) return { ok: false, error: "The customer price must be more than zero." };
-  if (price > PASS_THROUGH_AMOUNT_MAX) return { ok: false, error: "The customer price is too large." };
+  let price: number | null = null;
+  if (amount.trim()) {
+    const typed = customerPriceInput(amount);
+    if (!typed.ok) return typed;
+    price = typed.amount;
+  }
   if (!shopRate.trim()) return { ok: true, description: text, amount: price, shopRate: null };
   const rate = shopRateInput(shopRate, rateLabel);
   if (!rate.ok) return rate;

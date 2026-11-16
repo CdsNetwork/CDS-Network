@@ -1,5 +1,7 @@
 import Form from "next/form";
 import Link from "next/link";
+import { ListInternalStatusSelect, ListNotesButton, ListStatusSelect } from "@/components/cds-wo/ListRowEdits";
+import { listStatusMoves } from "@/components/cds-wo/list-edits";
 import { PeriodSelect } from "@/components/cds-wo/PeriodSelect";
 import { isQuestionPending, QUESTION_PARAM, questionTitle } from "@/components/cds-wo/question-pending";
 import { failedMark, isNewFromShop } from "@/components/cds-wo/shop-updates";
@@ -24,7 +26,7 @@ import {
 } from "@/components/cds-wo/woFilters";
 import { requireCds } from "@/lib/auth";
 import { deletedMessage } from "@/lib/work-order-delete";
-import { internalStatusLabel } from "@/lib/internal-status";
+import { invoiceLocked } from "@/lib/invoice-lock";
 import {
   dateReceived,
   FULFILLMENT_LABEL,
@@ -56,7 +58,10 @@ type ListInternal = {
   inbound_emails: { received_at: string | null } | { received_at: string | null }[] | null;
   internal_status: string | null;
   qb_invoice_number?: string | null;
+  qb_invoice_id?: string | null;
 };
+
+type Count = { count: number }[] | null;
 
 type ListRow = WoRow & {
   created_at: string;
@@ -65,6 +70,8 @@ type ListRow = WoRow & {
   work_order_shop_activity: { is_new: boolean | null } | { is_new: boolean | null }[] | null;
   work_order_components: { result: string | null }[] | null;
   work_order_questions: { question_pending: boolean | null; note: string | null } | { question_pending: boolean | null; note: string | null }[] | null;
+  work_order_notes: Count;
+  work_order_internal_notes: Count;
 };
 
 const WO_COLUMNS =
@@ -73,9 +80,13 @@ const WO_COLUMNS =
 /**
  * The table also shows when the request came in, how the part moves, whether the shop did
  * something CDS has not opened yet, a failed or condemned component, a pending customer
- * question, and CDS's own internal status.
+ * question, and CDS's own internal status. CDS changes the status and internal status from
+ * the table and reads, adds and edits notes in a popover (loaded when it opens; the table
+ * only counts them).
  */
-const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at), internal_status, qb_invoice_number), work_order_shop_activity(is_new), work_order_components(result), work_order_questions(question_pending, note)`;
+const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at), internal_status, qb_invoice_number, qb_invoice_id), work_order_shop_activity(is_new), work_order_components(result), work_order_questions(question_pending, note), work_order_notes(count), work_order_internal_notes(count)`;
+
+const embeddedCount = (c: Count) => c?.[0]?.count ?? 0;
 
 /** Unit and PO numbers up to this length stay on one line in the table. */
 const ID_NOWRAP = 22;
@@ -295,6 +306,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                 rows.map((r) => {
                   const f = finById.get(r.id);
                   const tbd = f?.supplier_cost_tbd;
+                  const noPrice = f?.customer_price_missing;
                   const customer = one(r.customers)?.name ?? "-";
                   const shop = one(r.affiliates)?.display_name ?? null;
                   const inHouse = Boolean(one(r.affiliates)?.is_in_house);
@@ -303,9 +315,11 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   const fromShopNew = isNewFromShop(r.work_order_shop_activity);
                   const failed = failedMark(r.work_order_components);
                   const questionOpen = isQuestionPending(r.work_order_questions);
-                  const internalStatus = internalStatusLabel(one(r.work_order_internal)?.internal_status);
+                  const internal = one(r.work_order_internal);
                   // Invoiced in QuickBooks before the shop finished: the status moves to Invoiced when the shop completes.
-                  const invoicedEarly = r.status !== "invoiced" ? one(r.work_order_internal)?.qb_invoice_number ?? null : null;
+                  const invoicedEarly = r.status !== "invoiced" ? internal?.qb_invoice_number ?? null : null;
+                  const moves = listStatusMoves(r.status, invoiceLocked(r.status, internal?.qb_invoice_id));
+                  const noteCount = embeddedCount(r.work_order_notes) + embeddedCount(r.work_order_internal_notes);
                   return (
                     <tr key={r.id} className={questionOpen ? styles.questionRow : undefined}>
                       <td className="nowrap">
@@ -326,6 +340,9 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                             </span>
                           </div>
                         )}
+                        <div>
+                          <ListNotesButton woId={r.id} label={woLabel(r.wo_number)} count={noteCount} />
+                        </div>
                       </td>
                       <td className="nowrap">{dateReceived(r)}</td>
                       <td className={`${styles.textCol} ${wrapCell(customer) ?? ""}`}>{customer}</td>
@@ -354,20 +371,19 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                             </span>
                           </div>
                         )}
-                        {internalStatus && (
-                          <div>
-                            <span className="badge internal" title="Internal status (CDS only)">
-                              {internalStatus}
-                            </span>
-                          </div>
-                        )}
+                        <ListStatusSelect woId={r.id} moves={moves} />
+                        <ListInternalStatusSelect
+                          key={internal?.internal_status ?? ""}
+                          woId={r.id}
+                          value={internal?.internal_status ?? null}
+                        />
                       </td>
                       <td className="num money">
                         {tbd ? "TBD" : money(f?.shop_subtotal)}
                         {inHouse && <div className="small">CDS cost</div>}
                       </td>
-                      <td className="num money">{money(f?.customer_subtotal)}</td>
-                      <td className="num money">{tbd ? "TBD" : money(f?.margin)}</td>
+                      <td className="num money">{noPrice ? "TBD" : money(f?.customer_subtotal)}</td>
+                      <td className="num money">{tbd || noPrice ? "TBD" : money(f?.margin)}</td>
                     </tr>
                   );
                 })

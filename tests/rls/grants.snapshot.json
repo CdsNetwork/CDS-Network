@@ -33,6 +33,10 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
+  "function public.cds_edit_internal_note(uuid,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
   "function public.cds_mark_invoiced(uuid,text,text,numeric,numeric)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
@@ -394,6 +398,10 @@
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "function public.cds_set_line_shop_rate(uuid,numeric)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_set_line_price(uuid,numeric)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   }

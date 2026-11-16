@@ -170,6 +170,8 @@ export type Financials = {
   customer_subtotal: number;
   margin: number;
   supplier_cost_tbd: boolean;
+  /** A line has no customer price yet: the customer subtotal and margin are TBD. */
+  customer_price_missing: boolean;
 };
 
 /** Financials for the given orders, fetched in chunks to keep URLs short. */
@@ -183,7 +185,7 @@ export async function financialsFor(supabase: Supabase, ids: string[]): Promise<
       chunks.slice(i, i + 8).map((part) =>
         supabase
           .from("work_order_financials")
-          .select("work_order_id, shop_subtotal, customer_subtotal, margin, supplier_cost_tbd")
+          .select("work_order_id, shop_subtotal, customer_subtotal, margin, supplier_cost_tbd, customer_price_missing")
           .in("work_order_id", part),
       ),
     );

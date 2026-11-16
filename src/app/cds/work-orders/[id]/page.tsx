@@ -66,6 +66,7 @@ import { packageForShipment } from "@/lib/shipstation/package";
 import { LABEL_STATUSES, NEW_SHIPMENT_STATUS } from "@/app/cds/shipping/options";
 import { setShipmentLabelStatus, setShipmentStatus } from "@/app/cds/shipping/actions";
 import { isCustomerItem, lineItemFor } from "@/lib/customer-items";
+import { missingPriceSkus, setPriceMessage } from "@/lib/line-price";
 import { ActionForm as ShippingActionForm } from "@/components/cds-admin/ActionForm";
 import {
   addLine,
@@ -81,6 +82,7 @@ import {
   deleteInternalNote,
   setInternalStatus,
   setQuestionPending,
+  setLinePrice,
   setLineShopRate,
   deleteNote,
   dispatchWorkOrder,
@@ -717,6 +719,21 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   // A line with no shop rate yet (TBD): CDS enters it, also on an invoiced order.
   const canSetRate = (l: Line) => rateOpen && l.shop_unit_rate === null && !isPassThrough(l);
   const removeColumn = !linesLocked || (perLineOpen && lines.some(isPerLine));
+  // Lines added before their item had a price (20261117010000_work_order_without_price.sql):
+  // "No price" on the line, TBD in the customer totals and margins, and no invoice until set.
+  const unpricedSkus = missingPriceSkus(
+    lines.map((l) => ({
+      sku: one(l.catalog_items)?.sku ?? "item",
+      qty: l.qty,
+      price: one(l.work_order_line_pricing) ? Number(one(l.work_order_line_pricing)?.customer_unit_price) : null,
+    })),
+  );
+  const priceMissing = unpricedSkus.length > 0;
+  // A line priced on the order takes its customer price on the line until the order is
+  // invoiced or cancelled (cds_set_line_price), also after the work is completed.
+  const canSetPrice = (l: Line) => perLineOpen && isPerLine(l) && !isPassThrough(l) && !one(l.work_order_line_pricing);
+  const pricedHere = lines.some(canSetPrice);
+  const pricedElsewhere = lines.some((l) => !isPerLine(l) && !one(l.work_order_line_pricing));
   // An order with a QuickBooks invoice keeps its tax like an invoiced one.
   const taxStatus = invoiceLockedNow ? "invoiced" : wo.status;
   const tbd = fin?.supplier_cost_tbd ?? false;
@@ -898,11 +915,11 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         </div>
         <div className="card">
           <div className="small">CUSTOMER SUBTOTAL (BEFORE TAX)</div>
-          <div className="bigAmount">{money(fin?.customer_subtotal ?? subtotal)}</div>
+          <div className="bigAmount">{priceMissing ? "TBD" : money(fin?.customer_subtotal ?? subtotal)}</div>
         </div>
         <div className="card">
           <div className="small">GROSS MARGIN</div>
-          <div className="bigAmount">{tbd ? "TBD" : money(fin?.margin)}</div>
+          <div className="bigAmount">{tbd || priceMissing ? "TBD" : money(fin?.margin)}</div>
           {fin && Number(fin.shipping_cost) > 0 && (
             <div className="small">After {money(fin.shipping_cost)} shipping cost</div>
           )}
@@ -1201,6 +1218,19 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
 
           <section className="section">
             <h3>Services &amp; parts</h3>
+            {priceMissing && (
+              <div className="notice" role="status">
+                {setPriceMessage(unpricedSkus)}
+                {pricedHere && " Enter the customer price on the line."}
+                {pricedElsewhere && (
+                  <>
+                    {" "}
+                    Set the customer&apos;s price on <Link href="/cds/pricing">Pricing</Link> or the fleet price on{" "}
+                    <Link href="/cds/catalog">Catalog</Link>; this order picks it up.
+                  </>
+                )}
+              </div>
+            )}
             {negativeLines.length > 0 && (
               <div className="notice danger" role="status">
                 <b>Negative margin:</b> {negativeLines.length === 1 ? "1 line is" : `${negativeLines.length} lines are`} priced
@@ -1280,15 +1310,40 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                           )}
                         </td>
                         <td className="num">
-                          <span className="money">{money(custAmt)}</span>
-                          <div className="small">{money(p?.customer_unit_price)} each</div>
+                          {p ? (
+                            <>
+                              <span className="money">{money(custAmt)}</span>
+                              <div className="small">{money(p.customer_unit_price)} each</div>
+                            </>
+                          ) : (
+                            <span className="money">{"No price"}</span>
+                          )}
+                          {canSetPrice(l) && (
+                            <ActionForm
+                              action={setLinePrice.bind(null, wo.id, l.id)}
+                              submitLabel="Set"
+                              pendingLabel="..."
+                              inline
+                              buttonClass="btn btn-secondary btn-small"
+                            >
+                              <input
+                                name="amount"
+                                className="input"
+                                inputMode="decimal"
+                                required
+                                placeholder="Customer price"
+                                aria-label={`Customer price for ${item?.sku ?? "this line"}`}
+                                style={{ width: 110 }}
+                              />
+                            </ActionForm>
+                          )}
                         </td>
                         <td>{p ? PRICE_SOURCE_LABEL[p.price_source] ?? p.price_source : "-"}</td>
                         <td>
                           {p && <span className="tag">{TAX_CLASS_LABEL[p.tax_class] ?? p.tax_class}</span>}
                           <div className="small">{p ? taxLabel(p.tax_class, taxFlags) : "Non-taxable"}</div>
                         </td>
-                        <td className="num money">{l.shop_unit_rate === null ? "TBD" : money(round2(custAmt - shopAmt))}</td>
+                        <td className="num money">{l.shop_unit_rate === null || !p ? "TBD" : money(round2(custAmt - shopAmt))}</td>
                         {removeColumn && (
                           <td>
                             {isPerLine(l) && perLineOpen ? (
@@ -1342,9 +1397,9 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                         <b>Totals</b>
                       </td>
                       <td className="num money">{tbd ? "TBD" : money(shopTotal)}</td>
-                      <td className="num money">{money(subtotal)}</td>
+                      <td className="num money">{priceMissing ? "TBD" : money(subtotal)}</td>
                       <td colSpan={2} />
-                      <td className="num money">{tbd ? "TBD" : money(round2(subtotal - shopTotal))}</td>
+                      <td className="num money">{tbd || priceMissing ? "TBD" : money(round2(subtotal - shopTotal))}</td>
                       {removeColumn && <td />}
                     </tr>
                   )}
@@ -1466,7 +1521,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   <label className="small" htmlFor="priced-amount">
                     Customer price
                   </label>
-                  <input id="priced-amount" name="amount" className="input" inputMode="decimal" required placeholder="0.00" />
+                  <input id="priced-amount" name="amount" className="input" inputMode="decimal" placeholder="No price yet" />
                 </div>
                 <div style={{ width: 120 }}>
                   <label className="small" htmlFor="priced-rate">
@@ -1855,19 +1910,19 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
             <div className="summarybox">
               <div className="summaryrow">
                 <span>Subtotal</span>
-                <b className="money">{money(subtotal)}</b>
+                <b className="money">{priceMissing ? "TBD" : money(subtotal)}</b>
               </div>
               <div className="summaryrow">
                 <span>Taxable amount</span>
-                <b className="money">{money(taxable)}</b>
+                <b className="money">{priceMissing ? "TBD" : money(taxable)}</b>
               </div>
               <div className="summaryrow">
                 <span>{taxView.taxLabel}</span>
-                <b className="money">{taxView.tax === null ? taxView.taxText : money(taxView.tax)}</b>
+                <b className="money">{priceMissing ? "TBD" : taxView.tax === null ? taxView.taxText : money(taxView.tax)}</b>
               </div>
               <div className="summaryrow">
                 <span>{taxView.totalLabel}</span>
-                <b className="money">{taxView.total === null ? taxView.totalText : money(taxView.total)}</b>
+                <b className="money">{priceMissing ? "TBD" : taxView.total === null ? taxView.totalText : money(taxView.total)}</b>
               </div>
               <div className="summaryrow">
                 <span>{shopPayableLabel(inHouse)}</span>
@@ -1875,7 +1930,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </div>
               <div className="summaryrow">
                 <span>Gross margin (before tax)</span>
-                <b className="money">{tbd ? "TBD" : money(fin?.margin)}</b>
+                <b className="money">{tbd || priceMissing ? "TBD" : money(fin?.margin)}</b>
               </div>
             </div>
             {taxView.note && <p className="small">{taxView.note}</p>}

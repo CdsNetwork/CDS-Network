@@ -7,7 +7,7 @@ import { isUuid, LINES_LOCKED_STATUSES, REMOVABLE_LABEL_STATUSES, REVIEW_STATUSE
 import { requireCds } from "@/lib/auth";
 import { recordSync } from "@/lib/integration-sync";
 import { noteBody } from "@/lib/notes";
-import { passThroughInput, pricedLineInput, shopRateInput } from "@/lib/pass-through";
+import { customerPriceInput, passThroughInput, pricedLineInput, shopRateInput } from "@/lib/pass-through";
 import { emailCdsAfter } from "@/lib/portal-email-send";
 import { INTERNAL_STATUS_LABEL, parseInternalStatus } from "@/lib/internal-status";
 import { invoiceBlockReason, invoicedOutcome, invoiceLocked, qbInvoiceIdOf } from "@/lib/invoice-lock";
@@ -355,10 +355,9 @@ export async function addLine(woId: string, _prev: ActionState, formData: FormDa
     origin: "cds_order",
     ...(cost !== null ? { shop_unit_rate: Math.round(cost * 100) / 100 } : {}),
   });
-  if (error) {
-    if (error.message.startsWith("No customer price")) return { error: "This item has no customer price yet. Set a fleet price first." };
-    return { error: error.message };
-  }
+  // An item with no price yet is added without one: the line shows "No price" until the fleet
+  // or customer price is set (20261117010000_work_order_without_price.sql).
+  if (error) return { error: error.message };
   await supabase.from("work_order_events").insert({
     work_order_id: woId,
     actor_id: profile.id,
@@ -687,7 +686,20 @@ export async function addPricedLine(woId: string, _prev: ActionState, formData: 
       return { error: `Line added, but the shop rate was not saved: ${rate.error.message}` };
     }
   }
-  return done(woId, input.shopRate === null ? "Line added. Enter the shop rate on the line when it is known." : "Line added.");
+  const later = [input.amount === null ? "customer price" : "", input.shopRate === null ? "shop rate" : ""].filter(Boolean);
+  return done(woId, later.length ? `Line added. Enter the ${later.join(" and ")} on the line when it is known.` : "Line added.");
+}
+
+/** The customer price of a line priced on the order (added without one, or corrected). */
+export async function setLinePrice(woId: string, lineId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId) || !isUuid(lineId)) return { error: "Line not found." };
+  const input = customerPriceInput(text(formData.get("amount")));
+  if (!input.ok) return { error: input.error };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("cds_set_line_price", { p_line: lineId, p_amount: input.amount });
+  if (error) return { error: error.message };
+  return done(woId, "Customer price saved.");
 }
 
 /** The shop rate of a line whose rate is TBD (or that CDS entered before). */

@@ -172,10 +172,26 @@ describe("intake_create_draft_work_order", () => {
       admin.from("work_order_internal").select("source, inbound_email_id, auto_dispatched, review_reason, internal_notes").eq("work_order_id", wo).single(),
     );
     expect(internal).toMatchObject({ source: "email_import", inbound_email_id: email, auto_dispatched: false });
-    expect(internal.internal_notes).toContain(`Not added (no customer price): IN-U-${runId}`);
+    // An item with no price yet is added without one (20261117010000_work_order_without_price.sql).
+    expect(internal.internal_notes ?? "").not.toContain("Not added");
 
-    const lines = await must(admin.from("work_order_lines").select("catalog_item_id").eq("work_order_id", wo));
-    expect(lines).toEqual([{ catalog_item_id: f.priced }]);
+    const lines = await must(
+      admin.from("work_order_lines").select("catalog_item_id, work_order_line_pricing(customer_unit_price)").eq("work_order_id", wo),
+    );
+    const priceOf = (p: unknown) => {
+      const row = (Array.isArray(p) ? p[0] : p) as { customer_unit_price: number } | null | undefined;
+      return row ? Number(row.customer_unit_price) : null;
+    };
+    expect(
+      (lines as { catalog_item_id: string; work_order_line_pricing: unknown }[])
+        .map((l) => [l.catalog_item_id, priceOf(l.work_order_line_pricing)])
+        .sort(),
+    ).toEqual(
+      [
+        [f.priced, 100],
+        [f.unpriced, null],
+      ].sort(),
+    );
 
     const row = await must(admin.from("inbound_emails").select("status, work_order_id, error").eq("id", email).single());
     expect(row).toEqual({ status: "converted", work_order_id: wo, error: null });

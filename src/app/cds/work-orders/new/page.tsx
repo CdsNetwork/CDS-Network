@@ -30,7 +30,7 @@ export default async function NewWorkOrderPage() {
     // item becomes the customer item on that customer's orders (private.use_customer_item).
     supabase
       .from("catalog_items")
-      .select("id, sku, name, category, oe_cross")
+      .select("id, sku, name, category, oe_cross, price_per_line, pass_through")
       .eq("active", true)
       .is("variant_of", null)
       .order("category")
@@ -62,9 +62,24 @@ export default async function NewWorkOrderPage() {
     (overrides[r.customer_id] ??= {})[r.catalog_item_id] = Number(r.amount);
   }
 
-  const catalog: CatalogOption[] = (
-    (catalogRes.data ?? []) as { id: string; sku: string; name: string; category: string; oe_cross: string | null }[]
-  ).map((c) => ({ ...c, fleetPrice: fleet.has(c.id) ? Number(fleet.get(c.id)!.amount) : null }));
+  // Misc. hardware is added on the order page with the amount from the shop's invoice. Items
+  // priced on the order (new filters) are added with no price; CDS enters it on the line.
+  type CatalogRow = {
+    id: string;
+    sku: string;
+    name: string;
+    category: string;
+    oe_cross: string | null;
+    price_per_line: boolean;
+    pass_through: boolean;
+  };
+  const catalog: CatalogOption[] = ((catalogRes.data ?? []) as CatalogRow[])
+    .filter((c) => !(c.price_per_line && c.pass_through))
+    .map(({ price_per_line, pass_through, ...c }) => ({
+      ...c,
+      pricedOnOrder: price_per_line && !pass_through,
+      fleetPrice: fleet.has(c.id) ? Number(fleet.get(c.id)!.amount) : null,
+    }));
 
   const locations: LocationOption[] = locationsRes.data ?? [];
 
