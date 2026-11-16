@@ -14,11 +14,13 @@ import {
 } from "react";
 import { addInternalNote, addNote, setInternalStatus, setStatus } from "@/app/cds/work-orders/[id]/actions";
 import { editInternalNote } from "@/app/cds/notes-actions";
+import { setShipmentStatus } from "@/app/cds/shipping/actions";
 import { INTERNAL_STATUS_LABEL, INTERNAL_STATUSES } from "@/lib/internal-status";
-import { dateTime } from "@/lib/format";
+import { dateTime, SHIPMENT_STATUS_LABEL } from "@/lib/format";
 import { NOTE_MAX_LENGTH } from "@/lib/notes";
 import { ActionForm, type ActionState } from "./ActionForm";
 import type { PopoverNote, PopoverNotes, StatusMove } from "./list-edits";
+import type { ListLeg } from "./list-shipments";
 import styles from "./cds-wo.module.css";
 
 /**
@@ -132,6 +134,84 @@ export function ListInternalStatusSelect({
           </option>
         ))}
       </select>
+      <div role="status" className="small" style={saved && !pending ? { color: "#3b6d12", fontWeight: 700 } : undefined}>
+        {pending ? "Saving..." : saved ? "Saved" : null}
+      </div>
+      {error && (
+        <p className={`error ${styles.cellError}`} role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The carrier status of one shipment leg in the work order list, saved on change with the
+ * Shipping page's action and statuses (setShipmentStatus). "In" goes to the shop or CDS,
+ * "Out" back to the customer; the tooltip names the full direction, carrier and tracking.
+ */
+export function ListShipmentStatusSelect({ leg }: { leg: ListLeg }) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [shown, setShown] = useState(leg.status);
+  // A saved change from elsewhere (tracking or the Shipping page) resets the select.
+  const [lastValue, setLastValue] = useState(leg.status);
+  if (leg.status !== lastValue) {
+    setLastValue(leg.status);
+    setShown(leg.status);
+  }
+
+  useEffect(() => {
+    if (!saved) return;
+    const t = setTimeout(() => setSaved(false), 2500);
+    return () => clearTimeout(t);
+  }, [saved]);
+
+  return (
+    <div className={styles.legRow}>
+      <div className={styles.legLine}>
+        <span className={styles.legDir} title={leg.title}>
+          {leg.dir}
+        </span>
+        <select
+          className={styles.cellSelect}
+          value={shown}
+          disabled={pending}
+          aria-label={`Shipment status, ${leg.title}`}
+          title={leg.title}
+          onChange={(e) => {
+            const next = e.target.value;
+            const before = shown;
+            setShown(next);
+            setError(null);
+            setSaved(false);
+            const fd = new FormData();
+            fd.set("status", next);
+            startTransition(async () => {
+              const res = await setShipmentStatus(leg.id, {}, fd);
+              if (res.error) {
+                setShown(before);
+                setError(res.error);
+              } else {
+                setSaved(true);
+              }
+            });
+          }}
+        >
+          {Object.entries(SHIPMENT_STATUS_LABEL).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        {leg.trackingUrl && (
+          <a className="link small" href={leg.trackingUrl} target="_blank" rel="noreferrer" title={leg.title}>
+            Track
+          </a>
+        )}
+      </div>
       <div role="status" className="small" style={saved && !pending ? { color: "#3b6d12", fontWeight: 700 } : undefined}>
         {pending ? "Saving..." : saved ? "Saved" : null}
       </div>

@@ -151,6 +151,26 @@
   font-weight: 700;
   background: #eef0f3;
 }
+/* One shipment leg in the work order list: direction, carrier status, tracking link. */
+.legRow {
+  margin-top: 6px;
+}
+.legLine {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+.legLine .cellSelect {
+  margin-top: 0;
+}
+.legDir {
+  min-width: 26px;
+  font-size: 12px;
+  font-weight: 750;
+  color: #344054;
+  cursor: help;
+}
 .cellError {
   margin-top: 4px;
   font-size: 12px;

@@ -1,7 +1,8 @@
 import Form from "next/form";
 import Link from "next/link";
-import { ListInternalStatusSelect, ListNotesButton, ListStatusSelect } from "@/components/cds-wo/ListRowEdits";
+import { ListInternalStatusSelect, ListNotesButton, ListShipmentStatusSelect, ListStatusSelect } from "@/components/cds-wo/ListRowEdits";
 import { listStatusMoves } from "@/components/cds-wo/list-edits";
+import { LEG_COLUMNS, listLegs, type LegRow } from "@/components/cds-wo/list-shipments";
 import { PeriodSelect } from "@/components/cds-wo/PeriodSelect";
 import { SubmitOnChange } from "@/components/cds-wo/SubmitOnChange";
 import { isQuestionPending, QUESTION_PARAM, questionTitle } from "@/components/cds-wo/question-pending";
@@ -72,6 +73,7 @@ type ListRow = WoRow & {
   work_order_questions: { question_pending: boolean | null; note: string | null } | { question_pending: boolean | null; note: string | null }[] | null;
   work_order_notes: Count;
   work_order_internal_notes: Count;
+  shipments: LegRow[] | null;
 };
 
 const WO_COLUMNS =
@@ -80,11 +82,11 @@ const WO_COLUMNS =
 /**
  * The table also shows when the request came in, how the part moves, whether the shop did
  * something CDS has not opened yet, a failed or condemned component, a pending customer
- * question, and CDS's own internal status. CDS changes the status and internal status from
- * the table and reads, adds and edits notes in a popover (loaded when it opens; the table
- * only counts them).
+ * question, CDS's own internal status and the carrier status of each shipment leg. CDS
+ * changes the status, internal status and shipment statuses from the table and reads, adds
+ * and edits notes in a popover (loaded when it opens; the table only counts them).
  */
-const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at), internal_status, qb_invoice_number, qb_invoice_id), work_order_shop_activity(is_new), work_order_components(result), work_order_questions(question_pending, note), work_order_notes(count), work_order_internal_notes(count)`;
+const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at), internal_status, qb_invoice_number, qb_invoice_id), work_order_shop_activity(is_new), work_order_components(result), work_order_questions(question_pending, note), work_order_notes(count), work_order_internal_notes(count), ${LEG_COLUMNS}`;
 
 const embeddedCount = (c: Count) => c?.[0]?.count ?? 0;
 
@@ -320,6 +322,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   const invoicedEarly = r.status !== "invoiced" ? internal?.qb_invoice_number ?? null : null;
                   const moves = listStatusMoves(r.status, invoiceLocked(r.status, internal?.qb_invoice_id));
                   const noteCount = embeddedCount(r.work_order_notes) + embeddedCount(r.work_order_internal_notes);
+                  const legs = listLegs(r.shipments);
                   return (
                     <tr key={r.id} className={questionOpen ? styles.questionRow : undefined}>
                       <td className="nowrap">
@@ -352,8 +355,11 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                       <td className={`${styles.textCol} ${wrapCell(shop) ?? ""}`}>
                         {shop ?? <span className="small">Not assigned</span>}
                       </td>
-                      <td className="nowrap" title={FULFILLMENT_LABEL[r.fulfillment]}>
-                        {logisticsLabel(r.fulfillment)}
+                      <td className="nowrap">
+                        <span title={FULFILLMENT_LABEL[r.fulfillment]}>{logisticsLabel(r.fulfillment)}</span>
+                        {legs.map((leg) => (
+                          <ListShipmentStatusSelect key={leg.id} leg={leg} />
+                        ))}
                       </td>
                       <td>
                         <span className={`status ${r.status}`}>
