@@ -705,15 +705,16 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   // Items priced per line (Misc. hardware) come from the shop's invoice, so CDS can add and
   // remove them after the work is completed, until the order is invoiced.
   const perLineOpen = !invoiceLockedNow && wo.status !== "cancelled";
-  // Shop rates are shop pay, not on the customer invoice: open until the order is invoiced.
-  const rateOpen = !["invoiced", "cancelled"].includes(wo.status);
+  // Shop rates are shop pay, not on the customer invoice: a TBD rate can still be entered
+  // after the order is invoiced (it often comes with the shop's invoice), not once cancelled.
+  const rateOpen = wo.status !== "cancelled";
   // Misc. hardware: the amount on the shop's invoice. Priced on the order (reconditioned and
   // new filters): CDS enters the customer price, the shop rate is entered on the line.
   const perLineItems = catalog.filter((c) => c.price_per_line && c.pass_through);
   const pricedItems = catalog.filter((c) => c.price_per_line && !c.pass_through);
   const isPerLine = (l: Line) => one(l.catalog_items)?.price_per_line === true;
   const isPassThrough = (l: Line) => isPerLine(l) && one(l.catalog_items)?.pass_through !== false;
-  // A line with no shop rate yet (TBD): CDS enters it until the order is invoiced.
+  // A line with no shop rate yet (TBD): CDS enters it, also on an invoiced order.
   const canSetRate = (l: Line) => rateOpen && l.shop_unit_rate === null && !isPassThrough(l);
   const removeColumn = !linesLocked || (perLineOpen && lines.some(isPerLine));
   // An order with a QuickBooks invoice keeps its tax like an invoiced one.

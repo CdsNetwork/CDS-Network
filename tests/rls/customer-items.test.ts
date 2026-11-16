@@ -245,7 +245,7 @@ describe("Shop rate TBD and entered on the line", () => {
     expect(events).toHaveLength(2);
   });
 
-  it("only CDS sets it, never on a price-list rate, Misc. hardware or an invoiced order, and only dollars and cents", async () => {
+  it("only CDS sets it, never on a price-list rate, Misc. hardware or a cancelled order, and only dollars and cents", async () => {
     const wo = await workOrder(f.other, "in_process", "CI-7");
     await cdsAdd(wo, f.gasket);
     const fsWo = await workOrder(f.fs, "in_process", "CI-7FS");
@@ -266,9 +266,21 @@ describe("Shop rate TBD and entered on the line", () => {
     )) as string;
     expect((await cds.client.rpc("cds_set_line_shop_rate", { p_line: miscId, p_amount: 5 })).error?.message).toMatch(/remove the line/);
 
-    await must(admin.from("work_orders").update({ status: "invoiced", affiliate_invoice_ref: "INV-1" }).eq("id", fsWo));
+    await must(admin.from("work_orders").update({ status: "cancelled" }).eq("id", fsWo));
     expect((await cds.client.rpc("cds_set_line_shop_rate", { p_line: tbd.id, p_amount: 5 })).error?.message).toMatch(/invoiced or cancelled/);
     expect((await lines(fsWo)).find((l) => l.id === tbd.id)?.shop_unit_rate).toBeNull();
+  });
+
+  // 20261116010000_invoiced_shipping_and_shop_rate.sql: the shop rate often comes with the
+  // shop's invoice, after CDS invoiced the customer.
+  it("on an invoiced order a TBD rate can be entered once, and does not change afterwards", async () => {
+    const wo = await workOrder(f.fs, "in_process", "CI-7INV");
+    await cdsAdd(wo, f.gasket);
+    const [tbd] = await lines(wo);
+    await must(admin.from("work_orders").update({ status: "invoiced", affiliate_invoice_ref: "INV-1" }).eq("id", wo));
+    await must(cds.client.rpc("cds_set_line_shop_rate", { p_line: tbd.id, p_amount: 5 }));
+    expect((await cds.client.rpc("cds_set_line_shop_rate", { p_line: tbd.id, p_amount: 6 })).error?.message).toMatch(/cannot change once the work order is invoiced/);
+    expect((await lines(wo)).find((l) => l.id === tbd.id)?.shop_unit_rate).toBe(5);
   });
 });
 

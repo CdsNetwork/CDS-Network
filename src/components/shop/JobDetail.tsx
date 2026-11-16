@@ -66,7 +66,9 @@ export function JobDetail({ data, backHref }: { data: JobDetailData; backHref: s
   const isPickup = job.fulfillment === "pickup";
   const isShipping = job.fulfillment === "shipping";
   const canUpload = editable || job.status === "completed";
-  const canShipStatus = isShipping && ["accepted", "in_process", "completed"].includes(job.status);
+  // An order CDS invoiced before it shipped still needs its shipping status (the database allows it once the shop completed it).
+  const canShipStatus =
+    isShipping && (["accepted", "in_process", "completed"].includes(job.status) || (job.status === "invoiced" && !!job.completed_at));
 
   const settlement = shopPayable(lines, deductions);
   const missingRate = hasMissingShopRate(lines);
