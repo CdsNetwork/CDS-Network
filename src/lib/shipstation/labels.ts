@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordSync } from "@/lib/integration-sync";
+import { claimShipStation, releaseShipStation } from "./claims";
 import { shipStationRequest, ShipStationError } from "./client";
 import { shipStationConfig } from "./config";
 import { ENDS, labelShop, NO_LOCATION_PROBLEM, NO_SHOP_PROBLEM } from "./ends";
@@ -311,6 +312,26 @@ export async function createLabelForShipment(db: Db, shipmentId: string, choice:
   if (allowed.length && !allowed.includes(choice.serviceCode)) return { ok: false, error: "That service is not turned on for this carrier." };
   const serviceName = carrier.shipping_services?.find((s) => s.service_code === choice.serviceCode)?.name ?? null;
 
+  // Reserve the purchase first: a second request at the same time is refused here, before
+  // anything is bought.
+  const claim = await claimShipStation(db, "label", shipmentId);
+  if (!claim.ok) return claim;
+  const result = await buyAndRecordLabel(db, config, ctx, choice, carrier, serviceName, claim.id);
+  if (!result.keepClaim) await releaseShipStation(db, "label", shipmentId, claim.id);
+  return result.result;
+}
+
+async function buyAndRecordLabel(
+  db: Db,
+  config: NonNullable<ReturnType<typeof shipStationConfig>>,
+  ctx: Context,
+  choice: LabelChoice,
+  carrier: CarrierRow,
+  serviceName: string | null,
+  claimId: string,
+): Promise<{ result: LabelResult; keepClaim: boolean }> {
+  const { shipmentId } = ctx;
+
   let body;
   try {
     body = buildLabelRequest({
@@ -321,10 +342,11 @@ export async function createLabelForShipment(db: Db, shipmentId: string, choice:
       serviceCode: choice.serviceCode,
       testLabel: config.testLabels,
       reference: `WO ${ctx.woNumber}`,
-      externalShipmentId: `${shipmentId}-${Date.now()}`,
+      // One id per claim: a retry of the same purchase carries the same id.
+      externalShipmentId: `${shipmentId}-${claimId}`,
     });
   } catch (e) {
-    return { ok: false, error: failure(e) };
+    return { result: { ok: false, error: failure(e) }, keepClaim: false };
   }
 
   let label;
@@ -335,9 +357,14 @@ export async function createLabelForShipment(db: Db, shipmentId: string, choice:
     await logSync(db, "label", shipmentId, e instanceof ShipStationError && e.rejected ? "rejected" : "error", null, msg);
     const hint = config.testLabels && /test label/i.test(msg) ? TEST_HINT : "";
     if (e instanceof ShipStationError && !e.rejected) {
-      return { ok: false, error: `ShipStation did not answer clearly (${msg}). Check ShipStation for a new label before trying again.` };
+      // A label may have been bought: keep the claim until it expires, so a quick retry
+      // cannot buy a second one.
+      return {
+        result: { ok: false, error: `ShipStation did not answer clearly (${msg}). Check ShipStation for a new label before trying again.` },
+        keepClaim: true,
+      };
     }
-    return { ok: false, error: `ShipStation refused the label: ${msg}.${hint}` };
+    return { result: { ok: false, error: `ShipStation refused the label: ${msg}.${hint}` }, keepClaim: false };
   }
 
   const filePath = await storePdf(ctx.workOrderId, shipmentId, label.labelId, label.pdfUrl, config.apiKey);
@@ -369,13 +396,16 @@ export async function createLabelForShipment(db: Db, shipmentId: string, choice:
   if (error) {
     const msg = `Label ${label.labelId} (tracking ${label.trackingNumber ?? "none"}) was created in ShipStation but not saved in the portal: ${error.message}`;
     await logSync(db, "label", shipmentId, "error", label.labelId, msg);
-    return { ok: false, error: label.isTest ? msg : `${msg}. Void it in ShipStation if it will not be used.` };
+    return { result: { ok: false, error: label.isTest ? msg : `${msg}. Void it in ShipStation if it will not be used.` }, keepClaim: false };
   }
   return {
-    ok: true,
-    message: label.isTest
-      ? `Test label created (not shippable, no charge). Tracking ${label.trackingNumber ?? "none"}.`
-      : `Label created. Tracking ${label.trackingNumber ?? "pending"}.`,
+    result: {
+      ok: true,
+      message: label.isTest
+        ? `Test label created (not shippable, no charge). Tracking ${label.trackingNumber ?? "none"}.`
+        : `Label created. Tracking ${label.trackingNumber ?? "pending"}.`,
+    },
+    keepClaim: false,
   };
 }
 

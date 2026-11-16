@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { recordSync } from "@/lib/integration-sync";
+import { claimShipStation, releaseShipStation } from "./claims";
 import { shipStationRequest, ShipStationError } from "./client";
 import { shipStationConfig } from "./config";
 import {
@@ -88,6 +89,11 @@ export async function schedulePickupForLabel(db: Db, labelId: string, form: Pick
     return { ok: false, error: failure(e) };
   }
 
+  // Reserve the booking first: a second request at the same time is refused here, before
+  // ShipStation is called.
+  const claim = await claimShipStation(db, "pickup", l.id);
+  if (!claim.ok) return claim;
+
   let pickup;
   try {
     pickup = mapPickup(await shipStationRequest<unknown>(config.apiKey, "POST", "pickups", { body, timeoutMs: 60_000 }));
@@ -95,8 +101,10 @@ export async function schedulePickupForLabel(db: Db, labelId: string, form: Pick
     const msg = failure(e);
     await logSync(db, "pickup", l.shipment_id, e instanceof ShipStationError && e.rejected ? "rejected" : "error", l.shipstation_label_id, msg);
     if (e instanceof ShipStationError && !e.rejected) {
+      // A pickup may have been booked: keep the claim until it expires.
       return { ok: false, error: `ShipStation did not answer clearly (${msg}). Check ShipStation for a new pickup before trying again.` };
     }
+    await releaseShipStation(db, "pickup", l.id, claim.id);
     return { ok: false, error: `ShipStation refused the pickup: ${msg.replace(/\.$/, "")}.` };
   }
 
@@ -111,6 +119,7 @@ export async function schedulePickupForLabel(db: Db, labelId: string, form: Pick
       notes: checked.notes,
     },
   });
+  await releaseShipStation(db, "pickup", l.id, claim.id);
   if (rpcError) {
     const msg = `Pickup ${pickup.pickupId} (confirmation ${pickup.confirmationNumber ?? "none"}) was booked in ShipStation but not saved in the portal: ${rpcError.message}`;
     await logSync(db, "pickup", l.shipment_id, "error", pickup.pickupId, msg);

@@ -142,7 +142,7 @@ describe("schedulePickupForLabel", () => {
     const { db, rpc } = fakeDb({ label: realLabel });
     const r = await schedulePickupForLabel(db, LABEL_ID, FORM, NOW);
     expect(r).toEqual({ ok: false, error: "ShipStation refused the pickup: The carrier does not support pickups." });
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalledWith("cds_record_shipment_pickup", expect.anything());
   });
 });
 

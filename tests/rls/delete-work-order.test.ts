@@ -156,6 +156,19 @@ describe("cds_delete_work_order", () => {
   });
 });
 
+// 20261116020000_no_direct_work_order_delete.sql: a work order is deleted only through
+// cds_delete_work_order, never with a plain DELETE through the Data API, whoever asks.
+describe("direct delete of a work order through the Data API", () => {
+  it("is refused for CDS staff without the permission, with it, and for a shop", async () => {
+    const wo = await workOrder("DW-6");
+    for (const login of [otherCds, cds, shopLogin]) {
+      const res = await login.client.from("work_orders").delete().eq("id", wo.id).select("id");
+      expect(res.error?.code, login.email).toBe("42501");
+      expect(await count("work_orders", "id", wo.id)).toBe(1);
+    }
+  });
+});
+
 describe("can_delete_work_orders", () => {
   const flag = async (id: string) =>
     ((await must(admin.from("profiles").select("can_delete_work_orders").eq("id", id).single())) as { can_delete_work_orders: boolean })

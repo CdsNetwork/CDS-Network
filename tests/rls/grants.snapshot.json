@@ -13,6 +13,10 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
+  "function public.cds_claim_shipstation(text,uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
   "function public.cds_create_work_order(uuid,uuid,text,text,public.request_type,public.fulfillment_method,text,text,text,text,jsonb)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
@@ -34,6 +38,10 @@
     "service_role": "EXECUTE"
   },
   "function public.cds_record_shipment_label(uuid,jsonb)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_release_shipstation(text,uuid,uuid)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
@@ -350,7 +358,7 @@
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "table public.work_orders": {
-    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "authenticated": "INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "view public.work_order_financials": {
