@@ -58,7 +58,7 @@ th { overflow-wrap: normal; }
    the nav in the middle (scrolls on its own) and the account at the bottom; collapsed it is an
    icon rail. Phone: a slim top bar whose menu opens the same nav as a drawer. */
 .cds-shell { min-height: 100vh; }
-.cds-main { margin: 0; }
+.cds-main { margin: 0; max-width: none; }
 .cds-iconbtn { border: 0; background: transparent; color: var(--muted); border-radius: 8px; padding: 6px; display: inline-grid; place-items: center; cursor: pointer; flex-shrink: 0; }
 .cds-iconbtn:hover { background: #f4f7f9; color: var(--ink); }
 .cds-iconbtn:focus-visible, .cds-avatarbtn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
