@@ -24,13 +24,23 @@
 .woTable td.idShort {
   white-space: nowrap;
 }
+/* WO, date, unit, PO and money columns are as wide as their values (a width below the
+   content keeps a column at its content width); the spare width goes to customer, location,
+   shop, logistics and status. */
+.woTable td.fit,
+.woTable td.idShort,
+.woTable td.idCol,
+.woTable td:global(.num),
+.woTable th:global(.num) {
+  width: 1px;
+}
 .woTable td.idCol {
   min-width: 6.5rem;
   max-width: 10.5rem;
   overflow-wrap: anywhere;
 }
 /* Customer, location and shop take the space left over and wrap between words. On wide
-   screens customer and shop names up to 24 characters stay on one line (nameClass on the
+   screens customer and shop names up to 16 characters stay on one line (nameClass on the
    dashboard); on narrower screens they wrap so the status column stays in view. */
 .woTable td.textCol {
   min-width: 4.5rem;
@@ -150,6 +160,7 @@
 .cellSelect {
   width: auto;
   max-width: 150px;
+  text-overflow: ellipsis;
   margin-top: 6px;
   padding: 2px 4px;
   font-size: 12px;
@@ -157,14 +168,14 @@
   border-radius: 6px;
   color: var(--muted);
 }
-/* Status column: the status pill and both selects side by side, wrapping only when the
-   column is narrow (then on two lines at most for ordinary statuses). */
+/* Status column: the status pill and both selects side by side, wrapping when the column
+   is narrow. The column never grows past the cap. */
 .statusLine {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 6px;
-  min-width: 15rem;
+  max-width: 22rem;
 }
 .statusLine > div {
   display: inline-flex;
@@ -184,7 +195,8 @@
 .statusLine .cellError {
   margin-top: 0;
 }
-/* WO column: the WO number with its Notes button, then any marks on one line under it. */
+/* WO column: the WO number with its Notes button (under it when the column is narrow),
+   then any marks on one line under them. */
 .woLine {
   display: flex;
   flex-wrap: wrap;
@@ -200,13 +212,6 @@
 }
 .woLine .notesButton {
   margin-top: 0;
-}
-/* Wide screens have the room to keep the status line and the WO line on one line each. */
-@media (min-width: 1600px) {
-  .statusLine,
-  .woLine {
-    flex-wrap: nowrap;
-  }
 }
 .cellSelectSet {
   color: #344054;

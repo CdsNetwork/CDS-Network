@@ -103,7 +103,7 @@ function idClass(value: string | null): string {
 }
 
 /** Customer and shop names up to this length (most of them) stay on one line on wide screens. */
-const NAME_NOWRAP = 24;
+const NAME_NOWRAP = 16;
 
 function nameClass(name: string | null): string {
   return wrapCell(name) ?? ((name ?? "").length <= NAME_NOWRAP ? styles.nameShort : "");
@@ -347,7 +347,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   const legs = listLegs(r.shipments);
                   return (
                     <tr key={r.id} className={questionOpen ? styles.questionRow : undefined}>
-                      <td className="nowrap">
+                      <td className={`nowrap ${styles.fit}`}>
                         <div className={styles.woLine}>
                           <Link className="link" href={`/cds/work-orders/${r.id}`}>
                             {woLabel(r.wo_number)}
@@ -374,7 +374,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                           </div>
                         )}
                       </td>
-                      <td className="nowrap">{dateReceived(r)}</td>
+                      <td className={`nowrap ${styles.fit}`}>{dateReceived(r)}</td>
                       <td className={`${styles.textCol} ${nameClass(customer)}`}>{customer}</td>
                       <td className={`${styles.textCol} ${wrapCell(r.location_label) ?? ""}`}>{r.location_label}</td>
                       <td className={idClass(r.unit_number)}>{r.unit_number}</td>
