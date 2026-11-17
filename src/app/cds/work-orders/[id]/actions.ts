@@ -12,13 +12,20 @@ import { noteBody } from "@/lib/notes";
 import { customerPriceInput, passThroughInput, pricedLineInput, shopRateInput } from "@/lib/pass-through";
 import { emailCdsAfter } from "@/lib/portal-email-send";
 import { INTERNAL_STATUS_LABEL, parseInternalStatus } from "@/lib/internal-status";
-import { invoiceBlockReason, invoicedOutcome, invoiceLocked, qbInvoiceIdOf } from "@/lib/invoice-lock";
+import { invoiceBlockReason, invoicedOutcome, invoiceLocked, movesToInvoiced, qbInvoiceIdOf } from "@/lib/invoice-lock";
 import { createInvoice, getInvoice, listClasses, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
 import { createShopBill, createShopBillAfter } from "@/lib/qbo/bill-server";
 import { QboError } from "@/lib/qbo/client";
 import { changedSinceNote, claimInvoice, finishInvoice, invoiceSnapshot } from "@/lib/qbo/invoice-claim";
-import { loadInvoice } from "@/lib/qbo/invoice-input";
-import { cachedSubCustomer, resolveInvoiceQbo, saveSubCustomer, type ResolvedInvoice } from "@/lib/qbo/invoice-qbo";
+import type { ItemTextLine, QboInvoicePayload } from "@/lib/qbo/invoice";
+import { loadInvoice, type CombinedInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
+import {
+  cachedSubCustomer,
+  resolveInvoiceQbo,
+  saveSubCustomer,
+  type InvoiceTarget,
+  type ResolvedInvoice,
+} from "@/lib/qbo/invoice-qbo";
 import { createdNote, type PendingQbInvoice } from "@/lib/qbo/pending";
 import { findShopClass, saveShopClass, type ShopClass } from "@/lib/qbo/shop-class";
 import { qboApi } from "@/lib/qbo/tokens";
@@ -272,8 +279,11 @@ export async function updateWorkOrderPo(woId: string, _prev: ActionState, formDa
 
 /**
  * Links this work order to another one by WO number, or removes the link when the field is
- * empty (linked work orders, light version, Sarah, CDS, 2026-11-17). CDS only: the link is in
- * public.work_order_links, which shops cannot read. Each order keeps its own invoice.
+ * empty (linked work orders, Sarah, CDS, 2026-11-17). CDS only: the link is in
+ * public.work_order_links, which shops cannot read. The two get one customer invoice
+ * (createQuickBooksInvoice, @/lib/qbo/invoice-combined); the database refuses linking a work
+ * order that has its invoice, a third work order, and unlinking once the invoice is started
+ * (20261119080000_combined_invoice.sql), and its message is shown as is.
  */
 export async function linkWorkOrder(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
   const profile = await requireCds();
@@ -904,6 +914,10 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
     return { error: `This work order already has QuickBooks invoice ${invoice.qbInvoiceNumber ?? invoice.qbInvoiceId}.` };
   }
   const blocked = invoiceBlockReason(invoice.status, null);
+  if (invoice.combined) {
+    if (blocked) return { error: blocked };
+    return createLinkedInvoice(supabase, profile.id, woId, invoice, invoice.combined);
+  }
   if (invoice.pendingQb && blocked) return recordPendingInvoice(supabase, woId, invoice.status, invoice.pendingQb, null, null);
   if (blocked) return { error: blocked };
   if (!invoice.pendingQb && !invoice.result.ok) return { error: `Fix these first: ${invoice.result.problems.join(" ")}` };
@@ -942,52 +956,15 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
   // details: QuickBooks returns that invoice if it made one.
   const changedSince = claim.snapshot !== null && claim.snapshot !== currentSnapshot;
 
-  // The site's sub-customer, the custom fields and the items' own descriptions are looked up
-  // in QuickBooks now (see @/lib/qbo/invoice-qbo); what is not found is left out with a note,
-  // never an error.
-  const parentId = payload.CustomerRef.value;
-  const cachedSub = await cachedSubCustomer(supabase, current.target.locationId, parentId);
-  // A shop without a Class row gets its "CDS <city>" class picked from QuickBooks (see
-  // @/lib/qbo/shop-class); no match or a failed lookup sends the invoice without a class.
-  const affiliateId = current.affiliateId;
-  let sent = false;
-  const send = async (api: Awaited<ReturnType<typeof qboApi>>) => {
-    const cls = !payload.ClassRef && affiliateId ? await findShopClass(supabase, () => listClasses(api), affiliateId) : null;
-    const withClass = cls ? { ...payload, ClassRef: { value: cls.id } } : payload;
-    const r = await resolveInvoiceQbo(qboLookups(api), withClass, current.target, cachedSub, itemText);
-    sent = true;
-    return { resolved: r, created: await createInvoice(api, r.payload, requestId), shopClass: cls };
-  };
-
-  let created: CreatedInvoice;
-  let resolved: ResolvedInvoice;
-  let shopClass: ShopClass | null;
-  try {
-    let api = await qboApi();
-    try {
-      ({ created, resolved, shopClass } = await send(api));
-    } catch (e) {
-      if (!(e instanceof QboError && e.unauthorized)) throw e;
-      // The access token was revoked or expired early: refresh once and send the same request.
-      api = await qboApi({ forceRefresh: true });
-      ({ created, resolved, shopClass } = await send(api));
-    }
-  } catch (e) {
-    const qbo = e instanceof QboError ? e : null;
-    const message = e instanceof Error ? e.message : "unknown error";
-    // Refused: nothing was created. Not called, or not signed in: nothing reached QuickBooks.
-    // Otherwise QuickBooks may have created it: the next attempt asks again with the same id.
-    await finishInvoice(supabase, woId, claim.claimId,
-      qbo?.rejected ? "refused" : !sent || qbo?.faultType === "Config" || qbo?.unauthorized ? "not_sent" : "unconfirmed");
-    if (qbo?.faultType === "Config") return { error: message };
-    await logSync(supabase, woId, qbo?.rejected ? "rejected" : "error", null,
-      `${message}${qbo?.intuitTid ? ` (intuit_tid ${qbo.intuitTid})` : ""}`);
-    return {
-      error: qbo?.rejected
-        ? `QuickBooks refused the invoice: ${message}`
-        : `QuickBooks did not confirm the invoice (${message}). Try again: a retry never creates a second invoice.`,
-    };
+  const sent = await sendInvoice(supabase, payload, itemText, current.target, current.affiliateId, requestId);
+  if (!sent.ok) {
+    await finishInvoice(supabase, woId, claim.claimId, sent.outcome);
+    if (!sent.log) return { error: sent.error };
+    await logSync(supabase, woId, sent.log.status, null, sent.log.message);
+    return { error: sent.error };
   }
+  const { created, resolved, shopClass, cachedSub, parentId } = sent;
+  const affiliateId = current.affiliateId;
 
   // Recorded before the work order is marked, so a failed update leaves the invoice findable
   // (see @/lib/qbo/pending and the claim) and the next click records it instead of sending a
@@ -1021,6 +998,70 @@ export async function createQuickBooksInvoice(woId: string): Promise<ActionState
     woId,
     [`QuickBooks invoice ${name} created.`, invoicedOutcome(current.status), ...notes, ...(changedSince ? [changedSinceNote(name)] : [])].join(" "),
   );
+}
+
+type SendResult =
+  | { ok: true; created: CreatedInvoice; resolved: ResolvedInvoice; shopClass: ShopClass | null; cachedSub: string | null; parentId: string }
+  | {
+      ok: false;
+      /** How the claim ends (@/lib/qbo/invoice-claim finishInvoice). */
+      outcome: "refused" | "unconfirmed" | "not_sent";
+      /** The integration_sync row to log, or null (a settings problem). */
+      log: { status: "rejected" | "error"; message: string } | null;
+      error: string;
+    };
+
+/**
+ * Sends the invoice to QuickBooks with the claim's request id. The site's sub-customer, the
+ * custom fields and the items' own descriptions are looked up in QuickBooks first (see
+ * @/lib/qbo/invoice-qbo); what is not found is left out with a note, never an error. A shop
+ * without a Class row gets its "CDS <city>" class picked from QuickBooks (see
+ * @/lib/qbo/shop-class); no match or a failed lookup sends the invoice without a class.
+ */
+async function sendInvoice(
+  supabase: Supabase,
+  payload: QboInvoicePayload,
+  itemText: ItemTextLine[],
+  target: InvoiceTarget,
+  affiliateId: string | null,
+  requestId: string,
+): Promise<SendResult> {
+  const parentId = payload.CustomerRef.value;
+  const cachedSub = await cachedSubCustomer(supabase, target.locationId, parentId);
+  let sent = false;
+  const send = async (api: Awaited<ReturnType<typeof qboApi>>) => {
+    const cls = !payload.ClassRef && affiliateId ? await findShopClass(supabase, () => listClasses(api), affiliateId) : null;
+    const withClass = cls ? { ...payload, ClassRef: { value: cls.id } } : payload;
+    const r = await resolveInvoiceQbo(qboLookups(api), withClass, target, cachedSub, itemText);
+    sent = true;
+    return { resolved: r, created: await createInvoice(api, r.payload, requestId), shopClass: cls };
+  };
+  try {
+    let api = await qboApi();
+    try {
+      return { ok: true, ...(await send(api)), cachedSub, parentId };
+    } catch (e) {
+      if (!(e instanceof QboError && e.unauthorized)) throw e;
+      // The access token was revoked or expired early: refresh once and send the same request.
+      api = await qboApi({ forceRefresh: true });
+      return { ok: true, ...(await send(api)), cachedSub, parentId };
+    }
+  } catch (e) {
+    const qbo = e instanceof QboError ? e : null;
+    const message = e instanceof Error ? e.message : "unknown error";
+    // Refused: nothing was created. Not called, or not signed in: nothing reached QuickBooks.
+    // Otherwise QuickBooks may have created it: the next attempt asks again with the same id.
+    const outcome = qbo?.rejected ? "refused" : !sent || qbo?.faultType === "Config" || qbo?.unauthorized ? "not_sent" : "unconfirmed";
+    if (qbo?.faultType === "Config") return { ok: false, outcome, log: null, error: message };
+    return {
+      ok: false,
+      outcome,
+      log: { status: qbo?.rejected ? "rejected" : "error", message: `${message}${qbo?.intuitTid ? ` (intuit_tid ${qbo.intuitTid})` : ""}` },
+      error: qbo?.rejected
+        ? `QuickBooks refused the invoice: ${message}`
+        : `QuickBooks did not confirm the invoice (${message}). Try again: a retry never creates a second invoice.`,
+    };
+  }
 }
 
 /**
@@ -1075,6 +1116,157 @@ async function readInvoiceAmounts(id: string): Promise<QbInvoiceAmounts> {
   } catch {
     return { taxTotal: null, total: null };
   }
+}
+
+// ---------------------------------------------------------------- one invoice for two linked work orders
+
+/** "WO-104101 and WO-104102" */
+function bothLabels(c: CombinedInvoice): string {
+  return c.orders.map((o) => woLabel(o.woNumber)).join(" and ");
+}
+
+/** What happens to each work order's status, as invoicedOutcome says for one. */
+function linkedOutcome(c: CombinedInvoice): string {
+  return c.orders
+    .map((o) => (movesToInvoiced(o.status) ? `${woLabel(o.woNumber)} is now Invoiced.` : `${woLabel(o.woNumber)} moves to Invoiced when the shop completes the job.`))
+    .join(" ");
+}
+
+function doneLinked(c: CombinedInvoice, woId: string, ok: string): ActionState {
+  for (const o of c.orders) if (o.id !== woId) revalidatePath(`/cds/work-orders/${o.id}`);
+  return done(woId, ok);
+}
+
+/**
+ * One order across 2 shops (CDS, 2026-11-17, milestone M4): ONE customer invoice in QuickBooks
+ * for two linked work orders (@/lib/qbo/invoice-combined), created from either page, recorded
+ * on both (public.cds_mark_invoiced_linked). The same safeguards as for one work order: the
+ * claim is taken first (on the first work order, naming the other one, so the two pages share
+ * one claim and one request id), the inputs of both are locked while it is open, the invoice
+ * is built again under the claim, and an invoice QuickBooks created is recorded instead of
+ * sent again. Sync rows are logged on both work orders.
+ */
+async function createLinkedInvoice(
+  supabase: Supabase,
+  profileId: string,
+  woId: string,
+  invoice: InvoiceState,
+  c: CombinedInvoice,
+): Promise<ActionState> {
+  if (!invoice.pendingQb && !invoice.result.ok) return { error: `Fix these first: ${invoice.result.problems.join(" ")}` };
+  const readSnapshot = invoice.result.ok ? invoiceSnapshot(invoice.result) : null;
+  const ids = c.orders.map((o) => o.id);
+  const logAll = (status: "ok" | "rejected" | "error", externalId: string | null, note: string | null) =>
+    Promise.all(ids.map((id) => logSync(supabase, id, status, externalId, note)));
+
+  const claimed = await claimInvoice(supabase, woId, readSnapshot, c.linkedId);
+  if (!claimed.ok) return { error: claimed.error };
+  const claim = claimed.claim;
+  const owner = claim.ownerId;
+  const linked = ids.find((id) => id !== owner) ?? c.linkedId;
+  if (claim.state === "created") {
+    const number = invoice.pendingQb?.id === claim.qbInvoiceId ? invoice.pendingQb.number : null;
+    return recordLinkedInvoice(supabase, woId, c, owner, linked, { id: claim.qbInvoiceId, number }, claim.snapshot, readSnapshot);
+  }
+
+  // Read again under the claim: from now on the details of both cannot change.
+  let current: InvoiceState | null;
+  try {
+    current = await loadInvoice(supabase, woId);
+  } catch {
+    current = null;
+  }
+  const currentSnapshot = current?.result.ok ? invoiceSnapshot(current.result) : null;
+  if (!current || !current.result.ok || current.combined?.ownerId !== owner || currentSnapshot !== readSnapshot) {
+    await finishInvoice(supabase, owner, claim.claimId, "not_sent");
+    return { error: "The work orders changed while the invoice was being prepared. Click Create QuickBooks invoice again." };
+  }
+  const { payload, itemText } = current.result;
+  const changedSince = claim.snapshot !== null && claim.snapshot !== currentSnapshot;
+
+  const sent = await sendInvoice(supabase, payload, itemText, current.target, current.affiliateId, claim.requestId);
+  if (!sent.ok) {
+    await finishInvoice(supabase, owner, claim.claimId, sent.outcome);
+    if (sent.log) await logAll(sent.log.status, null, sent.log.message);
+    return { error: sent.error };
+  }
+  const { created, resolved, shopClass, cachedSub, parentId } = sent;
+
+  // Recorded on both before the work orders are marked, so a failed update leaves the invoice
+  // findable from either page, and the claim says created: the next click records it.
+  const name = created.DocNumber ?? created.Id;
+  const billed = resolved.subCustomer ? [`Billed to ${resolved.subCustomer.name}.`] : [];
+  const notes = [...billed, ...resolved.notes];
+  await logAll("ok", created.Id, createdNote(created.DocNumber, notes));
+  await finishInvoice(supabase, owner, claim.claimId, "created", created.Id);
+  if (resolved.subCustomer && resolved.subCustomer.id !== cachedSub) {
+    await saveSubCustomer(supabase, current.target.locationId, parentId, resolved.subCustomer);
+  }
+  if (shopClass && current.affiliateId) await saveShopClass(supabase, current.affiliateId, shopClass, profileId);
+  const amounts = qbInvoiceAmounts(created);
+  const { error } = await supabase.rpc("cds_mark_invoiced_linked", {
+    p_work_order: owner,
+    p_linked: linked,
+    p_qb_invoice_id: created.Id,
+    p_qb_invoice_number: created.DocNumber ?? null,
+    p_qb_tax_total: amounts.taxTotal,
+    p_qb_total: amounts.total,
+  });
+  if (error) {
+    await logAll("error", created.Id, `Invoice created in QuickBooks, portal not updated: ${error.message}`);
+    return {
+      error: `QuickBooks invoice ${name} was created, but ${bothLabels(c)} could not be updated (${error.message}). Click again to finish; no second invoice is created.`,
+    };
+  }
+  return doneLinked(
+    c,
+    woId,
+    [`QuickBooks invoice ${name} created for ${bothLabels(c)}.`, linkedOutcome(c), ...notes, ...(changedSince ? [changedSinceNote(name)] : [])].join(" "),
+  );
+}
+
+/** The invoice QuickBooks created for both work orders, recorded on both; never sent again. */
+async function recordLinkedInvoice(
+  supabase: Supabase,
+  woId: string,
+  c: CombinedInvoice,
+  owner: string,
+  linked: string,
+  pending: { id: string; number: string | null },
+  claimedSnapshot: string | null,
+  currentSnapshot: string | null,
+): Promise<ActionState> {
+  const changed = claimedSnapshot !== null && claimedSnapshot !== currentSnapshot;
+  let number = pending.number;
+  let amounts: QbInvoiceAmounts = { taxTotal: null, total: null };
+  try {
+    // Best effort: without QuickBooks the invoice is still recorded, without the amounts.
+    const read = await getInvoice(await qboApi(), pending.id);
+    amounts = qbInvoiceAmounts(read);
+    number ??= read?.DocNumber ?? null;
+  } catch {
+    // keep the number known so far
+  }
+  const name = number ?? `id ${pending.id}`;
+  const { error } = await supabase.rpc("cds_mark_invoiced_linked", {
+    p_work_order: owner,
+    p_linked: linked,
+    p_qb_invoice_id: pending.id,
+    p_qb_invoice_number: number,
+    p_qb_tax_total: amounts.taxTotal,
+    p_qb_total: amounts.total,
+  });
+  if (error) {
+    await Promise.all(c.orders.map((o) => logSync(supabase, o.id, "error", pending.id, `Invoice created in QuickBooks, portal not updated: ${error.message}`)));
+    return {
+      error: `QuickBooks invoice ${name} exists, but ${bothLabels(c)} could not be updated (${error.message}). Click again to finish; no second invoice is created.`,
+    };
+  }
+  return doneLinked(
+    c,
+    woId,
+    [`QuickBooks invoice ${name} (created earlier) is now recorded on ${bothLabels(c)}.`, linkedOutcome(c), ...(changed ? [changedSinceNote(name)] : [])].join(" "),
+  );
 }
 
 // ---------------------------------------------------------------- QuickBooks shop bill

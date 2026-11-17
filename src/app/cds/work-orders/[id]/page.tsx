@@ -58,7 +58,8 @@ import { internalNotesHistory, NOTE_MAX_LENGTH, ORDER_CREATED_NOTE_ID, type Note
 import { NotesList } from "@/components/WorkOrderNotes";
 import { AttachmentForm } from "@/components/shop/AttachmentForm";
 import { cdsCanDelete, uploaderLabel } from "@/lib/attachments";
-import { loadInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
+import { loadInvoice, type CombinedInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
+import { combinedTaxView } from "@/lib/qbo/invoice-combined";
 import { billState, type BillState } from "@/lib/qbo/bill";
 import { loadBillInputs } from "@/lib/qbo/bill-input";
 import { ShopBillPanel } from "@/components/cds-wo/ShopBillPanel";
@@ -365,6 +366,66 @@ function approvedLabel(internal: Internal | null, currentName: string | null): s
   return `${name}${removed}, ${when}`;
 }
 
+/** "WO-104101 and WO-104102" */
+function combinedLabels(c: CombinedInvoice): string {
+  return c.orders.map((o) => woLabel(o.woNumber)).join(" and ");
+}
+
+/** Both WO numbers, the other one as a link. */
+function bothLinks(c: CombinedInvoice, woId: string) {
+  return c.orders.map((o, i) => (
+    <span key={o.id}>
+      {i > 0 && " and "}
+      {o.id === woId ? (
+        <b>{woLabel(o.woNumber)}</b>
+      ) : (
+        <Link className="link" href={`/cds/work-orders/${o.id}`}>
+          {woLabel(o.woNumber)}
+        </Link>
+      )}
+    </span>
+  ));
+}
+
+/**
+ * The two linked work orders on one customer invoice (@/lib/qbo/invoice-combined), with
+ * their status and customer lines; the first one gives the invoice header. CDS only.
+ */
+function CombinedOrders({ combined, woId }: { combined: CombinedInvoice; woId: string }) {
+  return (
+    <div className="notice" role="note" style={{ marginBottom: 10 }}>
+      <b>One invoice for both linked work orders.</b>{" "}
+      <span className="small">
+        Customer, ship-to, PO and Class come from {woLabel(combined.orders[0].woNumber)}; each shop still gets its own bill.
+      </span>
+      {combined.orders.map((o) => (
+        <div key={o.id} style={{ marginTop: 8 }}>
+          {o.id === woId ? (
+            <b>{woLabel(o.woNumber)} (this work order)</b>
+          ) : (
+            <Link className="link" href={`/cds/work-orders/${o.id}`}>
+              {woLabel(o.woNumber)}
+            </Link>
+          )}{" "}
+          <StatusBadge status={o.status as WoStatus} />
+          {o.lines.length ? (
+            <ul className="small" style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              {o.lines.map((l, i) => (
+                <li key={i}>
+                  {l.qty} x {l.sku} {l.name}
+                  {l.description ? ` - ${l.description}` : ""}: {l.amount === null ? "no price yet" : money(l.amount)}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="small">No lines yet.</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * Customer invoice in QuickBooks: CDS creates it at any status but cancelled (@/lib/invoice-lock),
  * and it shows once recorded, also while the shop is still working on the order.
@@ -382,6 +443,7 @@ function InvoicePanel({
   invoice: InvoiceState | null;
   loadError: boolean;
 }) {
+  const combined = invoice?.combined ?? null;
   if (status === "invoiced" || invoice?.qbInvoiceId) {
     return (
       <section className="section panel-invoice">
@@ -390,10 +452,14 @@ function InvoicePanel({
           <p>
             QuickBooks invoice <b>{invoice.qbInvoiceNumber ?? `id ${invoice.qbInvoiceId}`}</b>
             {invoice.invoicedAt ? <span className="small"> created {dateTime(invoice.invoicedAt)}</span> : null}
+            {combined && combined.orders.every((o) => o.qbInvoiceId === invoice.qbInvoiceId) && (
+              <> covers both linked work orders: {bothLinks(combined, woId)}.</>
+            )}
           </p>
         ) : (
           <p className="small">No QuickBooks invoice is recorded for this order.</p>
         )}
+        {combined && <CombinedOrders combined={combined} woId={woId} />}
         {status !== "invoiced" && (
           <p className="small">
             The shop has not completed the job yet. The order moves to Invoiced when it does. Lines, prices, tax and the
@@ -413,8 +479,8 @@ function InvoicePanel({
       <section className="section panel-invoice">
         <h3>{heading}</h3>
         <div className="notice warning" role="status">
-          QuickBooks invoice <b>{name}</b> was created in QuickBooks {dateTime(pending.at)}, but it is not recorded on the work
-          order. Record it below; no second invoice is created.
+          QuickBooks invoice <b>{name}</b> was created in QuickBooks {dateTime(pending.at)}, but it is not recorded on{" "}
+          {combined ? <>{bothLinks(combined, woId)}</> : "the work order"}. Record it below; no second invoice is created.
         </div>
         <ActionForm
           action={createQuickBooksInvoice.bind(null, woId)}
@@ -443,13 +509,25 @@ function InvoicePanel({
         </div>
       ) : (
         <>
-          <p className="small">
-            {done ? "Work is complete. " : ""}This creates the customer invoice in QuickBooks
-            {qbo?.companyName ? ` (${qbo.companyName})` : ""}; QuickBooks calculates the sales tax from the ship-to address.
-            {done
-              ? ""
-              : " The shop has not completed the job yet: the order keeps its status and moves to Invoiced when the shop completes it. Lines, prices, tax and the customer are then locked."}
-          </p>
+          {combined ? (
+            <>
+              <p className="small">
+                This creates ONE customer invoice in QuickBooks{qbo?.companyName ? ` (${qbo.companyName})` : ""} for{" "}
+                {bothLinks(combined, woId)}, with the lines of both; QuickBooks calculates the sales tax from the ship-to address.
+                A work order whose shop has not completed the job keeps its status and moves to Invoiced when it does. Lines,
+                prices, tax and the customer of both are then locked.
+              </p>
+              <CombinedOrders combined={combined} woId={woId} />
+            </>
+          ) : (
+            <p className="small">
+              {done ? "Work is complete. " : ""}This creates the customer invoice in QuickBooks
+              {qbo?.companyName ? ` (${qbo.companyName})` : ""}; QuickBooks calculates the sales tax from the ship-to address.
+              {done
+                ? ""
+                : " The shop has not completed the job yet: the order keeps its status and moves to Invoiced when the shop completes it. Lines, prices, tax and the customer are then locked."}
+            </p>
+          )}
           {problems.length > 0 && (
             <div className="notice warning" role="status">
               <b>Fix these before invoicing:</b>
@@ -475,14 +553,16 @@ function InvoicePanel({
           )}
           <ActionForm
             action={createQuickBooksInvoice.bind(null, woId)}
-            submitLabel="Create QuickBooks invoice"
+            submitLabel={combined ? `Create QuickBooks invoice for ${combinedLabels(combined)}` : "Create QuickBooks invoice"}
             pendingLabel="Creating invoice..."
             buttonClass="btn btn-blue"
             disabled={problems.length > 0 || loadError}
             confirmText={
-              done
-                ? "Create the customer invoice in QuickBooks and mark this work order Invoiced?"
-                : "Create the customer invoice in QuickBooks now? Lines, prices, tax and the customer are locked from then on, and the order moves to Invoiced when the shop completes it."
+              combined
+                ? `Create one customer invoice in QuickBooks for ${combinedLabels(combined)}? Lines, prices, tax and the customer of both are locked from then on, and the two work orders cannot be unlinked.`
+                : done
+                  ? "Create the customer invoice in QuickBooks and mark this work order Invoiced?"
+                  : "Create the customer invoice in QuickBooks now? Lines, prices, tax and the customer are locked from then on, and the order moves to Invoiced when the shop completes it."
             }
           />
         </>
@@ -788,7 +868,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   // the order has a QuickBooks invoice the box shows its tax and total, before that the
   // portal's figure as an estimate (@/lib/tax invoiceTaxView).
   const amount = (v: number | string | null | undefined) => (v === null || v === undefined ? null : Number(v));
-  const taxView = invoiceTaxView({
+  // A QuickBooks invoice that covers both linked work orders: its tax and total are for both.
+  const taxView = combinedTaxView(invoiceTaxView({
     qbInvoiceId: internal?.qb_invoice_id ?? null,
     qbInvoiceNumber: internal?.qb_invoice_number ?? null,
     qbTaxTotal: amount(internal?.qb_tax_total),
@@ -797,7 +878,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     rate,
     jurisdiction: internal?.tax_jurisdiction ?? null,
     estimate,
-  });
+  }), Boolean(internal?.qb_invoice_id), invoice?.combined?.orders.every((o) => o.qbInvoiceId === internal?.qb_invoice_id) ? invoice.combined.orders.map((o) => o.woNumber) : null);
   const compName = new Map(components.map((c) => [c.id, `${c.component_type} #${c.seq}`]));
   const locationDefault = location?.default_affiliate_id ?? null;
   const defaultShop = dispatchShopDefault({ status: wo.status, affiliateId: wo.affiliate_id, locationDefault });
@@ -992,8 +1073,10 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   <summary className="small link">{linksTo ? "Change link" : "Link to another work order"}</summary>
                   <p className="small" style={{ margin: "6px 0" }}>
                     For one customer order split across shops: create the second work order as usual, then link it here. Both
-                    pages show the link (CDS only; shops never see it). Each work order keeps its own invoice. Leave the box empty
-                    to remove this order&apos;s link.
+                    pages show the link (CDS only; shops never see it). The two get ONE customer invoice in QuickBooks with the
+                    lines of both; each shop still gets its own bill. A work order that already has its invoice cannot be linked,
+                    and the link cannot be removed once the invoice is created. Leave the box empty to remove this order&apos;s
+                    link.
                   </p>
                   <ActionForm action={linkWorkOrder.bind(null, wo.id)} submitLabel="Save link" buttonClass="btn btn-secondary" inline>
                     <div className="field" style={{ flex: 1, minWidth: 160 }}>

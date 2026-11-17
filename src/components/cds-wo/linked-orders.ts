@@ -1,6 +1,7 @@
 /**
- * Linked work orders, light version (Sarah, CDS, 2026-11-17): CDS links a work order to
- * another one (work_order_internal.linked_work_order_id, CDS only); both pages show the link.
+ * Linked work orders (Sarah, CDS, 2026-11-17): CDS links a work order to another one
+ * (public.work_order_links, CDS only); both pages show the link, and the two get one
+ * customer invoice in QuickBooks (@/lib/qbo/invoice-combined).
  * Safe on server and client.
  */
 

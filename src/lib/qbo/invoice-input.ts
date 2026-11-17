@@ -18,6 +18,14 @@ import {
   type MeasurementMappings,
   type TaxClass,
 } from "./invoice";
+import {
+  buildCombinedInvoicePayload,
+  combinedUnit,
+  invoiceGroup,
+  tooManyLinkedMessage,
+  type InvoicePart,
+  type LinkRow,
+} from "./invoice-combined";
 import { itemDescriptionKey, type InvoiceTarget } from "./invoice-qbo";
 import { locationSiteNumber } from "./sub-customer";
 import { pendingQbInvoice, type InvoiceSyncRow, type PendingQbInvoice } from "./pending";
@@ -37,13 +45,142 @@ export type InvoiceState = {
   /** What the invoice-time QuickBooks lookups need (sub-customer, custom fields). */
   target: InvoiceTarget;
   result: BuildResult;
+  /**
+   * Set when the work order is linked to another one (public.work_order_links): ONE invoice
+   * covers both (./invoice-combined), result is that invoice, and target, affiliateId and
+   * pendingQb are the first work order's. Null for a work order on its own.
+   */
+  combined?: CombinedInvoice | null;
+};
+
+/** One of the two work orders of a combined invoice, as the invoice panel lists it. */
+export type CombinedOrder = {
+  id: string;
+  woNumber: number;
+  status: string;
+  qbInvoiceId: string | null;
+  qbInvoiceNumber: string | null;
+  lines: { sku: string; name: string; description: string | null; qty: number; amount: number | null }[];
+};
+
+export type CombinedInvoice = {
+  /** The first work order (lowest WO number): its claim and request id are the invoice's. */
+  ownerId: string;
+  /** The other work order than the one loaded. */
+  linkedId: string;
+  /** Both work orders, the first one first. */
+  orders: CombinedOrder[];
+};
+
+/** Everything one work order contributes to its invoice, read as the signed-in CDS user. */
+type LoadedPart = {
+  part: InvoicePart;
+  qbInvoiceNumber: string | null;
+  invoicedAt: string | null;
+  affiliateId: string | null;
+  syncRows: InvoiceSyncRow[];
+  target: InvoiceTarget;
 };
 
 /**
- * Reads everything the invoice needs as the signed-in CDS user (RLS applies) and builds it.
- * Null when the work order does not exist or is not visible.
+ * Reads everything the invoice needs as the signed-in CDS user (RLS applies) and builds it:
+ * the invoice of this work order, or of it and the work order linked to it (one invoice for
+ * both, ./invoice-combined). Null when the work order does not exist or is not visible.
  */
 export async function loadInvoice(supabase: Supabase, woId: string): Promise<InvoiceState | null> {
+  const own = await loadPart(supabase, woId);
+  if (!own) return null;
+  const group = invoiceGroup(woId, await loadLinks(supabase, woId));
+  const state = (over: Partial<InvoiceState>): InvoiceState => ({
+    status: own.part.status,
+    qbInvoiceId: own.part.qbInvoiceId,
+    qbInvoiceNumber: own.qbInvoiceNumber,
+    invoicedAt: own.invoicedAt,
+    affiliateId: own.affiliateId,
+    pendingQb: own.part.qbInvoiceId ? null : pendingQbInvoice(own.syncRows),
+    target: own.target,
+    result: buildPart(own.part),
+    combined: null,
+    ...over,
+  });
+  if (group.kind === "solo") return state({});
+  if (group.kind === "too_many") {
+    return state({ pendingQb: null, result: { ok: false, problems: [tooManyLinkedMessage(own.part.workOrder.woNumber)], warnings: [] } });
+  }
+
+  const other = await loadPart(supabase, group.linkedId);
+  if (!other) throw new Error("Could not read the linked work order.");
+  // The first work order (lowest WO number) gives the header, as in ./invoice-combined.
+  const [first, second] = own.part.workOrder.woNumber <= other.part.workOrder.woNumber ? [own, other] : [other, own];
+  const unit = combinedUnit([own.part, other.part]);
+  return state({
+    affiliateId: first.affiliateId,
+    // An invoice QuickBooks created for both and not recorded yet is on the first work order's claim.
+    pendingQb: own.part.qbInvoiceId ? null : await pendingCombined(supabase, first, second.part.workOrder.id, own.syncRows),
+    target: { ...first.target, unitNumber: unit },
+    result: buildCombinedInvoicePayload([own.part, other.part]),
+    combined: {
+      ownerId: first.part.workOrder.id,
+      linkedId: other.part.workOrder.id,
+      orders: [first, second].map((p) => ({
+        id: p.part.workOrder.id,
+        woNumber: p.part.workOrder.woNumber,
+        status: p.part.status,
+        qbInvoiceId: p.part.qbInvoiceId,
+        qbInvoiceNumber: p.qbInvoiceNumber,
+        lines: p.part.lines.map((l) => ({
+          sku: l.sku,
+          name: l.name,
+          description: l.description ?? null,
+          qty: l.qty,
+          amount: l.customerUnitPrice === null ? null : Math.round(l.qty * l.customerUnitPrice * 100) / 100,
+        })),
+      })),
+    },
+  });
+}
+
+function buildPart(p: InvoicePart): BuildResult {
+  return buildInvoicePayload(p.workOrder, p.lines, p.customerMap, p.itemMap, p.aliases, p.location, p.components, p.measurementMap, p.refs);
+}
+
+/**
+ * The link rows that touch the work order or the ones linked to it: enough to know whether
+ * it is on its own, one of a pair, or one of more than two (./invoice-combined invoiceGroup).
+ */
+async function loadLinks(supabase: Supabase, woId: string): Promise<LinkRow[]> {
+  const cols = "work_order_id, linked_work_order_id";
+  const first = await supabase.from("work_order_links").select(cols).or(`work_order_id.eq.${woId},linked_work_order_id.eq.${woId}`);
+  if (first.error) throw new Error(`Could not read the linked work orders: ${first.error.message}`);
+  const rows = (first.data ?? []) as LinkRow[];
+  const others = [...new Set(rows.flatMap((r) => [r.work_order_id, r.linked_work_order_id]))].filter((x) => x !== woId);
+  if (!others.length) return rows;
+  const list = others.join(",");
+  const second = await supabase.from("work_order_links").select(cols).or(`work_order_id.in.(${list}),linked_work_order_id.in.(${list})`);
+  if (second.error) throw new Error(`Could not read the linked work orders: ${second.error.message}`);
+  return [...rows, ...((second.data ?? []) as LinkRow[])];
+}
+
+/**
+ * The invoice QuickBooks created for both work orders that is not recorded yet: the first
+ * work order's claim says created for this pair (20261119080000_combined_invoice.sql). Its
+ * number comes from the sync row logged when it was created, when there is one.
+ */
+async function pendingCombined(supabase: Supabase, first: LoadedPart, linkedId: string, syncRows: InvoiceSyncRow[]): Promise<PendingQbInvoice | null> {
+  const { data, error } = await supabase
+    .from("qbo_invoice_claims")
+    .select("state, qb_invoice_id, linked_work_order_id, updated_at")
+    .eq("work_order_id", first.part.workOrder.id)
+    .maybeSingle();
+  if (error) throw new Error(`Could not read the invoice claim: ${error.message}`);
+  const c = data as { state: string; qb_invoice_id: string | null; linked_work_order_id: string | null; updated_at: string } | null;
+  if (!c || c.state !== "created" || !c.qb_invoice_id || c.linked_work_order_id !== linkedId) return null;
+  const logged = pendingQbInvoice([...syncRows, ...first.syncRows].filter((r) => r.external_id === c.qb_invoice_id));
+  return { id: c.qb_invoice_id, number: logged?.number ?? null, at: logged?.at ?? c.updated_at };
+}
+
+/** One work order's invoice inputs. Null when it does not exist or is not visible. */
+async function loadPart(supabase: Supabase, woId: string): Promise<LoadedPart | null> {
   const { data: woData, error } = await supabase
     .from("work_orders")
     .select(
@@ -248,12 +385,25 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
   });
 
   return {
-    status: wo.status,
-    qbInvoiceId: internal?.qb_invoice_id ?? null,
+    part: {
+      workOrder,
+      status: wo.status,
+      qbInvoiceId: internal?.qb_invoice_id ?? null,
+      customerId: wo.customer_id,
+      locationId: loc?.id ?? null,
+      lines,
+      customerMap,
+      itemMap,
+      aliases,
+      location,
+      components,
+      measurementMap,
+      refs,
+    },
     qbInvoiceNumber: internal?.qb_invoice_number ?? null,
     invoicedAt: internal?.invoiced_at ?? null,
     affiliateId: wo.affiliate_id,
-    pendingQb: internal?.qb_invoice_id ? null : pendingQbInvoice((syncRes.data ?? []) as InvoiceSyncRow[]),
+    syncRows: (syncRes.data ?? []) as InvoiceSyncRow[],
     target: {
       locationId: loc?.id ?? null,
       siteNumber: loc ? locationSiteNumber(loc.location_number, loc.code) : null,
@@ -262,7 +412,6 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
       poNumber: wo.po_number,
       unitNumber: wo.unit_number,
     },
-    result: buildInvoicePayload(workOrder, lines, customerMap, itemMap, aliases, location, components, measurementMap, refs),
   };
 }
 

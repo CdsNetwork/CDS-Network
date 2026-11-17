@@ -32,13 +32,28 @@ type Rpc = { rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<{ d
  *     else the one passed in;
  *   * "created": QuickBooks created invoice qbInvoiceId for this order and it is not recorded
  *     yet; no claim is taken, the invoice is to be recorded.
+ * ownerId is the order the claim is on (cds_finish_qbo_invoice is called with it): this order,
+ * or for two linked work orders the first one (20261119080000_combined_invoice.sql).
+ *
+ * linkedId: the other work order the invoice was built for (one invoice for two linked work
+ * orders), left out for an order on its own; the database refuses the claim when the links
+ * say otherwise.
  */
 export type InvoiceClaim =
-  | { state: "sending"; claimId: string; requestId: string; snapshot: string | null }
-  | { state: "created"; qbInvoiceId: string; snapshot: string | null };
+  | { state: "sending"; claimId: string; requestId: string; snapshot: string | null; ownerId: string }
+  | { state: "created"; qbInvoiceId: string; snapshot: string | null; ownerId: string };
 
-export async function claimInvoice(db: Rpc, woId: string, snapshot: string | null): Promise<{ ok: true; claim: InvoiceClaim } | { ok: false; error: string }> {
-  const { data, error } = await db.rpc("cds_claim_qbo_invoice", { p_work_order: woId, p_snapshot: snapshot });
+export async function claimInvoice(
+  db: Rpc,
+  woId: string,
+  snapshot: string | null,
+  linkedId?: string,
+): Promise<{ ok: true; claim: InvoiceClaim } | { ok: false; error: string }> {
+  const { data, error } = await db.rpc("cds_claim_qbo_invoice", {
+    p_work_order: woId,
+    p_snapshot: snapshot,
+    ...(linkedId ? { p_linked: linkedId } : {}),
+  });
   if (error) {
     // Raised by the function: written for users.
     if (error.code === "P0001" || error.code === "P0002") return { ok: false, error: error.message };
@@ -46,11 +61,12 @@ export async function claimInvoice(db: Rpc, woId: string, snapshot: string | nul
   }
   const d = (data ?? {}) as Record<string, unknown>;
   const snap = typeof d.snapshot === "string" ? d.snapshot : null;
+  const ownerId = typeof d.work_order_id === "string" ? d.work_order_id : woId;
   if (d.state === "created" && typeof d.qb_invoice_id === "string") {
-    return { ok: true, claim: { state: "created", qbInvoiceId: d.qb_invoice_id, snapshot: snap } };
+    return { ok: true, claim: { state: "created", qbInvoiceId: d.qb_invoice_id, snapshot: snap, ownerId } };
   }
   if (d.state === "sending" && typeof d.claim_id === "string" && typeof d.request_id === "string") {
-    return { ok: true, claim: { state: "sending", claimId: d.claim_id, requestId: d.request_id, snapshot: snap } };
+    return { ok: true, claim: { state: "sending", claimId: d.claim_id, requestId: d.request_id, snapshot: snap, ownerId } };
   }
   return { ok: false, error: "The invoice could not be started. Try again." };
 }

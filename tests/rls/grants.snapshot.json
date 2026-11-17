@@ -13,7 +13,7 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
-  "function public.cds_claim_qbo_invoice(uuid,text)": {
+  "function public.cds_claim_qbo_invoice(uuid,text,uuid)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
@@ -46,6 +46,10 @@
     "service_role": "EXECUTE"
   },
   "function public.cds_mark_invoiced(uuid,text,text,numeric,numeric)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.cds_mark_invoiced_linked(uuid,uuid,text,text,numeric,numeric)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
