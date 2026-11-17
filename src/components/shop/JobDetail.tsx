@@ -9,6 +9,7 @@ import {
   SHIP_STATUS_LABEL,
   SHIPMENT_STATUS_LABEL,
   date,
+  measurementText,
   money,
   pickupWindowLabel,
   woLabel,
@@ -25,6 +26,7 @@ import {
   registerUpload,
   removePart,
   requestAuthorization,
+  requestInvoiceCorrection,
   saveComponent,
   setProgress,
   setShipStatus,
@@ -41,6 +43,7 @@ import { queueHref } from "./JobQueue";
 import { TestBadge } from "@/components/shipping/TestBadge";
 import { NotesList } from "@/components/WorkOrderNotes";
 import { NOTE_MAX_LENGTH } from "@/lib/notes";
+import { canRequestCorrection, CORRECTION_REASON_MAX } from "@/lib/invoice-correction";
 import styles from "./shop.module.css";
 import { EDITABLE_STATUSES, componentLabel, doneNotice, type ComponentRow, type DoneKey, type LineRow } from "./types";
 
@@ -114,6 +117,9 @@ export function JobDetail({
         </h2>
         <div>
           Unit {job.unit_number ?? "-"} • PO {job.po_number || "-"}
+        </div>
+        <div className="small" style={{ marginTop: 4 }}>
+          Received {date(data.receivedAt)} • Completed {date(job.completed_at)}
         </div>
         {job.site_address && <div className="small" style={{ marginTop: 4 }}>{job.site_address}</div>}
         <div className="row" style={{ marginTop: 10 }}>
@@ -449,8 +455,9 @@ export function JobDetail({
           <section className="section">
             <h3>Components Received</h3>
             <p className="small">
-              Add every DPF, DOC, SCR or EGR actually received, one item per component. DPF and DOC need pressure and weight
-              before and after; EGR coolers are Pass / Condemned only. Every required field must be filled in before completion.
+              Add every DPF, DOC, SCR or EGR actually received, one item per component. A DPF needs pressure and weight before
+              and after; DOC and SCR measurements are optional; EGR coolers are Pass / Condemned only. Every required field must
+              be filled in before completion.
             </p>
             {editable && (
               <ActionForm
@@ -539,6 +546,24 @@ export function JobDetail({
                   <strong>{date(job.completed_at)}</strong>
                 </div>
                 <p className="small" style={{ marginBottom: 0 }}>This job is read-only.</p>
+                {canRequestCorrection(job.status) && (
+                  <details style={{ marginTop: 10 }}>
+                    <summary className="link">Request invoice correction</summary>
+                    <ActionForm
+                      action={requestInvoiceCorrection.bind(null, id)}
+                      submitLabel="Send to CDS"
+                      pendingLabel="Sending..."
+                      submitClass="btn btn-secondary"
+                      successText="Sent. CDS sees it in the notes."
+                      resetOnSuccess
+                    >
+                      <div className="field" style={{ marginTop: 8 }}>
+                        <label htmlFor="correction-reason">What needs correcting?</label>
+                        <textarea id="correction-reason" name="reason" rows={2} required maxLength={CORRECTION_REASON_MAX} />
+                      </div>
+                    </ActionForm>
+                  </details>
+                )}
               </div>
             )}
             <div className="bottomTotal">
@@ -569,12 +594,13 @@ function ComponentSummary({ component: c }: { component: ComponentRow }) {
       c.weight_before_g !== null && c.weight_after_g !== null
         ? `${Math.round((c.weight_before_g - c.weight_after_g) * 10) / 10} g`
         : "-";
+    // Blank DOC and SCR readings show N/A (optional for them).
     rows.push(
-      ["Differential Pressure: Before", c.dp_before?.toString() ?? "-"],
-      ["Differential Pressure: After", c.dp_after?.toString() ?? "-"],
-      ["Weight Before (g)", c.weight_before_g?.toString() ?? "-"],
-      ["Weight After (g)", c.weight_after_g?.toString() ?? "-"],
-      ["Weight Removed", removed],
+      ["Differential Pressure: Before", measurementText(c.component_type, c.dp_before)],
+      ["Differential Pressure: After", measurementText(c.component_type, c.dp_after)],
+      ["Weight Before (g)", measurementText(c.component_type, c.weight_before_g)],
+      ["Weight After (g)", measurementText(c.component_type, c.weight_after_g)],
+      ["Weight Removed", removed === "-" ? measurementText(c.component_type, null) : removed],
     );
   }
   rows.push(["Result", c.result ? (COMPONENT_RESULT_LABEL[c.result] ?? c.result) : "-"]);

@@ -209,8 +209,10 @@ describe("labels written by CDS", () => {
 
 describe("what a shop sees", () => {
   it("its own labels without any cost, and none of the CDS-only tables", async () => {
+    // Only the label of the leg back to the customer (20261119020000_shop_labels_outbound_only.sql).
     const labels = await must(shopA.client.from("shipment_labels").select("*").eq("work_order_id", f.wo));
-    expect(labels).toHaveLength(2);
+    expect(labels).toHaveLength(1);
+    expect((labels as { shipment_id: string }[])[0].shipment_id).toBe(f.realShipment);
     for (const l of labels as Record<string, unknown>[]) {
       for (const key of Object.keys(l)) expect(key).not.toMatch(/cost|rate|amount|total|price/i);
     }

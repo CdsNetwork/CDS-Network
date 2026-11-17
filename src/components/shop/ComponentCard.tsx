@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ActionButton, ActionForm } from "./ActionForm";
-import { componentLabel, measurementsRequired, type ActionState, type ComponentRow } from "./types";
+import { componentLabel, condemnedPhotoRequired, measurementsRequired, type ActionState, type ComponentRow } from "./types";
 
 const fmt = (v: number | null) => (v === null ? "" : String(v));
 
@@ -72,6 +72,8 @@ export function ComponentCard({
       ? `${Math.round((Number(wBefore) - Number(wAfter)) * 10) / 10} g`
       : "";
   const needsReason = result === "condemned";
+  // A condemned EGR cooler needs no photo (Sarah, CDS, 2026-11-17).
+  const needsPhoto = condemnedPhotoRequired(c.component_type, result);
   const key = (f: string) => `c-${c.id}-${f}`;
 
   return (
@@ -189,12 +191,18 @@ export function ComponentCard({
               </label>
               <textarea id={key("note")} name="result_note" rows={2} required maxLength={2000} defaultValue={c.result_note ?? ""} />
             </div>
-            <p className="small" style={{ color: "inherit", margin: 0 }}>
-              <strong>Damage / Condition Photo *</strong>{" "}
-              {photoCount > 0
-                ? `${photoCount} photo${photoCount === 1 ? "" : "s"} linked to ${componentLabel(c)}.`
-                : `At least one photo is required for condemned components. Add it under Photos & Attachments with "Linked component" set to ${componentLabel(c)}.`}
-            </p>
+            {needsPhoto ? (
+              <p className="small" style={{ color: "inherit", margin: 0 }}>
+                <strong>Damage / Condition Photo *</strong>{" "}
+                {photoCount > 0
+                  ? `${photoCount} photo${photoCount === 1 ? "" : "s"} linked to ${componentLabel(c)}.`
+                  : `At least one photo is required for condemned components. Add it under Photos & Attachments with "Linked component" set to ${componentLabel(c)}.`}
+              </p>
+            ) : (
+              <p className="small" style={{ color: "inherit", margin: 0 }}>
+                No photo needed for a condemned EGR cooler.
+              </p>
+            )}
           </div>
         )}
       </ActionForm>

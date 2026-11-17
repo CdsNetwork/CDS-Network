@@ -10,6 +10,7 @@ import { packageForShipment, type ShipmentPackage } from "./package";
 import {
   buildLabelRequest,
   buildRatesRequest,
+  labelReferences,
   labelTrackingUrl,
   mapLabel,
   mapRates,
@@ -77,6 +78,8 @@ type Context = {
   shipmentId: string;
   workOrderId: string;
   woNumber: number;
+  /** The customer's PO, printed as the first label reference when there is one. */
+  poNumber: string | null;
   direction: string;
   pkg: ShipmentPackage;
   from: { address: ShipAddress; summary: string };
@@ -95,7 +98,7 @@ async function loadContext(db: Db, shipmentId: string): Promise<{ ok: true; ctx:
   const { data: sh, error } = await db
     .from("shipments")
     .select(
-      "id, work_order_id, direction, weight_lb, length_in, width_in, height_in, work_orders(id, wo_number, status, location_label, location_id, affiliate_id, customers(name), customer_locations(default_affiliate_id))",
+      "id, work_order_id, direction, weight_lb, length_in, width_in, height_in, work_orders(id, wo_number, po_number, status, location_label, location_id, affiliate_id, customers(name), customer_locations(default_affiliate_id))",
     )
     .eq("id", shipmentId)
     .maybeSingle();
@@ -105,6 +108,7 @@ async function loadContext(db: Db, shipmentId: string): Promise<{ ok: true; ctx:
     sh.work_orders as One<{
       id: string;
       wo_number: number;
+      po_number: string | null;
       status: string;
       location_label: string;
       location_id: string | null;
@@ -208,6 +212,7 @@ async function loadContext(db: Db, shipmentId: string): Promise<{ ok: true; ctx:
       shipmentId,
       workOrderId: wo.id,
       woNumber: wo.wo_number,
+      poNumber: wo.po_number ?? null,
       direction: sh.direction,
       pkg,
       from: { address: from.address, summary: summary(from.address) },
@@ -291,7 +296,15 @@ export async function ratesForShipment(db: Db, shipmentId: string): Promise<Rate
   }
 }
 
-export type LabelChoice = { carrierId: string; serviceCode: string; rateId: string | null; quotedTotal: number | null; deliveryDays: number | null };
+export type LabelChoice = {
+  carrierId: string;
+  serviceCode: string;
+  rateId: string | null;
+  quotedTotal: number | null;
+  deliveryDays: number | null;
+  /** Optional extra reference CDS typed on the create-label form (printed after PO and WO). */
+  reference?: string | null;
+};
 
 export type LabelResult = { ok: true; message: string } | { ok: false; error: string };
 
@@ -341,7 +354,8 @@ async function buyAndRecordLabel(
       carrierId: carrier.shipstation_carrier_id,
       serviceCode: choice.serviceCode,
       testLabel: config.testLabels,
-      reference: `WO ${ctx.woNumber}`,
+      // PO first when the order has one, then WO <n>, then CDS's own reference.
+      references: labelReferences({ woNumber: ctx.woNumber, po: ctx.poNumber, extra: choice.reference }),
       // One id per claim: a retry of the same purchase carries the same id.
       externalShipmentId: `${shipmentId}-${claimId}`,
     });

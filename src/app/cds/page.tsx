@@ -22,10 +22,12 @@ import {
   parsePeriod,
   periodRange,
   PERIODS,
+  SHIPPED,
   TO_INVOICE,
   type Financials,
 } from "@/components/cds-wo/woFilters";
 import { requireCds } from "@/lib/auth";
+import { correctionRequested, INVOICE_CORRECTION_PREFIX } from "@/lib/invoice-correction";
 import { deletedMessage } from "@/lib/work-order-delete";
 import { invoiceLocked } from "@/lib/invoice-lock";
 import {
@@ -64,11 +66,14 @@ type ListInternal = {
 
 type Count = { count: number }[] | null;
 
+type ShopActivity = { is_new: boolean | null; cds_viewed_at: string | null };
+
 type ListRow = WoRow & {
   created_at: string;
   fulfillment: string;
   work_order_internal: ListInternal | ListInternal[] | null;
-  work_order_shop_activity: { is_new: boolean | null } | { is_new: boolean | null }[] | null;
+  work_order_shop_activity: ShopActivity | ShopActivity[] | null;
+  correction_notes: { body: string; created_at: string; profiles: { kind: string } | { kind: string }[] | null }[] | null;
   work_order_components: { result: string | null }[] | null;
   work_order_questions: { question_pending: boolean | null; note: string | null } | { question_pending: boolean | null; note: string | null }[] | null;
   work_order_notes: Count;
@@ -86,7 +91,7 @@ const WO_COLUMNS =
  * changes the status, internal status and shipment statuses from the table and reads, adds
  * and edits notes in a popover (loaded when it opens; the table only counts them).
  */
-const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at), internal_status, qb_invoice_number, qb_invoice_id), work_order_shop_activity(is_new), work_order_components(result), work_order_questions(question_pending, note), work_order_notes(count), work_order_internal_notes(count), ${LEG_COLUMNS}`;
+const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at), internal_status, qb_invoice_number, qb_invoice_id), work_order_shop_activity(is_new, cds_viewed_at), correction_notes:work_order_notes(body, created_at, profiles(kind)), work_order_components(result), work_order_questions(question_pending, note), work_order_notes(count), work_order_internal_notes(count), ${LEG_COLUMNS}`;
 
 const embeddedCount = (c: Count) => c?.[0]?.count ?? 0;
 
@@ -118,7 +123,10 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
 
   // Work order table query (same filters and order as the CSV export): most pressing status
   // first, newest first within a status.
-  const list = (await filteredWorkOrders(supabase, filters, LIST_COLUMNS)).query.limit(200);
+  // correction_notes: only the shop's invoice correction requests (Correction requested mark).
+  const list = (await filteredWorkOrders(supabase, filters, LIST_COLUMNS)).query
+    .like("correction_notes.body", `${INVOICE_CORRECTION_PREFIX}%`)
+    .limit(200);
 
   const [listRes, inProgress, toInvoice, pendingReview, invoiced, shopsRes] = await Promise.all([
     list,
@@ -244,6 +252,9 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
               <optgroup label="Component result">
                 <option value={CONDEMNED}>Condemned</option>
               </optgroup>
+              <optgroup label="Shipping">
+                <option value={SHIPPED}>Shipped</option>
+              </optgroup>
             </select>
             <select name="shop" defaultValue={shopParam} style={{ maxWidth: 240 }} aria-label="Shop">
               <option value="">All shops</option>
@@ -315,6 +326,10 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   const shop = one(r.affiliates)?.display_name ?? null;
                   const inHouse = Boolean(one(r.affiliates)?.is_in_house);
                   const fromShopNew = isNewFromShop(r.work_order_shop_activity);
+                  const correction = correctionRequested(
+                    (r.correction_notes ?? []).map((n) => ({ body: n.body, created_at: n.created_at, author_kind: one(n.profiles)?.kind ?? null })),
+                    one(r.work_order_shop_activity)?.cds_viewed_at ?? null,
+                  );
                   const failed = failedMark(r.work_order_components);
                   const questionOpen = isQuestionPending(r.work_order_questions);
                   const internal = one(r.work_order_internal);
@@ -333,6 +348,13 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                           <div>
                             <span className="badge pending" title="The shop added a note, a file or a condemned part since CDS last opened this order">
                               New from shop
+                            </span>
+                          </div>
+                        )}
+                        {correction && (
+                          <div>
+                            <span className="badge rejected" title="The shop asked CDS to correct the invoice (see the notes)">
+                              Correction requested
                             </span>
                           </div>
                         )}

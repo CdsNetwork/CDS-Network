@@ -151,13 +151,41 @@ export type LabelRequest = {
     validate_address: "no_validation";
     ship_from: ShipAddress;
     ship_to: ShipAddress;
-    packages: (ShipPackage & { label_messages: { reference1: string } })[];
+    packages: (ShipPackage & { label_messages: LabelReferences })[];
   };
 };
 
-/** Body for POST /v2/labels. `reference` is printed on the label (carriers print up to 35 characters). */
+/** The references printed on a label (ShipStation label_messages). */
+export type LabelReferences = { reference1: string; reference2?: string; reference3?: string };
+
+/** Carriers print up to this many characters per reference. */
+export const LABEL_REFERENCE_MAX = 35;
+
+/**
+ * The references of a work order's label (Sarah, CDS, 2026-11-17): the customer's PO first
+ * when the order has one, then "WO <n>"; without a PO, "WO <n>" first. The optional reference
+ * CDS typed on the create-label form goes in the next free reference. Each is cut to 35
+ * characters; empty ones are left out.
+ */
+export function labelReferences(input: { woNumber: number; po: string | null | undefined; extra?: string | null }): LabelReferences {
+  const cut = (v: string | null | undefined) => clean(v).slice(0, LABEL_REFERENCE_MAX);
+  const wo = cut(`WO ${input.woNumber}`);
+  const values = [cut(input.po), wo, cut(input.extra)].filter(Boolean);
+  const [reference1, reference2, reference3] = values;
+  return { reference1, ...(reference2 ? { reference2 } : {}), ...(reference3 ? { reference3 } : {}) };
+}
+
+/**
+ * Body for POST /v2/labels. `reference` (one reference) or `references` (up to three) is
+ * printed on the label; carriers print up to 35 characters each.
+ */
 export function buildLabelRequest(
-  input: ShipmentParts & { carrierId: string; serviceCode: string; testLabel: boolean; reference: string; externalShipmentId: string },
+  input: ShipmentParts & {
+    carrierId: string;
+    serviceCode: string;
+    testLabel: boolean;
+    externalShipmentId: string;
+  } & ({ reference: string; references?: undefined } | { references: LabelReferences; reference?: undefined }),
 ): LabelRequest {
   const carrierId = input.carrierId.trim();
   const serviceCode = input.serviceCode.trim();
@@ -175,9 +203,17 @@ export function buildLabelRequest(
       validate_address: "no_validation",
       ship_from: input.shipFrom,
       ship_to: input.shipTo,
-      packages: [{ ...buildPackage(input.pkg), label_messages: { reference1: clean(input.reference).slice(0, 35) } }],
+      packages: [{ ...buildPackage(input.pkg), label_messages: labelMessages(input.references ?? { reference1: input.reference ?? "" }) }],
     },
   };
+}
+
+function labelMessages(refs: LabelReferences): LabelReferences {
+  const cut = (v: string | undefined) => clean(v).slice(0, LABEL_REFERENCE_MAX);
+  const out: LabelReferences = { reference1: cut(refs.reference1) };
+  if (cut(refs.reference2)) out.reference2 = cut(refs.reference2);
+  if (cut(refs.reference3)) out.reference3 = cut(refs.reference3);
+  return out;
 }
 
 // ---------------------------------------------------------------- rates

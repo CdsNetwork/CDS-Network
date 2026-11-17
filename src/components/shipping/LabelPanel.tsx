@@ -68,6 +68,8 @@ export function LabelPanel({
   const [picked, setPicked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Optional text printed on the label after the PO and WO number (35 characters per reference).
+  const [reference, setReference] = useState("");
   const [pending, start] = useTransition();
 
   if (!configured) {
@@ -177,10 +179,12 @@ export function LabelPanel({
                   rateId: chosen.rateId,
                   quotedTotal: chosen.total,
                   deliveryDays: chosen.deliveryDays,
+                  reference: reference,
                 });
                 if (r.ok) {
                   setMessage(r.message);
                   setRates(null);
+                  setReference("");
                 } else setError(r.error);
               });
             }}
@@ -203,6 +207,18 @@ export function LabelPanel({
             <br />
             Package {packageSummary(rates.pkg)}
           </div>
+          <label className="small row" style={{ gap: 6, alignItems: "center", flexWrap: "nowrap", marginTop: 6 }}>
+            Reference (optional)
+            <input
+              className="input"
+              value={reference}
+              maxLength={35}
+              disabled={pending}
+              placeholder="Printed after the PO and WO number"
+              onChange={(e) => setReference(e.target.value)}
+              style={{ maxWidth: 260, padding: "5px 6px" }}
+            />
+          </label>
           {rates.rates.length === 0 ? (
             <p className="small">No rates for this shipment.</p>
           ) : (

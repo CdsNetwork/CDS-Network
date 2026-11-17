@@ -66,7 +66,9 @@ beforeAll(async () => {
   await must(admin.from("work_order_internal").insert({ work_order_id: wo.id }));
   await must(admin.from("sell_prices").insert({ catalog_item_id: service.id, amount: 300, effective_from: "2026-01-01" }));
   await must(admin.from("work_order_lines").insert({ work_order_id: wo.id, catalog_item_id: service.id, qty: 1 }));
-  const s1 = await insertOne("shipments", { work_order_id: wo.id, direction: "customer_to_affiliate" });
+  // The leg back to the customer: the only one whose label a shop sees
+  // (20261119020000_shop_labels_outbound_only.sql).
+  const s1 = await insertOne("shipments", { work_order_id: wo.id, direction: "affiliate_to_customer" });
   const s2 = await insertOne("shipments", { work_order_id: wo.id, direction: "cds_to_customer" });
   await must(admin.from("shipment_internal").insert([{ shipment_id: s1.id }, { shipment_id: s2.id }]));
   f = { shopA: a.id, shopB: b.id, customer: customer.id, location: location.id, service: service.id, wo: wo.id, toShop: s1.id, toCds: s2.id };

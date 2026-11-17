@@ -19,6 +19,7 @@ import {
 } from "@/lib/attachments";
 import { discardUnrecorded, signedUploadTarget, storedObject } from "@/lib/attachment-storage";
 import { noteBody } from "@/lib/notes";
+import { canRequestCorrection, correctionNote } from "@/lib/invoice-correction";
 import type { ActionState } from "@/components/shop/types";
 import { isUuid } from "./data";
 
@@ -124,6 +125,25 @@ export async function addNote(workOrderId: string, _prev: ActionState, fd: FormD
   const supabase = await createClient();
   const { error } = await supabase.from("work_order_notes").insert({ work_order_id: workOrderId, body: note.body });
   // 42501: not this shop's job (any more), the policy refused the row.
+  if (error?.code === "42501") return { error: "This job is not available. It may have been reassigned by CDS." };
+  return done(error);
+}
+
+/**
+ * "Request invoice correction" on a completed job: a shop note starting with "Invoice
+ * correction requested: ", which raises "New from shop" for CDS like any shop note.
+ */
+export async function requestInvoiceCorrection(workOrderId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
+  const bad = await guard(workOrderId);
+  if (bad) return bad;
+  const note = correctionNote(fd.get("reason"));
+  if ("error" in note) return { error: note.error };
+  const supabase = await createClient();
+  const { data: wo, error: readError } = await supabase.from("work_orders").select("status").eq("id", workOrderId).maybeSingle();
+  if (readError) return { error: "Something went wrong. Try again, or contact CDS if it keeps happening." };
+  if (!wo) return { error: "This job is not available. It may have been reassigned by CDS." };
+  if (!canRequestCorrection(wo.status as string)) return { error: "Complete the job first, then ask for an invoice correction." };
+  const { error } = await supabase.from("work_order_notes").insert({ work_order_id: workOrderId, body: note.body });
   if (error?.code === "42501") return { error: "This job is not available. It may have been reassigned by CDS." };
   return done(error);
 }

@@ -45,6 +45,9 @@ export type QueueJob = {
   unit_number: string;
   po_number: string | null;
   customer_name: string;
+  /** When the shop received the part (shop-dates receivedAt), or null. */
+  received_at: string | null;
+  completed_at: string | null;
 };
 
 export type JobRow = {
@@ -61,6 +64,7 @@ export type JobRow = {
   pickup_window: string | null;
   shop_ship_status: string | null;
   affiliate_invoice_ref: string | null;
+  picked_up_at: string | null;
   completed_at: string | null;
   customer_name: string;
 };
@@ -139,11 +143,20 @@ export type Option = { id: string; label: string };
 export type CatalogOption = Option & { category: string; hint: string; keywords?: string };
 
 /**
- * Whether a component's pressure and weight are required: a DPF or DOC is measured, unless the
- * shop condemned it (a condemned filter is not measured).
+ * Whether a component's pressure and weight are required: a DPF is measured, unless the shop
+ * condemned it (a condemned filter is not measured). DOC and SCR measurements are optional
+ * (Sarah, CDS, 2026-11-17); an EGR cooler has none.
  */
 export function measurementsRequired(type: ComponentType, result: string | null): boolean {
-  return (type === "DPF" || type === "DOC") && result !== "condemned";
+  return type === "DPF" && result !== "condemned";
+}
+
+/**
+ * Whether a condemned component needs a damage photo before the job completes: yes, except
+ * an EGR cooler (Sarah, CDS, 2026-11-17). Same rule as public.shop_complete_work_order.
+ */
+export function condemnedPhotoRequired(type: ComponentType, result: string | null): boolean {
+  return result === "condemned" && type !== "EGR";
 }
 
 export function componentLabel(c: Pick<ComponentRow, "component_type" | "seq">): string {

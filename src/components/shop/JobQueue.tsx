@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
-import { woLabel } from "@/lib/format";
+import { date, woLabel } from "@/lib/format";
 import styles from "./shop.module.css";
 import type { QueueJob, QueueTab } from "./types";
 
@@ -99,6 +99,13 @@ export function JobQueue({
           <div className="small" style={{ marginBottom: 8 }}>
             {j.requested_work}
           </div>
+          {(j.received_at || j.completed_at) && (
+            <div className="small" style={{ marginBottom: 8 }}>
+              {j.received_at && <>Received {date(j.received_at)}</>}
+              {j.received_at && j.completed_at && " • "}
+              {j.completed_at && <>Completed {date(j.completed_at)}</>}
+            </div>
+          )}
           <StatusBadge status={j.status} shop />
         </Link>
       ))}

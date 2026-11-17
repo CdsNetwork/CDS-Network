@@ -23,6 +23,8 @@ export type ListLeg = {
   /** "In": to the shop or CDS. "Out": back to the customer (private.is_return_leg). */
   dir: "In" | "Out";
   status: string;
+  /** The tracking number, shown in the row next to In or Out; null when there is none. */
+  tracking: string | null;
   /** Full direction, carrier and tracking number, for the tooltip. */
   title: string;
   /** UPS's tracking page for a UPS tracking number; null otherwise. */
@@ -44,6 +46,7 @@ export function listLegs(rows: LegRow[] | null | undefined): ListLeg[] {
         id: r.id,
         dir,
         status: r.status,
+        tracking,
         title: `${DIRECTION_LABEL[r.direction] ?? r.direction}${parts ? `, ${parts}` : ""}`,
         trackingUrl: r.carrier === "UPS" && tracking ? upsTrackingUrl(tracking) : null,
       };

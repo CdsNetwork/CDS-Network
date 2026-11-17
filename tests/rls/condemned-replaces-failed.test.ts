@@ -9,7 +9,6 @@
  *
  * Fixtures are created with the service role under a per-run id and removed afterwards.
  */
-import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { admin, createLogin, deleteLogins, must, runId, type Login } from "./helpers";
 
@@ -138,23 +137,11 @@ describe("a condemned EGR", () => {
     expect(activity.is_new).toBe(true);
   });
 
-  it("completes the job once it has its photo", async () => {
+  it("completes the job without a photo (Sarah, CDS, 2026-11-17; 20261119040000_egr_no_photo_doc_optional.sql)", async () => {
     const wo = await job("E-2");
     const comp = await newComponent(wo, "EGR");
     await must(save(wo, comp, "EGR", "condemned", "Leaking core"));
-    const complete = () => shopLogin.client.rpc("shop_complete_work_order", { p_work_order: wo, p_invoice_ref: `INV-${runId}` });
-    const noPhoto = await complete();
-    expect(noPhoto.error?.message).toMatch(/add a photo for a condemned part/);
-    await must(
-      admin.from("attachments").insert({
-        work_order_id: wo,
-        component_id: comp,
-        category: "condition_damage",
-        storage_path: `${wo}/${randomUUID()}-photo.png`,
-        file_name: "photo.png",
-      }),
-    );
-    await must(complete());
+    await must(shopLogin.client.rpc("shop_complete_work_order", { p_work_order: wo, p_invoice_ref: `INV-${runId}` }));
     const after = await must(admin.from("work_orders").select("status").eq("id", wo).single());
     expect(after.status).toBe("completed");
   });

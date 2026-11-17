@@ -74,6 +74,8 @@ export async function createShipmentLabel(shipmentId: string, woId: string, choi
     rateId: typeof choice.rateId === "string" ? choice.rateId.slice(0, 60) : null,
     quotedTotal: Number.isFinite(quoted) && quoted >= 0 ? Math.round(quoted * 100) / 100 : null,
     deliveryDays: Number.isInteger(days) && days >= 0 ? days : null,
+    // Printed on the label; carriers print up to 35 characters.
+    reference: typeof choice.reference === "string" ? choice.reference.slice(0, 35) : null,
   });
   refresh(woId);
   return result;

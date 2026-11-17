@@ -164,6 +164,11 @@
 .legLine .cellSelect {
   margin-top: 0;
 }
+.legTracking {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
 .legDir {
   min-width: 26px;
   font-size: 12px;

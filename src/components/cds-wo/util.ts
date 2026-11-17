@@ -59,6 +59,18 @@ export const LINES_LOCKED_STATUSES = ["completed", "delivered", "ready_to_invoic
 export const REVIEW_STATUSES = ["pending_review", "rejected_by_affiliate"];
 
 /**
+ * Whether the work order page offers the PO-only edit (Sarah, CDS, 2026-11-17): after
+ * dispatch, at any status but cancelled, also once invoiced. In review the Edit order box has
+ * the PO with the other fields.
+ */
+export function canEditPoOnly(status: string): boolean {
+  return !REVIEW_STATUSES.includes(status) && status !== "cancelled";
+}
+
+/** Shown with the PO edit when the order already has its QuickBooks invoice (the portal never changes it). */
+export const PO_IN_QUICKBOOKS_NOTE = "This invoice is already in QuickBooks. Change the PO there too.";
+
+/**
  * Shop preselected in the dispatch Shop box: the shop the order is with, else the location's
  * default shop. After a decline the declining shop is never preselected, so the location
  * default is offered unless it is that same shop, in which case nothing is.

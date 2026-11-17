@@ -27,6 +27,16 @@ export const ALL_STATUSES: WoStatus[] = [...STATUS_ORDER, "rejected_by_affiliate
  */
 export const CONDEMNED = "condemned";
 
+/**
+ * Status filter value "Shipped" (Sarah, CDS, 2026-11-17): the orders whose leg from the shop
+ * back to the customer (affiliate_to_customer) is with the carrier and not delivered yet, by
+ * that shipment's carrier status (SHIPPED_STATUSES). A leg that only has a label
+ * (label_needed, label_created, awaiting_pickup, no_scan) has not shipped; a delivered one is
+ * the Delivered status. Like Condemned, not one of ALL_STATUSES.
+ */
+export const SHIPPED = "shipped";
+export const SHIPPED_STATUSES = ["picked_up", "in_transit", "out_for_delivery", "delayed", "exception", "address_problem"];
+
 export type WoFilters = {
   q: string;
   /** The raw status parameter when it is a known group or status, else "". */
@@ -40,6 +50,8 @@ export type WoFilters = {
   question: boolean;
   /** Only work orders with at least one condemned component (status parameter CONDEMNED). */
   condemned: boolean;
+  /** Only work orders whose outbound leg has shipped (status parameter SHIPPED). */
+  shipped: boolean;
 };
 
 /** Shop filter value for CDS's own in-house sales (the shop with is_in_house). */
@@ -69,11 +81,13 @@ export function parseFilters(sp: Params): WoFilters {
   const fromShop = param(sp, FROM_SHOP_PARAM) === "1";
   const question = param(sp, QUESTION_PARAM) === "1";
   const raw = param(sp, "status");
+  const base = { q, shop, fromShop, question, condemned: false, shipped: false };
   const group = GROUPS[raw];
-  if (group) return { q, status: raw, statuses: group.statuses, shop, fromShop, question, condemned: false };
-  if (ALL_STATUSES.includes(raw as WoStatus)) return { q, status: raw, statuses: [raw as WoStatus], shop, fromShop, question, condemned: false };
-  if (raw === CONDEMNED) return { q, status: raw, statuses: null, shop, fromShop, question, condemned: true };
-  return { q, status: "", statuses: null, shop, fromShop, question, condemned: false };
+  if (group) return { ...base, status: raw, statuses: group.statuses };
+  if (ALL_STATUSES.includes(raw as WoStatus)) return { ...base, status: raw, statuses: [raw as WoStatus] };
+  if (raw === CONDEMNED) return { ...base, status: raw, statuses: null, condemned: true };
+  if (raw === SHIPPED) return { ...base, status: raw, statuses: null, shipped: true };
+  return { ...base, status: "", statuses: null };
 }
 
 /** Query string for links that keep the current filters ("" when there are none). */
@@ -107,7 +121,12 @@ const MAX_FLAGGED = 200;
 export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, columns: string) {
   // Condemned: an inner join on the condemned components keeps only the orders that have one
   // (under its own name, so the row's own component list stays complete).
-  const select = f.condemned ? `${columns}, condemned_components:work_order_components!inner(id)` : columns;
+  // Shipped: the same with the outbound legs that are with the carrier.
+  const select = f.condemned
+    ? `${columns}, condemned_components:work_order_components!inner(id)`
+    : f.shipped
+      ? `${columns}, shipped_legs:shipments!inner(id)`
+      : columns;
   let list = supabase
     .from("work_order_list")
     .select(select)
@@ -115,6 +134,7 @@ export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, colum
     .order("created_at", { ascending: false })
     .order("id");
   if (f.condemned) list = list.eq("condemned_components.result", "condemned");
+  if (f.shipped) list = list.eq("shipped_legs.direction", "affiliate_to_customer").in("shipped_legs.status", SHIPPED_STATUSES);
   if (f.statuses) list = f.statuses.length === 1 ? list.eq("status", f.statuses[0]) : list.in("status", f.statuses);
   if (f.shop === IN_HOUSE) {
     const { data: inHouse } = await supabase.from("affiliates").select("id").eq("is_in_house", true).maybeSingle();

@@ -6,6 +6,7 @@ import { pacificToday } from "@/lib/dates";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { pickShopRatesByItem } from "@/lib/shop-rates";
 import { isCustomerItem, lineItemFor } from "@/lib/customer-items";
+import { receivedAt, shopCanSeeLabel } from "@/components/shop/shop-dates";
 import type { NoteView } from "@/lib/notes";
 import {
   TAB_STATUSES,
@@ -60,7 +61,9 @@ export async function loadQueue(
   search = "",
 ): Promise<{ jobs: Record<QueueTab, QueueJob[]>; counts: Record<QueueTab, number> }> {
   const supabase = await createClient();
-  const cols = "id, wo_number, status, location_label, requested_work, unit_number, po_number, customers(name)";
+  // The inbound legs' delivery times give the Received date (shop-dates receivedAt).
+  const cols =
+    "id, wo_number, status, location_label, requested_work, unit_number, po_number, picked_up_at, completed_at, customers(name), shipments(direction, delivered_at)";
 
   // One OR filter shared by the three queries. Customer names are looked up first (RLS
   // only returns customers on this shop's own work orders).
@@ -112,6 +115,11 @@ export async function loadQueue(
     unit_number: (r.unit_number as string | null) ?? "",
     po_number: (r.po_number as string | null) ?? null,
     customer_name: (r.customers as Named)?.name ?? "",
+    received_at: receivedAt(
+      { picked_up_at: (r.picked_up_at as string | null) ?? null },
+      r.shipments as { direction: string; delivered_at: string | null }[] | null,
+    ),
+    completed_at: (r.completed_at as string | null) ?? null,
   });
 
   required(done, "the completed jobs");
@@ -151,6 +159,8 @@ export type JobDetailData = {
   partsSale: boolean;
   /** Automatic deductions on the shop's bill (shipped orders: $15 per filter). */
   deductions: ShopDeduction[];
+  /** When the shop received the part (inbound delivery, else Picked Up), or null. */
+  receivedAt: string | null;
 };
 
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -164,7 +174,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
       .from("work_orders")
       .select(
         "id, wo_number, status, market, fulfillment, location_label, site_address, unit_number, po_number, " +
-          "requested_work, pickup_window, shop_ship_status, affiliate_invoice_ref, completed_at, customer_id, affiliate_id, request_type, customers(name)",
+          "requested_work, pickup_window, shop_ship_status, affiliate_invoice_ref, picked_up_at, completed_at, customer_id, affiliate_id, request_type, customers(name)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -210,7 +220,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
       .order("uploaded_at"),
     supabase
       .from("shipments")
-      .select("id, direction, carrier, tracking_number, status, created_at")
+      .select("id, direction, carrier, tracking_number, status, delivered_at, created_at")
       .eq("work_order_id", id)
       .order("created_at"),
     supabase.from("work_order_notes").select("id, author_name, created_at, body").eq("work_order_id", id).order("created_at"),
@@ -285,8 +295,10 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     url: urls.get(f.storage_path) ?? null,
   }));
 
-  // Labels CDS created for this job: shops print them (the return leg) and see the ship-to.
-  const labelRows = (ships.data ?? []).length
+  // Labels CDS created for this job: the shop prints the label of the leg back to the
+  // customer only (RLS returns no other label; checked here as well). Inbound legs keep their
+  // tracking number.
+  const labelRows = (ships.data ?? []).some((s) => shopCanSeeLabel(s.direction))
     ? required(
         await supabase
           .from("shipment_labels")
@@ -299,7 +311,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
   const labelByShipment = new Map((labelRows ?? []).map((l) => [l.shipment_id as string, l]));
 
   const shipments: ShipmentRow[] = (ships.data ?? []).map((s) => {
-    const l = labelByShipment.get(s.id);
+    const l = shopCanSeeLabel(s.direction) ? labelByShipment.get(s.id) : undefined;
     return {
       id: s.id,
       direction: s.direction,
@@ -335,6 +347,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     inHouse,
     partsSale: inHouse && w.request_type === "parts_only",
     deductions,
+    receivedAt: receivedAt(job, ships.data ?? []),
   };
 }
 

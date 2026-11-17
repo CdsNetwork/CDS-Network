@@ -60,8 +60,18 @@ export const PICKUP_WINDOWS: { value: string; label: string }[] = [
   { value: "12-14", label: "12:00 PM - 2:00 PM" },
   { value: "14-16", label: "2:00 PM - 4:00 PM" },
   { value: "16-17", label: "4:00 PM - 5:00 PM" },
+  { value: "tomorrow", label: "Tomorrow" },
   { value: "coordinate", label: "Need to coordinate" },
 ];
+
+/**
+ * A component measurement for display: the value with its unit, else "N/A" for a DOC or SCR
+ * (their measurements are optional, Sarah, CDS, 2026-11-17) and "-" for a DPF.
+ */
+export function measurementText(type: string, value: number | string | null | undefined, unit = ""): string {
+  if (value === null || value === undefined || value === "") return type === "DOC" || type === "SCR" ? "N/A" : "-";
+  return `${value}${unit}`;
+}
 
 export function pickupWindowLabel(value: string | null | undefined): string {
   return PICKUP_WINDOWS.find((w) => w.value === value)?.label ?? "Not accepted yet";

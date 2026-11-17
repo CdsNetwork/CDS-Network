@@ -9,6 +9,7 @@ import {
   dateTime,
   DIRECTION_LABEL,
   FULFILLMENT_LABEL,
+  measurementText,
   money,
   pickupWindowLabel,
   SHIP_STATUS_LABEL,
@@ -356,12 +357,13 @@ export function ShopPreview({ data }: { data: PreviewData }) {
           if (!isEgr) {
             const before = c.weight_before_g === null ? null : Number(c.weight_before_g);
             const after = c.weight_after_g === null ? null : Number(c.weight_after_g);
+            // Blank DOC and SCR readings show N/A (optional for them).
             rows.push(
-              ["Differential Pressure: Before", c.dp_before?.toString() ?? "-"],
-              ["Differential Pressure: After", c.dp_after?.toString() ?? "-"],
-              ["Weight Before (g)", before?.toString() ?? "-"],
-              ["Weight After (g)", after?.toString() ?? "-"],
-              ["Weight Removed", before !== null && after !== null ? `${Math.round((before - after) * 10) / 10} g` : "-"],
+              ["Differential Pressure: Before", measurementText(c.component_type, c.dp_before)],
+              ["Differential Pressure: After", measurementText(c.component_type, c.dp_after)],
+              ["Weight Before (g)", measurementText(c.component_type, before)],
+              ["Weight After (g)", measurementText(c.component_type, after)],
+              ["Weight Removed", before !== null && after !== null ? `${Math.round((before - after) * 10) / 10} g` : measurementText(c.component_type, null)],
             );
           }
           rows.push([

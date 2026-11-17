@@ -149,7 +149,8 @@ export function ListInternalStatusSelect({
 /**
  * The carrier status of one shipment leg in the work order list, saved on change with the
  * Shipping page's action and statuses (setShipmentStatus). "In" goes to the shop or CDS,
- * "Out" back to the customer; the tooltip names the full direction, carrier and tracking.
+ * "Out" back to the customer, with the leg's tracking number as text and the UPS Track link;
+ * the tooltip names the full direction and carrier.
  */
 export function ListShipmentStatusSelect({ leg }: { leg: ListLeg }) {
   const [pending, startTransition] = useTransition();
@@ -175,6 +176,16 @@ export function ListShipmentStatusSelect({ leg }: { leg: ListLeg }) {
         <span className={styles.legDir} title={leg.title}>
           {leg.dir}
         </span>
+        <span className={styles.legTracking} title={leg.title}>
+          {leg.tracking ?? <span className="small">No tracking #</span>}
+        </span>
+        {leg.trackingUrl && (
+          <a className="link small" href={leg.trackingUrl} target="_blank" rel="noreferrer" title={leg.title}>
+            Track
+          </a>
+        )}
+      </div>
+      <div className={styles.legLine}>
         <select
           className={styles.cellSelect}
           value={shown}
@@ -206,11 +217,6 @@ export function ListShipmentStatusSelect({ leg }: { leg: ListLeg }) {
             </option>
           ))}
         </select>
-        {leg.trackingUrl && (
-          <a className="link small" href={leg.trackingUrl} target="_blank" rel="noreferrer" title={leg.title}>
-            Track
-          </a>
-        )}
       </div>
       <div role="status" className="small" style={saved && !pending ? { color: "#3b6d12", fontWeight: 700 } : undefined}>
         {pending ? "Saving..." : saved ? "Saved" : null}

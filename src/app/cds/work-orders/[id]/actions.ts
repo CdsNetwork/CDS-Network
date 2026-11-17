@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
-import { isUuid, LINES_LOCKED_STATUSES, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
+import { isUuid, LINES_LOCKED_STATUSES, PO_IN_QUICKBOOKS_NOTE, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
+import { parseWoNumber } from "@/components/cds-wo/linked-orders";
+import { woLabel } from "@/lib/format";
 import { requireCds } from "@/lib/auth";
 import { recordSync } from "@/lib/integration-sync";
 import { noteBody } from "@/lib/notes";
@@ -229,6 +231,87 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
   });
   if (internalError) return { error: `Order details saved, but the routing notes and tax were not: ${internalError}` };
   return done(woId, "Order details saved.");
+}
+
+/**
+ * The PO alone, at any status but cancelled (Sarah, CDS, 2026-11-17: a PO often comes after
+ * the shop accepted). In review the Edit order box saves it with the other fields. The
+ * database still refuses a change while a QuickBooks invoice is being created
+ * (private.invoice_inputs_locked). An invoice already in QuickBooks is not changed: CDS is told
+ * to change the PO there too.
+ */
+export async function updateWorkOrderPo(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const po = text(formData.get("po_number"));
+  if (po.length > 100) return { error: "The PO is too long (max 100 characters)." };
+
+  const supabase = await createClient();
+  const { data: current, error: readError } = await supabase
+    .from("work_orders")
+    .select("status, po_number, work_order_internal(qb_invoice_id)")
+    .eq("id", woId)
+    .maybeSingle();
+  if (readError) return { error: "The work order could not be read. Try again." };
+  if (!current) return { error: "Work order not found." };
+  if (current.status === "cancelled") return { error: "The PO of a cancelled order cannot change." };
+
+  const { error } = await supabase.from("work_orders").update({ po_number: po || null }).eq("id", woId);
+  if (error) return { error: error.message };
+  const before = (current.po_number as string | null) ?? null;
+  await supabase.from("work_order_events").insert({
+    work_order_id: woId,
+    actor_id: profile.id,
+    event_type: "edit",
+    message: `PO changed by CDS: ${before ?? "none"} to ${po || "none"}`,
+    shop_visible: false,
+  });
+  const inQuickBooks = qbInvoiceIdOf(current.work_order_internal) !== null;
+  return done(woId, inQuickBooks ? `PO saved. ${PO_IN_QUICKBOOKS_NOTE}` : "PO saved.");
+}
+
+/**
+ * Links this work order to another one by WO number, or removes the link when the field is
+ * empty (linked work orders, light version, Sarah, CDS, 2026-11-17). CDS only: the link is in
+ * public.work_order_links, which shops cannot read. Each order keeps its own invoice.
+ */
+export async function linkWorkOrder(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const raw = text(formData.get("linked_wo_number"));
+  const n = raw ? parseWoNumber(raw) : null;
+  if (raw && n === null) return { error: "Enter a WO number, for example 104101." };
+
+  const supabase = await createClient();
+  const { data: current } = await supabase.from("work_orders").select("id, wo_number").eq("id", woId).maybeSingle();
+  if (!current) return { error: "Work order not found." };
+
+  let target: { id: string; wo_number: number } | null = null;
+  if (n !== null) {
+    const { data, error } = await supabase.from("work_orders").select("id, wo_number").eq("wo_number", n).maybeSingle();
+    if (error) return { error: "The work order could not be read. Try again." };
+    if (!data) return { error: `No work order ${woLabel(n)}.` };
+    if (data.id === woId) return { error: "A work order cannot be linked to itself." };
+    target = data as { id: string; wo_number: number };
+  }
+
+  const { data: before } = await supabase.from("work_order_links").select("linked_work_order_id").eq("work_order_id", woId).maybeSingle();
+  const previous = (before?.linked_work_order_id as string | null | undefined) ?? null;
+  if (!target && !previous) return done(woId, "No link to remove.");
+  const { error } = target
+    ? await supabase.from("work_order_links").upsert({ work_order_id: woId, linked_work_order_id: target.id })
+    : await supabase.from("work_order_links").delete().eq("work_order_id", woId);
+  if (error) return { error: error.message };
+
+  // CDS-only events on this order and on the other one (the one linked now, or the one unlinked).
+  const own = woLabel(current.wo_number as number);
+  const other = target?.id ?? previous;
+  const message = target ? `Linked to ${woLabel(target.wo_number)} by CDS` : "Link to another work order removed by CDS";
+  const otherMessage = target ? `${own} linked to this work order by CDS` : `Link from ${own} removed by CDS`;
+  const event = (work_order_id: string, msg: string) => ({ work_order_id, actor_id: profile.id, event_type: "edit", message: msg, shop_visible: false });
+  await supabase.from("work_order_events").insert([event(woId, message), ...(other ? [event(other, otherMessage)] : [])]);
+  if (other) revalidatePath(`/cds/work-orders/${other}`);
+  return done(woId, target ? `Linked to ${woLabel(target.wo_number)}.` : "Link removed.");
 }
 
 export async function addShipment(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {

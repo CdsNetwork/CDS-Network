@@ -11,16 +11,19 @@ import { addShipmentHelp, canAddShipment } from "@/components/cds-wo/add-shipmen
 import { QUESTION_NOTE_MAX } from "@/components/cds-wo/question-pending";
 import type { LocationOption } from "@/components/cds-wo/NewWorkOrderForm";
 import { OrderLocationFields } from "@/components/cds-wo/OrderLocationFields";
+import { linkedOrders, type LinkedOrder } from "@/components/cds-wo/linked-orders";
 import { loadPickerLocations } from "@/app/cds/work-orders/new/locations";
 import styles from "@/components/cds-wo/cds-wo.module.css";
 import type { SearchOption } from "@/components/SearchSelect";
 import {
+  canEditPoOnly,
   CUSTOMER_APPROVAL_LABEL,
   dispatchShopDefault,
   isUuid,
   LABEL_STATUS_LABEL,
   LINES_LOCKED_STATUSES,
   one,
+  PO_IN_QUICKBOOKS_NOTE,
   PRICE_SOURCE_LABEL,
   REMOVABLE_LABEL_STATUSES,
   REQUEST_TYPE_LABEL,
@@ -38,6 +41,7 @@ import {
   dateTime,
   DIRECTION_LABEL,
   FULFILLMENT_LABEL,
+  measurementText,
   money,
   pickupWindowLabel,
   SHIP_STATUS_LABEL,
@@ -96,8 +100,10 @@ import {
   removeShipment,
   setAttachmentShopVisible,
   setStatus,
+  linkWorkOrder,
   updateTax,
   updateWorkOrderFields,
+  updateWorkOrderPo,
 } from "./actions";
 
 type MaybeOne<T> = T | T[] | null;
@@ -485,10 +491,6 @@ function InvoicePanel({
   );
 }
 
-function num(v: number | null, unit = ""): string {
-  return v === null || v === undefined ? "-" : `${v}${unit}`;
-}
-
 export default async function WorkOrderPage({ params }: PageProps<"/cds/work-orders/[id]">) {
   const profile = await requireCds();
   const { id } = await params;
@@ -567,6 +569,28 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         .eq("work_order_id", id)
         .order("created_at"),
     ]);
+
+  // Linked work orders (CDS only, public.work_order_links): the order this one links to and the
+  // orders that link to it.
+  const [linkOutRes, linkInRes] = await Promise.all([
+    supabase.from("work_order_links").select("linked_work_order_id").eq("work_order_id", id).maybeSingle(),
+    supabase.from("work_order_links").select("work_order_id").eq("linked_work_order_id", id),
+  ]);
+  const linksToId = (linkOutRes.data as { linked_work_order_id: string } | null)?.linked_work_order_id ?? null;
+  const linkedIds = [
+    ...(linksToId ? [linksToId] : []),
+    ...((linkInRes.data ?? []) as { work_order_id: string }[]).map((r) => r.work_order_id),
+  ];
+  const { data: linkedRows } = linkedIds.length
+    ? await supabase.from("work_orders").select("id, wo_number").in("id", linkedIds)
+    : { data: [] as LinkedOrder[] };
+  const linkedById = new Map(((linkedRows ?? []) as LinkedOrder[]).map((o) => [o.id, o]));
+  const linksTo = linksToId ? (linkedById.get(linksToId) ?? null) : null;
+  const linked = linkedOrders(
+    linksTo,
+    linkedIds.filter((x) => x !== linksToId).map((x) => linkedById.get(x)).filter((o): o is LinkedOrder => !!o),
+  );
+  const linkLoadError = Boolean(linkOutRes.error || linkInRes.error);
 
   // Automatic deductions on the shop's bill (shipped orders: $15 per filter), computed in the
   // database; already part of work_order_financials.shop_subtotal and margin.
@@ -928,8 +952,65 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
           <section className="section" style={{ marginTop: 0 }}>
             <h3>Work order</h3>
             <div className="grid2">
-              <Fact label="PO">{wo.po_number ?? <span className="small">Missing</span>}</Fact>
+              <Fact label="PO">
+                {wo.po_number ?? <span className="small">Missing</span>}
+                {canEditPoOnly(wo.status) && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary className="small link">Edit PO</summary>
+                    {qbInvoiceId && (
+                      <div className="notice warning" style={{ margin: "6px 0" }}>
+                        {PO_IN_QUICKBOOKS_NOTE}
+                      </div>
+                    )}
+                    <ActionForm action={updateWorkOrderPo.bind(null, wo.id)} submitLabel="Save PO" buttonClass="btn btn-secondary" inline>
+                      <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                        <label htmlFor="edit-po-only">PO #</label>
+                        <input id="edit-po-only" name="po_number" className="input" defaultValue={wo.po_number ?? ""} maxLength={100} />
+                      </div>
+                    </ActionForm>
+                  </details>
+                )}
+              </Fact>
               <Fact label="Affiliate">{shop?.display_name ?? "Not assigned"}</Fact>
+              <Fact label="Linked work orders">
+                {linkLoadError ? (
+                  <span className="small">The linked work orders could not be loaded. Reload the page.</span>
+                ) : linked.length ? (
+                  linked.map((o, i) => (
+                    <span key={o.id}>
+                      {i > 0 && ", "}
+                      Linked to{" "}
+                      <Link className="link" href={`/cds/work-orders/${o.id}`}>
+                        {woLabel(o.wo_number)}
+                      </Link>
+                    </span>
+                  ))
+                ) : (
+                  <span className="small">None</span>
+                )}
+                <details style={{ marginTop: 6 }}>
+                  <summary className="small link">{linksTo ? "Change link" : "Link to another work order"}</summary>
+                  <p className="small" style={{ margin: "6px 0" }}>
+                    For one customer order split across shops: create the second work order as usual, then link it here. Both
+                    pages show the link (CDS only; shops never see it). Each work order keeps its own invoice. Leave the box empty
+                    to remove this order&apos;s link.
+                  </p>
+                  <ActionForm action={linkWorkOrder.bind(null, wo.id)} submitLabel="Save link" buttonClass="btn btn-secondary" inline>
+                    <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                      <label htmlFor="link-wo">WO number</label>
+                      <input
+                        id="link-wo"
+                        name="linked_wo_number"
+                        className="input"
+                        defaultValue={linksTo ? String(linksTo.wo_number) : ""}
+                        placeholder="e.g. 104101"
+                        maxLength={20}
+                        autoComplete="off"
+                      />
+                    </div>
+                  </ActionForm>
+                </details>
+              </Fact>
               <Fact label="Approved By">
                 {approvedLabel(internal, approver?.full_name ?? null)}
               </Fact>
@@ -1201,11 +1282,12 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       <Fact label="Serial #">{c.serial_number}</Fact>
                       {c.component_type !== "EGR" && (
                         <>
-                          <Fact label="DP Before">{num(c.dp_before)}</Fact>
-                          <Fact label="DP After">{num(c.dp_after)}</Fact>
-                          <Fact label="Weight Before">{num(c.weight_before_g, " g")}</Fact>
-                          <Fact label="Weight After">{num(c.weight_after_g, " g")}</Fact>
-                          <Fact label="Weight Removed">{num(c.weight_removed_g, " g")}</Fact>
+                          {/* Blank DOC and SCR readings show N/A (optional for them, Sarah, CDS, 2026-11-17). */}
+                          <Fact label="DP Before">{measurementText(c.component_type, c.dp_before)}</Fact>
+                          <Fact label="DP After">{measurementText(c.component_type, c.dp_after)}</Fact>
+                          <Fact label="Weight Before">{measurementText(c.component_type, c.weight_before_g, " g")}</Fact>
+                          <Fact label="Weight After">{measurementText(c.component_type, c.weight_after_g, " g")}</Fact>
+                          <Fact label="Weight Removed">{measurementText(c.component_type, c.weight_removed_g, " g")}</Fact>
                         </>
                       )}
                       <Fact label="Result note">{c.result_note}</Fact>

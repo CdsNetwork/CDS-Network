@@ -12,11 +12,15 @@ describe("measurementsRequired", () => {
     expect(measurementsRequired("DOC", "condemned")).toBe(false);
   });
 
-  it("a DPF or DOC that is cleaned, failed or has no result yet still needs them", () => {
-    for (const type of ["DPF", "DOC"] as const) {
-      for (const result of ["cleaned", "failed", "", null]) {
-        expect(measurementsRequired(type, result)).toBe(true);
-      }
+  it("a DPF that is cleaned, failed or has no result yet still needs them", () => {
+    for (const result of ["cleaned", "failed", "", null]) {
+      expect(measurementsRequired("DPF", result)).toBe(true);
+    }
+  });
+
+  it("a DOC is never required to be measured (Sarah, CDS, 2026-11-17)", () => {
+    for (const result of ["cleaned", "", null]) {
+      expect(measurementsRequired("DOC", result)).toBe(false);
     }
   });
 

@@ -65,7 +65,7 @@ describe("CDS work order list", () => {
   const page = read("src/app/cds/page.tsx");
 
   it("loads the shop activity flag and the component results of each row", () => {
-    expect(page).toMatch(/work_order_shop_activity\(is_new\)/);
+    expect(page).toMatch(/work_order_shop_activity\(is_new[,)]/);
     expect(page).toMatch(/work_order_components\(result\)/);
   });
 
