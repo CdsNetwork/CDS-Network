@@ -5,6 +5,7 @@ import { ActionForm } from "@/components/cds-admin/ActionForm";
 import { removeVendorLinkConfirm } from "@/components/cds-admin/confirm";
 import styles from "@/components/cds-admin/cds-admin.module.css";
 import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
+import { deductionOptions } from "@/lib/qbo/deduction-options";
 import { qboBillLists, type QboBillLists } from "@/lib/qbo/lists";
 import { qboStatus } from "@/lib/qbo/status";
 import { BILL_SETTING_KEY, defaultBillTerm, parseBillSetting, suggestVendor, type BillLineSetting } from "@/lib/qbo/bill";
@@ -237,11 +238,7 @@ async function SettingFields({ lists: listsPromise, setting }: { lists: Lists; s
       </div>
     );
   }
-  const accountOptions: SearchOption[] = lists.accounts.map((a) => ({
-    value: `account::${a.Id}::${a.FullyQualifiedName ?? a.Name}`,
-    label: a.FullyQualifiedName ?? a.Name,
-    hint: [a.AccountType, a.AcctNum && `No. ${a.AcctNum}`, `QuickBooks id ${a.Id}`].filter(Boolean).join(" - "),
-  }));
+  const accountOptions: SearchOption[] = deductionOptions(lists.accounts, lists.items);
   const termsValue = setting?.termsId ? `${setting.termsId}::${setting.termsName ?? ""}` : "";
   // CDS books freight deductions to GL 5030 (CDS, 2026-11-16): suggested until an account is saved.
   const suggested5030 = !setting?.deduction ? lists.accounts.filter((a) => a.AcctNum?.trim() === "5030") : null;
@@ -250,13 +247,13 @@ async function SettingFields({ lists: listsPromise, setting }: { lists: Lists; s
   return (
     <div className="grid2">
       <div className="field">
-        <label htmlFor="bill-target">Account for shipping deductions</label>
+        <label htmlFor="bill-target">Shipping deductions go to (account or item)</label>
         <FormSearchSelect
           id="bill-target"
           name="bill_target"
           options={accountOptions}
           defaultValue={deductionDefault}
-          placeholder={setting?.deduction ? `Keep ${setting.deduction.name}` : "Type the account name"}
+          placeholder={setting?.deduction ? `Keep ${setting.deduction.name}` : "Type the account or item name"}
           limit={150}
         />
       </div>

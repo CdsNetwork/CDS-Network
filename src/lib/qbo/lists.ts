@@ -56,19 +56,20 @@ export async function qboMappingLists(connected: boolean): Promise<QboMappingLis
   }
 }
 
-export type QboBillLists = { lists: { vendors: QboVendor[]; accounts: QboAccount[]; terms: QboTerm[] } | null; error: string | null };
+export type QboBillLists = { lists: { vendors: QboVendor[]; accounts: QboAccount[]; terms: QboTerm[]; items: QboItem[] } | null; error: string | null };
 
-/** QuickBooks vendors, expense accounts and terms for shop bills when connected. */
+/** QuickBooks vendors, expense accounts, terms and items (shared with the mappings tab) for shop bills when connected. */
 export async function qboBillLists(connected: boolean): Promise<QboBillLists> {
   if (!connected) return { lists: null, error: null };
   try {
     const api = await qboApi();
-    const [vendors, accounts, terms] = await Promise.all([
+    const [vendors, accounts, terms, items] = await Promise.all([
       cached(api, "vendors", () => listVendors(api)),
       cached(api, "bill-accounts", () => listBillAccounts(api)),
       cached(api, "terms", () => listTerms(api)),
+      cached(api, "items", () => listItems(api)),
     ]);
-    return { lists: { vendors, accounts, terms }, error: null };
+    return { lists: { vendors, accounts, terms, items }, error: null };
   } catch (e) {
     return { lists: null, error: `QuickBooks vendors and accounts could not be loaded (${message(e)}). Enter ids by hand or reload.` };
   }
