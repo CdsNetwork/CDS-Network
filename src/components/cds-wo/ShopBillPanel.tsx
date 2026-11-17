@@ -26,8 +26,8 @@ export function ShopBillPanel({ woId, status, state, loadError }: { woId: string
         <h3>Shop bill</h3>
         <p className="small">
           QuickBooks bills are not set up yet.{" "}
-          <Link className="link" href="/cds/admin?tab=quickbooks">
-            Admin &gt; QuickBooks mappings
+          <Link className="link" href="/cds/admin?tab=bills">
+            Admin &gt; Shop bills
           </Link>
         </p>
       </section>

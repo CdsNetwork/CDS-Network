@@ -8,7 +8,7 @@ import { cents, linkedItem, unlinkedItemMessage, type ItemMappings } from "./inv
  *
  * Bill fields: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/bill
  *   * VendorRef: the shop's QuickBooks vendor (qbo_affiliate_vendor, linked by CDS on Admin >
- *     QuickBooks mappings).
+ *     Shop bills).
  *   * DocNumber: the shop's invoice number (work_orders.affiliate_invoice_ref, required when the
  *     shop completes the job). QuickBooks allows 21 characters: a longer number is cut there
  *     and kept whole in the memo. Without one: "WO-<number>", said in the memo.
@@ -166,7 +166,7 @@ export type QboBillPayload = {
 export type BillBuild = { ok: true; payload: QboBillPayload; total: number } | { ok: false; problems: string[] };
 
 /** What CDS is told when an order has a shipping deduction and no account is chosen for it. */
-export const DEDUCTION_ACCOUNT_MISSING = "Choose the account for shipping deductions on Admin > QuickBooks mappings > Shop bills.";
+export const DEDUCTION_ACCOUNT_MISSING = "Choose the account for shipping deductions on Admin > Shop bills.";
 
 /** QuickBooks limits: Bill.DocNumber 21, PrivateNote 4000, line Description 4000. */
 const DOC_NUMBER_MAX = 21;
@@ -199,7 +199,7 @@ export function buildBillPayload(i: BillInputs): BillBuild {
   const problems: string[] = [];
   if (!setting) problems.push("QuickBooks bills are not set up yet.");
   if (!i.vendor?.qboVendorId?.trim()) {
-    problems.push(`${wo.shopName} is not linked to a QuickBooks vendor. Link it on Admin > QuickBooks mappings.`);
+    problems.push(`${wo.shopName} is not linked to a QuickBooks vendor. Link it on Admin > Shop bills.`);
   }
   const unlinked = new Set<string>();
   for (const l of i.lines) {
@@ -407,23 +407,38 @@ export type QboVendor = { Id: string; DisplayName: string; CompanyName?: string;
 
 const SUFFIX = /\b(llc|l\s*l\s*c|inc|incorporated|corp|corporation|co|company|ltd|limited)\b\.?/g;
 
-function vendorKey(s: string | null | undefined): string {
-  return (s ?? "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9 ]/g, " ").replace(SUFFIX, " ").replace(/\s+/g, "");
+/** The words of a name: lower case, punctuation and LLC / Inc / Co dropped, "&" read as "and". */
+function vendorWords(s: string | null | undefined): string[] {
+  return (s ?? "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(SUFFIX, " ")
+    .split(/\s+/)
+    .filter(Boolean);
 }
+
+const startsWith = (words: string[], lead: string[]) => lead.length <= words.length && lead.every((w, i) => words[i] === w);
 
 /**
  * The QuickBooks vendor suggested for a shop: an active vendor whose display or company name
- * is the shop name (ignoring case, punctuation and LLC / Inc), else one that contains it or is
- * contained in it. Null when nothing matches or two vendors match equally well: CDS picks.
+ * is the shop name (ignoring case, punctuation and LLC / Inc), else one whose name starts with
+ * the shop name's words when the shop name has at least two words ("Kings Truck" for "Kings
+ * Truck Center Inc."). A single place name inside a vendor name ("Connecticut" in "Connecticut
+ * Department of Revenue") is never enough. Null when nothing matches or two vendors match
+ * equally well: CDS picks.
  */
 export function suggestVendor(shopName: string, vendors: QboVendor[]): QboVendor | null {
-  const key = vendorKey(shopName);
-  if (key.length < 3) return null;
+  const shop = vendorWords(shopName);
+  if (shop.join("").length < 3) return null;
   const active = vendors.filter((v) => v.Active !== false && v.Id?.trim());
-  const keys = (v: QboVendor) => [vendorKey(v.DisplayName), vendorKey(v.CompanyName)].filter((k) => k.length >= 3);
+  const names = (v: QboVendor) => [vendorWords(v.DisplayName), vendorWords(v.CompanyName)].filter((w) => w.join("").length >= 3);
   const unique = (hits: QboVendor[]) => (new Set(hits.map((v) => v.Id)).size === 1 ? hits[0] : null);
-  const exact = active.filter((v) => keys(v).includes(key));
+  // Spaces ignored, as before: "Enviro Motive" is "Enviromotive".
+  const same = (a: string[], b: string[]) => a.join("") === b.join("");
+  const exact = active.filter((v) => names(v).some((n) => same(n, shop)));
   if (exact.length) return unique(exact);
-  const partial = active.filter((v) => keys(v).some((k) => k.includes(key) || key.includes(k)));
-  return partial.length ? unique(partial) : null;
+  if (shop.length < 2) return null;
+  const leading = active.filter((v) => names(v).some((n) => startsWith(n, shop)));
+  return leading.length ? unique(leading) : null;
 }

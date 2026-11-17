@@ -146,7 +146,7 @@ describe("buildBillPayload: one line per item, on the item the customer invoice 
     const noAccount = { ...setting, deduction: null };
     const withDeduction = buildBillPayload(inputs({ setting: noAccount }));
     expect(withDeduction.ok).toBe(false);
-    if (!withDeduction.ok) expect(withDeduction.problems).toEqual(["Choose the account for shipping deductions on Admin > QuickBooks mappings > Shop bills."]);
+    if (!withDeduction.ok) expect(withDeduction.problems).toEqual(["Choose the account for shipping deductions on Admin > Shop bills."]);
     const without = buildBillPayload(inputs({ setting: noAccount, deductions: [] }));
     expect(without.ok).toBe(true);
     if (without.ok) expect(without.total).toBe(263.75);
@@ -204,7 +204,7 @@ describe("buildBillPayload: one line per item, on the item the customer invoice 
   it("refuses a shop without a QuickBooks vendor, and a total of $0 or less", () => {
     const noVendor = buildBillPayload(inputs({ vendor: null }));
     expect(noVendor.ok).toBe(false);
-    if (!noVendor.ok) expect(noVendor.problems[0]).toBe("Diesel Pros Houston is not linked to a QuickBooks vendor. Link it on Admin > QuickBooks mappings.");
+    if (!noVendor.ok) expect(noVendor.problems[0]).toBe("Diesel Pros Houston is not linked to a QuickBooks vendor. Link it on Admin > Shop bills.");
     const zero = buildBillPayload(inputs({ lines: [{ catalogItemId: CLEAN, sku: "X", name: "x", description: null, qty: 1, shopUnitRate: 20 }] }));
     expect(zero.ok).toBe(false);
     if (!zero.ok) expect(zero.problems[0]).toMatch(/^The shop total is -\$10\.00/);
@@ -298,7 +298,7 @@ describe("billState: when a bill is created", () => {
 
   it("an unlinked item or a missing deduction account: blocked, nothing runs", () => {
     const s = billState(inputs({ setting: { ...setting, deduction: null } }), none);
-    expect(s).toMatchObject({ kind: "blocked", problems: ["Choose the account for shipping deductions on Admin > QuickBooks mappings > Shop bills."] });
+    expect(s).toMatchObject({ kind: "blocked", problems: ["Choose the account for shipping deductions on Admin > Shop bills."] });
     expect(shouldAutoCreate(s, none)).toBe(false);
   });
 

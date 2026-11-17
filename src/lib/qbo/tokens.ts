@@ -62,7 +62,7 @@ export async function saveConnection(input: {
  * expire. Throws a QboError the user can act on when QuickBooks is not connected, the
  * connection is for the other environment, or the connection has expired.
  */
-export async function qboApi(options: { forceRefresh?: boolean } = {}): Promise<QboApi & { astEnabled: boolean | null }> {
+export async function qboApi(options: { forceRefresh?: boolean } = {}): Promise<ConnectedApi> {
   const config = qboConfig();
   if (!config) throw new QboError("QuickBooks is not configured on this server.", 0, "Config");
   const stored = await load();
@@ -86,12 +86,34 @@ export async function qboApi(options: { forceRefresh?: boolean } = {}): Promise<
     return { environment: stored.environment, realmId: stored.realm_id, accessToken: access, astEnabled: stored.ast_enabled };
   }
 
+  return refreshOnce(config, stored);
+}
+
+type ConnectedApi = QboApi & { astEnabled: boolean | null };
+
+/**
+ * Refreshes in flight on this server, by company and refresh token. Intuit rotates the refresh
+ * token, so two requests refreshing with the same one at once (the QuickBooks admin tabs load
+ * several lists together) could see the second fail as "connection expired": they share one.
+ */
+const refreshing = new Map<string, Promise<ConnectedApi>>();
+
+function refreshOnce(config: QboConfig, stored: StoredConnection): Promise<ConnectedApi> {
+  const key = `${stored.environment}:${stored.realm_id}:${stored.refresh_token}`;
+  const inFlight = refreshing.get(key);
+  if (inFlight) return inFlight;
+  const p = refresh(config, stored).finally(() => refreshing.delete(key));
+  refreshing.set(key, p);
+  return p;
+}
+
+async function refresh(config: QboConfig, stored: StoredConnection): Promise<ConnectedApi> {
   const refreshToken = decryptToken(config.clientSecret, stored.refresh_token);
   let tokens: TokenResponse;
   try {
     tokens = await refreshTokens(config, refreshToken);
   } catch (e) {
-    // Another request may have refreshed (and rotated the refresh token) at the same time.
+    // Another server may have refreshed (and rotated the refresh token) at the same time.
     const again = await load();
     if (again && again.refresh_token !== stored.refresh_token && Date.parse(again.access_token_expires_at) > Date.now()) {
       return {

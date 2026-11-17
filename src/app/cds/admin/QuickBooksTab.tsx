@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import type { SearchOption } from "@/components/SearchSelect";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
 import {
@@ -10,9 +11,8 @@ import {
 import styles from "@/components/cds-admin/cds-admin.module.css";
 import { one } from "@/components/cds-admin/server-utils";
 import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
-import { listCustomers, listItems, type QboCustomer, type QboItem } from "@/lib/qbo/api";
+import { qboMappingLists, type QboMappingLists } from "@/lib/qbo/lists";
 import { qboStatus } from "@/lib/qbo/status";
-import { qboApi } from "@/lib/qbo/tokens";
 import { wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllSettled } from "@/lib/supabase/fetch-all";
@@ -26,7 +26,6 @@ import {
   saveItemMap,
   saveMeasurementMap,
 } from "./qbo-actions";
-import { ShopBillsSection } from "./ShopBillsSection";
 
 type Customer = { id: string; code: string; name: string };
 type Item = { id: string; sku: string; name: string };
@@ -43,26 +42,12 @@ type Alias = {
   catalog_items: { sku: string; name: string } | { sku: string; name: string }[] | null;
 };
 
-/** Loads QuickBooks customers and items when connected; null lists mean "type the id by hand". */
-async function qboLists(connected: boolean): Promise<{ customers: QboCustomer[] | null; items: QboItem[] | null; error: string | null }> {
-  if (!connected) return { customers: null, items: null, error: null };
-  try {
-    const api = await qboApi();
-    const [customers, items] = await Promise.all([listCustomers(api), listItems(api)]);
-    return { customers, items, error: null };
-  } catch (e) {
-    return {
-      customers: null,
-      items: null,
-      error: `QuickBooks lists could not be loaded (${e instanceof Error ? e.message : "unknown error"}). Enter ids by hand or reload.`,
-    };
-  }
-}
-
 export async function QuickBooksTab() {
   const supabase = await createClient();
   const status = await qboStatus(supabase);
-  const [customersRes, itemsRes, customerMapRes, itemMapRes, measurementRes, aliasRes, lists] = await Promise.all([
+  // The QuickBooks lists can take seconds: not awaited here, the pickers stream in when they arrive.
+  const lists = qboMappingLists(status.connected);
+  const [customersRes, itemsRes, customerMapRes, itemMapRes, measurementRes, aliasRes] = await Promise.all([
     supabase.from("customers").select("id, code, name").eq("active", true).order("name"),
     supabase.from("catalog_items").select("id, sku, name").eq("active", true).order("sku"),
     supabase.from("qbo_customer_map").select("customer_id, qbo_customer_id, qbo_display_name"),
@@ -81,7 +66,6 @@ export async function QuickBooksTab() {
         .order("id")
         .range(from, to),
     ),
-    qboLists(status.connected),
   ]);
   const loadError = [customersRes, itemsRes, customerMapRes, itemMapRes, measurementRes, aliasRes].some((r) => r.error);
   const customers = (customersRes.data ?? []) as Customer[];
@@ -144,19 +128,6 @@ export async function QuickBooksTab() {
       (m) => String(COMPONENT_TYPES.indexOf(m.component_type as (typeof COMPONENT_TYPES)[number])),
     ),
   ];
-  const qboCustomerOptions: SearchOption[] | null =
-    lists.customers?.map((c) => ({
-      value: `${c.Id}::${c.DisplayName}`,
-      label: c.DisplayName,
-      hint: `QuickBooks id ${c.Id}${c.CompanyName && c.CompanyName !== c.DisplayName ? ` - ${c.CompanyName}` : ""}`,
-    })) ?? null;
-  const qboItemOptions: SearchOption[] | null =
-    lists.items?.map((i) => ({
-      value: `${i.Id}::${i.Name}`,
-      label: i.FullyQualifiedName ?? i.Name,
-      hint: [`QuickBooks id ${i.Id}`, i.Type, i.Sku && `SKU ${i.Sku}`].filter(Boolean).join(" - "),
-    })) ?? null;
-
   const unmappedItems = items.filter((i) => !itemMap.has(i.id) && !customerItemCount.has(i.id));
   const unmappedCustomers = customers.filter((c) => !customerMap.has(c.id));
 
@@ -166,7 +137,11 @@ export async function QuickBooksTab() {
         <h3>QuickBooks mappings</h3>
         <p className="small">
           Every customer and every item on a work order must be linked to its QuickBooks record before the invoice can be
-          created; every shop to its QuickBooks vendor before its bill can be created (Shop bills, below). Links point into the connected QuickBooks company; after switching companies (for example from sandbox to
+          created; every shop to its QuickBooks vendor before its bill can be created (
+          <Link className="link" href="/cds/admin?tab=bills">
+            Shop bills
+          </Link>
+          ). Links point into the connected QuickBooks company; after switching companies (for example from sandbox to
           production) check them again.
         </p>
         {!status.connected && (
@@ -178,7 +153,10 @@ export async function QuickBooksTab() {
             .
           </div>
         )}
-        {lists.error && <div className="notice danger">{lists.error}</div>}
+        {/* The pickers below say while the lists load; an error shows here once they fail. */}
+        <Suspense fallback={null}>
+          <QboListsError lists={lists} />
+        </Suspense>
         {loadError && <div className="notice danger">Some mappings could not be loaded. Refresh the page to try again.</div>}
       </div>
 
@@ -193,7 +171,7 @@ export async function QuickBooksTab() {
               </label>
               <FormSearchSelect id="qmap-customer" name="customer_id" options={customerOptions} required placeholder="Type a customer name or code" />
             </div>
-            <QboPicker kind="customer" idPrefix="qmap-customer" options={qboCustomerOptions} />
+            <QboPicker kind="customer" idPrefix="qmap-customer" lists={lists} />
           </div>
         </ActionForm>
         <div className="tablewrap" style={{ marginTop: 14 }}>
@@ -271,7 +249,7 @@ export async function QuickBooksTab() {
               <label htmlFor="qmap-item-customer">Customer</label>
               <FormSearchSelect id="qmap-item-customer" name="customer_id" options={mappingCustomerOptions} placeholder="All customers" />
             </div>
-            <QboPicker kind="item" idPrefix="qmap-item" options={qboItemOptions} />
+            <QboPicker kind="item" idPrefix="qmap-item" lists={lists} />
           </div>
         </ActionForm>
         <h4 style={{ marginTop: 16 }}>All customers</h4>
@@ -407,7 +385,7 @@ export async function QuickBooksTab() {
                 ))}
               </select>
             </div>
-            <QboPicker kind="item" idPrefix="qmeas" options={qboItemOptions} />
+            <QboPicker kind="item" idPrefix="qmeas" lists={lists} />
           </div>
         </ActionForm>
         <div className="tablewrap" style={{ marginTop: 14 }}>
@@ -544,9 +522,6 @@ export async function QuickBooksTab() {
           </table>
         </div>
       </div>
-
-      {/* ---------------------------------------------------------- shop bills */}
-      <ShopBillsSection connected={status.connected} />
     </>
   );
 }
@@ -569,11 +544,59 @@ function sortByType<T extends { component_type: string }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => order(a.component_type) - order(b.component_type));
 }
 
+async function QboListsError({ lists }: { lists: Promise<QboMappingLists> }) {
+  const { error } = await lists;
+  return error ? <div className="notice danger">{error}</div> : null;
+}
+
+/** QuickBooks customers or items as picker options; null when the lists are not available. */
+function qboOptions(kind: "customer" | "item", lists: QboMappingLists): SearchOption[] | null {
+  if (kind === "customer") {
+    return (
+      lists.customers?.map((c) => ({
+        value: `${c.Id}::${c.DisplayName}`,
+        label: c.DisplayName,
+        hint: `QuickBooks id ${c.Id}${c.CompanyName && c.CompanyName !== c.DisplayName ? ` - ${c.CompanyName}` : ""}`,
+      })) ?? null
+    );
+  }
+  return (
+    lists.items?.map((i) => ({
+      value: `${i.Id}::${i.Name}`,
+      label: i.FullyQualifiedName ?? i.Name,
+      hint: [`QuickBooks id ${i.Id}`, i.Type, i.Sku && `SKU ${i.Sku}`].filter(Boolean).join(" - "),
+    })) ?? null
+  );
+}
+
+/** The QuickBooks record picker, shown while the QuickBooks lists load. */
+function QboPicker({ kind, idPrefix, lists }: { kind: "customer" | "item"; idPrefix: string; lists: Promise<QboMappingLists> }) {
+  const label = kind === "customer" ? "QuickBooks customer" : "QuickBooks item";
+  return (
+    <Suspense
+      fallback={
+        <div className="field">
+          <label>{label}</label>
+          <p className="small" role="status">
+            Loading QuickBooks lists...
+          </p>
+        </div>
+      }
+    >
+      <LoadedQboPicker kind={kind} idPrefix={idPrefix} lists={lists} />
+    </Suspense>
+  );
+}
+
+async function LoadedQboPicker({ kind, idPrefix, lists }: { kind: "customer" | "item"; idPrefix: string; lists: Promise<QboMappingLists> }) {
+  return <QboPickerFields kind={kind} idPrefix={idPrefix} options={qboOptions(kind, await lists)} />;
+}
+
 /**
  * The QuickBooks record: a list from QuickBooks when connected, else id and name typed in.
  * idPrefix keeps element ids unique when two forms on the tab pick a QuickBooks item.
  */
-function QboPicker({ kind, idPrefix, options }: { kind: "customer" | "item"; idPrefix: string; options: SearchOption[] | null }) {
+function QboPickerFields({ kind, idPrefix, options }: { kind: "customer" | "item"; idPrefix: string; options: SearchOption[] | null }) {
   const field = kind === "customer" ? "qbo_customer" : "qbo_item";
   const label = kind === "customer" ? "QuickBooks customer" : "QuickBooks item";
   if (options) {
