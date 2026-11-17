@@ -3,6 +3,7 @@
   "crons": [
     { "path": "/api/cron/shipstation-tracking", "schedule": "0 */2 * * *" },
     { "path": "/api/cron/sheets-backup", "schedule": "*/15 * * * *" },
-    { "path": "/api/cron/portal-email-retry", "schedule": "7,22,37,52 * * * *" }
+    { "path": "/api/cron/portal-email-retry", "schedule": "7,22,37,52 * * * *" },
+    { "path": "/api/cron/qbo-catalog-sync", "schedule": "41 * * * *" }
   ]
 }

@@ -5,6 +5,7 @@ import type { ActionState } from "@/components/cds-admin/ActionForm";
 import { checkbox, dbMessage, optionalAmount, optionalText, text } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { CATEGORY_LABEL } from "@/lib/format";
+import { syncCatalogFromQuickBooks } from "@/lib/qbo/catalog-sync-server";
 import { createClient } from "@/lib/supabase/server";
 
 const TAX_CLASSES = ["parts", "labor", "shipping", "exempt"];
@@ -108,4 +109,19 @@ export async function setInHouseCost(itemId: string, _prev: ActionState, formDat
   if (error) return { error: dbMessage(error, "Could not save the CDS cost.") };
   revalidatePath("/cds/catalog");
   return { ok: true, message: amount === null ? "CDS cost removed." : "CDS cost saved." };
+}
+
+/**
+ * "Sync now": the same QuickBooks catalog sync the hourly cron runs (src/lib/qbo/catalog-sync.ts),
+ * on the server with the service role after requireCds().
+ */
+export async function syncCatalogNow(): Promise<ActionState> {
+  await requireCds();
+  const r = await syncCatalogFromQuickBooks("manual");
+  revalidatePath("/cds/catalog");
+  if (r.status === "skipped") return { error: r.reason };
+  if (r.status === "failed") return { error: `The QuickBooks sync failed: ${r.error ?? "unknown error"}` };
+  const parts = [`${r.created} new ${r.created === 1 ? "item" : "items"}`];
+  if (r.linked) parts.push(`${r.linked} linked by SKU`);
+  return { ok: true, message: `Synced from QuickBooks: ${parts.join(", ")}.` };
 }

@@ -171,6 +171,9 @@
     "authenticated": "SELECT,UPDATE,USAGE",
     "service_role": "SELECT,UPDATE,USAGE"
   },
+  "sequence public.qbo_catalog_sync_runs_id_seq": {
+    "service_role": "SELECT,UPDATE,USAGE"
+  },
   "sequence public.shipment_tracking_events_id_seq": {
     "authenticated": "SELECT,UPDATE,USAGE",
     "service_role": "SELECT,UPDATE,USAGE"
@@ -415,6 +418,10 @@
     "authenticated": "SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
+  "table public.qbo_catalog_sync_runs": {
+    "authenticated": "SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
   "table public.qbo_invoice_claims": {
     "authenticated": "SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
@@ -440,6 +447,15 @@
     "service_role": "EXECUTE"
   },
   "function public.portal_email_reclaim(bigint,integer)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.qbo_catalog_sync_create_item(jsonb)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.qbo_catalog_sync_link(uuid,text,text)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.qbo_catalog_sync_rename(text,text)": {
     "service_role": "EXECUTE"
   },
   "table public.work_order_links": {

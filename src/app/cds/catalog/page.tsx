@@ -6,8 +6,10 @@ import { CatalogPriceFields } from "@/components/cds-admin/PriceWarning";
 import { today } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { CATEGORY_LABEL, money } from "@/lib/format";
+import { catalogSyncStatus, type CatalogSyncRunRow } from "@/lib/qbo/catalog-sync";
+import { qboStatus } from "@/lib/qbo/status";
 import { createClient } from "@/lib/supabase/server";
-import { saveCatalogItem, setCustomerShopRate, setInHouseCost } from "./actions";
+import { saveCatalogItem, setCustomerShopRate, setInHouseCost, syncCatalogNow } from "./actions";
 
 type Item = {
   id: string;
@@ -22,6 +24,7 @@ type Item = {
 type PriceRow = { catalog_item_id: string; amount: string | null; effective_from: string };
 type CustomerRateRow = PriceRow & { customer_id: string };
 type Customer = { id: string; code: string; name: string };
+type SyncRunRow = Omit<CatalogSyncRunRow, "details"> & { created_list: { sku: string; qbo_item_id: string }[] | null };
 
 const TAX_CLASS_LABEL: Record<string, string> = { parts: "Parts", labor: "Labor", shipping: "Shipping", exempt: "Exempt" };
 
@@ -46,6 +49,8 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
     { data: customerRateData },
     { data: custData },
     { data: costData },
+    { data: syncRunData },
+    qbo,
   ] = await Promise.all([
     supabase.from("catalog_items").select("id, sku, category, name, oe_cross, tax_class, shop_selectable, active").order("sku"),
     supabase
@@ -86,7 +91,17 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
           .or(current)
           .order("effective_from", { ascending: true })
       : Promise.resolve({ data: [] as PriceRow[] }),
+    // The QuickBooks catalog sync (hourly): the latest runs, newest first, for the status line.
+    supabase
+      .from("qbo_catalog_sync_runs")
+      .select("finished_at, status, created, linked, error, created_list:details->created")
+      .order("finished_at", { ascending: false })
+      .limit(20),
+    qboStatus(supabase),
   ]);
+  const sync = catalogSyncStatus(
+    ((syncRunData ?? []) as SyncRunRow[]).map(({ created_list, ...r }) => ({ ...r, details: { created: created_list ?? [] } })),
+  );
   const costs = new Map(((costData ?? []) as PriceRow[]).map((r) => [r.catalog_item_id, r]));
   const items = (itemData ?? []) as Item[];
   // Ascending order: the latest row in effect wins.
@@ -126,6 +141,14 @@ export default async function CatalogPage({ searchParams }: PageProps<"/cds/cata
           {shown.length} of {items.length} items
         </span>
       </div>
+
+      <div className="row between" style={{ alignItems: "center" }}>
+        <p className="small" role="status" style={{ margin: 0 }}>
+          {sync.text}
+        </p>
+        {qbo.connected && <ActionForm action={syncCatalogNow} submitLabel="Sync now" pendingLabel="Syncing..." submitClassName="btn btn-secondary btn-small" />}
+      </div>
+      {sync.error && <div className="notice danger">{sync.error}</div>}
 
       <div className="notice">
         Changing a price starts a new price from today and keeps the old one in history. Existing work orders keep the
