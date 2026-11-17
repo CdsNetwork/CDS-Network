@@ -592,8 +592,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   );
   const linkLoadError = Boolean(linkOutRes.error || linkInRes.error);
 
-  // Automatic deductions on the shop's bill (shipped orders: $15 per filter), computed in the
-  // database; already part of work_order_financials.shop_subtotal and margin.
+  // Automatic deductions on the shop's bill (shipped orders: $15 per filter or EGR cooler),
+  // computed in the database; already part of work_order_financials.shop_subtotal and margin.
   const { data: deductionRows } = await supabase
     .from("work_order_shop_deductions")
     .select(SHOP_DEDUCTION_COLUMNS)

@@ -1,5 +1,5 @@
 import "server-only";
-import { listBillAccounts, listCustomers, listItems, listTerms, listVendors, type QboAccount, type QboCustomer, type QboItem, type QboTerm } from "./api";
+import { listBillAccounts, listCustomers, listItems, listTerms, listVendors, recentBillCustomFields, type QboAccount, type QboCustomer, type QboItem, type QboTerm } from "./api";
 import type { QboVendor } from "./bill";
 import type { QboApi } from "./client";
 import { qboApi } from "./tokens";
@@ -73,4 +73,12 @@ export async function qboBillLists(connected: boolean): Promise<QboBillLists> {
   } catch (e) {
     return { lists: null, error: `QuickBooks vendors and accounts could not be loaded (${message(e)}). Enter ids by hand or reload.` };
   }
+}
+
+/**
+ * The custom fields seen on recent bills (./custom-fields billCustomFieldDefs), kept like the
+ * lists: a field CDS adds or renames in QuickBooks is used within QBO_LISTS_TTL_MS.
+ */
+export function cachedBillCustomFields(api: QboApi): ReturnType<typeof recentBillCustomFields> {
+  return cached(api, "bill-custom-fields", () => recentBillCustomFields(api));
 }

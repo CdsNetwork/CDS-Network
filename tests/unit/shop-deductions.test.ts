@@ -1,6 +1,7 @@
 /**
- * The $15 per filter shared shipping deduction on the shop's bill
- * (20261111030000_shop_filter_shipping_deduction.sql). The database computes the deduction
+ * The $15 per part (filter or EGR cooler) shared shipping deduction on the shop's bill
+ * (20261111030000_shop_filter_shipping_deduction.sql, 20261119050000_shipping_deduction_egr.sql).
+ * The database computes the deduction
  * (view work_order_shop_deductions); the pages show it like any other line and take it off
  * the shop total. The customer invoice never sees it.
  */
@@ -41,10 +42,12 @@ describe("shopPayable", () => {
 });
 
 describe("deductionLabel", () => {
-  it("names the filters and the amount per filter", () => {
-    expect(deductionLabel(deduction)).toBe("Shared shipping deduction: 3 filters x $15.00 round trip");
+  it("names the parts (filters and EGR coolers) and the amount per part", () => {
+    expect(deductionLabel(deduction)).toBe(
+      "Shared shipping deduction: 3 parts (filters or EGR coolers) x $15.00 round trip",
+    );
     expect(deductionLabel({ ...deduction, filters: 1, amount: -15 })).toBe(
-      "Shared shipping deduction: 1 filter x $15.00 round trip",
+      "Shared shipping deduction: 1 part (filter or EGR cooler) x $15.00 round trip",
     );
   });
 

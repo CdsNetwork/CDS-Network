@@ -1,9 +1,10 @@
 /**
  * Automatic deductions on the shop's bill. The database computes them (view
- * public.work_order_shop_deductions, 20261111030000_shop_filter_shipping_deduction.sql):
- * $15 per filter (DPF, DOC and SCR components) on shipped orders, never on pickup orders or
- * for the in-house shop. The amount per filter is private.shop_shipping_deduction_per_filter()
- * there. This file only reads, labels and adds them up; it never decides them.
+ * public.work_order_shop_deductions, 20261111030000_shop_filter_shipping_deduction.sql and
+ * 20261119050000_shipping_deduction_egr.sql): $15 per part shipped (every DPF, DOC, SCR and
+ * EGR cooler component) on shipped orders, never on pickup orders or for the in-house shop.
+ * The amount per part is private.shop_shipping_deduction_per_filter() there. This file only
+ * reads, labels and adds them up; it never decides them.
  *
  * Deductions are not work order lines: they have no customer price and never reach the
  * customer invoice.
@@ -13,8 +14,9 @@ import { money } from "@/lib/format";
 
 export type ShopDeduction = {
   kind: "filter_shipping";
+  /** Parts shipped: filters (DPF, DOC, SCR) and EGR coolers. The view column keeps its old name. */
   filters: number;
-  /** Per filter, negative. */
+  /** Per part, negative. */
   unit_amount: number;
   /** Total, negative. */
   amount: number;
@@ -69,6 +71,6 @@ export function shopMoney(amount: number | null): string {
 
 /** The line text shown to CDS and to the shop. */
 export function deductionLabel(d: ShopDeduction): string {
-  const filters = `${d.filters} ${d.filters === 1 ? "filter" : "filters"}`;
-  return `Shared shipping deduction: ${filters} x ${money(Math.abs(d.unit_amount))} round trip`;
+  const parts = d.filters === 1 ? "1 part (filter or EGR cooler)" : `${d.filters} parts (filters or EGR coolers)`;
+  return `Shared shipping deduction: ${parts} x ${money(Math.abs(d.unit_amount))} round trip`;
 }

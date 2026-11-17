@@ -1,9 +1,10 @@
 /**
- * The $15 per filter shared shipping deduction on the shop's bill
- * (20261111030000_shop_filter_shipping_deduction.sql).
+ * The $15 per part shared shipping deduction on the shop's bill
+ * (20261111030000_shop_filter_shipping_deduction.sql, EGR coolers counted since
+ * 20261119050000_shipping_deduction_egr.sql).
  *
- * On a shipped order the shop's bill gets one deduction: minus $15 per filter (DPF, DOC and
- * SCR components the order's shop recorded; EGR coolers are not filters). Pickup orders and
+ * On a shipped order the shop's bill gets one deduction: minus $15 per part shipped (every
+ * DPF, DOC, SCR and EGR cooler component the order's shop recorded). Pickup orders and
  * the in-house shop get nothing. It is computed, so it follows the fulfillment method and
  * the filter count, and it never touches the customer side.
  */
@@ -87,10 +88,25 @@ const financials = async (wo: string) =>
   );
 
 describe("shared shipping deduction", () => {
-  it("is minus $15 per DPF, DOC and SCR on a shipped order; EGR coolers are not filters", async () => {
+  it("is minus $15 per DPF, DOC, SCR and EGR cooler on a shipped order", async () => {
     const wo = await newWo(f.shopA);
-    await addComponents(wo, ["DPF", "DPF", "DOC", "EGR"]);
-    expect(await deductions(cds, wo)).toEqual([{ kind: "filter_shipping", filters: 3, unit_amount: -15, amount: -45 }]);
+    await addComponents(wo, ["DPF", "DPF", "DOC", "SCR", "EGR"]);
+    expect(await deductions(cds, wo)).toEqual([{ kind: "filter_shipping", filters: 5, unit_amount: -15, amount: -75 }]);
+  });
+
+  // Client report 2026-11-17 (WO-101928): a shipped EGR order got no shipping credit.
+  it("is minus $15.00 on a shipped order with one EGR cooler only", async () => {
+    const wo = await newWo(f.shopA);
+    await addComponents(wo, ["EGR"]);
+    expect(await deductions(cds, wo)).toEqual([{ kind: "filter_shipping", filters: 1, unit_amount: -15, amount: -15 }]);
+    expect(await deductions(shopA, wo)).toEqual([{ kind: "filter_shipping", filters: 1, unit_amount: -15, amount: -15 }]);
+    expect(Number((await financials(wo)).shop_subtotal)).toBe(85);
+  });
+
+  it("is never on a pickup EGR order", async () => {
+    const wo = await newWo(f.shopA, "pickup");
+    await addComponents(wo, ["EGR"]);
+    expect(await deductions(cds, wo)).toEqual([]);
   });
 
   it("is in the shop subtotal and the margin, and leaves the customer subtotal alone", async () => {
@@ -116,7 +132,7 @@ describe("shared shipping deduction", () => {
     expect(Number((await financials(wo)).shop_subtotal)).toBe(85);
   });
 
-  it("follows the filter count", async () => {
+  it("follows the part count", async () => {
     const wo = await newWo(f.shopA);
     expect(await deductions(cds, wo)).toEqual([]);
     const [first] = await addComponents(wo, ["DPF"]);
@@ -157,7 +173,7 @@ describe("shared shipping deduction", () => {
     expect(await deductions(cds, wo.id)).toEqual([]);
   });
 
-  it("counts only the filters of the order's current shop", async () => {
+  it("counts only the parts of the order's current shop", async () => {
     const wo = await newWo(f.shopA);
     await addComponents(wo, ["DPF"]);
     await addComponents(wo, ["DPF", "DPF"], f.shopB);

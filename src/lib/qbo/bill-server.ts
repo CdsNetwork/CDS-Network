@@ -35,13 +35,14 @@ function deps(db: SupabaseClient, woId: string): BillRunDeps {
       if (error) throw new Error(error.message);
     },
     qbo: async (options) => {
-      const [{ qboApi }, api] = await Promise.all([import("./tokens"), import("./api")]);
+      const [{ qboApi }, api, { cachedBillCustomFields }] = await Promise.all([import("./tokens"), import("./api"), import("./lists")]);
       const conn = await qboApi(options);
       return {
         findBills: (docNumber) => api.findBillsByNumber(conn, docNumber),
         getItems: (ids) => api.getItems(conn, ids),
         listDepartments: () => api.listDepartments(conn),
         listTerms: () => api.listTerms(conn),
+        recentBillCustomFields: () => cachedBillCustomFields(conn),
         createBill: (payload, requestId) => api.createBill(conn, payload, requestId),
       };
     },

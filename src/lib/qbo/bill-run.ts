@@ -3,7 +3,9 @@ import {
   billItemIds,
   billState,
   defaultBillTerm,
+  hasBillFieldValues,
   itemsWithoutExpenseAccount,
+  withBillCustomFields,
   shouldAutoCreate,
   type BillInputs,
   type BillRecord,
@@ -12,6 +14,7 @@ import {
   type QboBillTerm,
 } from "./bill";
 import { matchCogsDivision, type CogsDivision, type QboDepartment } from "./cogs-division";
+import { billCustomFieldDefs } from "./custom-fields";
 import { QboError } from "./client";
 
 /**
@@ -29,7 +32,9 @@ import { QboError } from "./client";
  *      (QuickBooks would refuse it) stops the run with the item named, recorded as a refusal
  *      CDS retries after fixing the item in QuickBooks. Read alongside, and never stopping
  *      the bill: the customer's COGS division when none is remembered yet (found by name,
- *      ./cogs-division, then remembered), and the Net 30 term when CDS chose no terms.
+ *      ./cogs-division, then remembered), the Net 30 term when CDS chose no terms, and the
+ *      bill custom fields Fleet Number and P.O. Number (learned from recent bills; a value
+ *      whose field is not found stays in the memo, ./bill withBillCustomFields).
  *   4. The bill is sent with Intuit's requestid ("bill-<order id>"), so a retry after a
  *      timeout or a lost answer gets the same bill back. Only after QuickBooks refused the
  *      request outright (nothing created) does the next attempt use "bill-<id>-r<n>".
@@ -52,6 +57,8 @@ export type BillQbo = {
   getItems(ids: string[]): Promise<QboBillItem[]>;
   listDepartments(): Promise<QboDepartment[]>;
   listTerms(): Promise<QboBillTerm[]>;
+  /** Recent bills read with include=enhancedAllCustomFields, to learn the bill custom fields. */
+  recentBillCustomFields(): Promise<{ CustomField?: { DefinitionId?: string; Name?: string }[] }[]>;
   createBill(payload: QboBillPayload, requestId: string): Promise<CreatedBill>;
 };
 
@@ -123,21 +130,41 @@ export async function runShopBill(deps: BillRunDeps, woId: string, mode: "auto" 
       return null;
     }
   };
+  /** The bill's custom fields; never stops the bill (only an expired token is passed on, to refresh and retry). */
+  const fieldNotes: string[] = [];
+  const findFields = async (qbo: BillQbo) => {
+    if (!hasBillFieldValues(inputs.workOrder)) return null;
+    try {
+      return billCustomFieldDefs(await qbo.recentBillCustomFields());
+    } catch (e) {
+      if (e instanceof QboError && e.unauthorized) throw e;
+      fieldNotes.push(`The QuickBooks bill custom fields could not be read (${why(e)}), so the PO and unit are in the bill memo.`);
+      return null;
+    }
+  };
   const send = async (qbo: BillQbo): Promise<{ bill: CreatedBill; found: boolean } | { conflict: FoundBill } | { noExpenseAccount: string[] }> => {
     const same = (await qbo.findBills(payload.DocNumber)).filter((b) => b.VendorRef?.value === vendorId);
     const ours = same.find((b) => madeForOrder(b, inputs.workOrder.woNumber));
     if (ours) return { bill: ours, found: true };
     if (same.length) return { conflict: same[0] };
     const ids = billItemIds(payload);
-    const [items, division, term] = await Promise.all([
+    fieldNotes.length = 0;
+    const [items, division, term, fieldDefs] = await Promise.all([
       ids.length ? qbo.getItems(ids) : Promise.resolve([]),
       payload.DepartmentRef ? Promise.resolve(null) : findDivision(qbo),
       payload.SalesTermRef ? Promise.resolve(null) : qbo.listTerms().then(defaultBillTerm, () => null),
+      findFields(qbo),
     ]);
     const missing = itemsWithoutExpenseAccount(payload, items);
     if (missing.length) return { noExpenseAccount: missing };
+    let withFields = payload;
+    if (fieldDefs) {
+      const filled = withBillCustomFields(payload, inputs.workOrder, fieldDefs);
+      withFields = filled.payload;
+      fieldNotes.push(...filled.notes);
+    }
     const toSend: QboBillPayload = {
-      ...payload,
+      ...withFields,
       ...(division ? { DepartmentRef: { value: division.id, name: division.name } } : {}),
       ...(term ? { SalesTermRef: term } : {}),
     };
@@ -187,7 +214,11 @@ export async function runShopBill(deps: BillRunDeps, woId: string, mode: "auto" 
   const { bill, found } = result;
   const number = bill.DocNumber ?? payload.DocNumber;
   const billTotal = typeof bill.TotalAmt === "number" ? bill.TotalAmt : total;
-  await deps.log("ok", bill.Id, `QuickBooks bill number ${number}${found ? " | found in QuickBooks, not sent again" : ""}`);
+  await deps.log(
+    "ok",
+    bill.Id,
+    [`QuickBooks bill number ${number}`, found ? "found in QuickBooks, not sent again" : null, ...(found ? [] : fieldNotes)].filter(Boolean).join(" | "),
+  );
   try {
     await deps.finish(woId, claim.claimId, { outcome: "created", billId: bill.Id, number, total: billTotal, vendorId, found });
   } catch (e) {

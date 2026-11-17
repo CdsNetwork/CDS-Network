@@ -1,6 +1,7 @@
 import { money } from "@/lib/format";
 import { deductionLabel, shopPayable, type ShopDeduction } from "@/lib/shop-deductions";
 import type { CogsDivision } from "./cogs-division";
+import type { BillFieldDefs, QboCustomField } from "./custom-fields";
 import { cents, linkedItem, unlinkedItemMessage, type ItemMappings } from "./invoice";
 
 /**
@@ -23,6 +24,10 @@ import { cents, linkedItem, unlinkedItemMessage, type ItemMappings } from "./inv
  *     (qbo_affiliate_class).
  *   * DepartmentRef: the customer's COGS division (qbo_customer_cogs_division, ./cogs-division),
  *     found in QuickBooks on the customer's first bill (./bill-run); without one, none.
+ *   * CustomField: "Fleet Number" (the work order's unit number) and "P.O. Number" (its PO),
+ *     CDS's bill custom fields, added when sending (withBillCustomFields, ./bill-run) once
+ *     their DefinitionIds are learned from recent bills. A value whose field is not found
+ *     stays in the memo (PrivateNote) instead; it never stops the bill.
  *   * SalesTermRef: the terms, when they are part of that setting; else the QuickBooks term
  *     named Net 30 (all CDS vendors are Net 30, CDS 2026-11-16), added when sending
  *     (defaultBillTerm, ./bill-run); without such a term, the vendor's own.
@@ -157,6 +162,8 @@ export type QboBillPayload = {
   TxnDate: string;
   DocNumber: string;
   PrivateNote: string;
+  /** The bill's custom fields (Fleet Number, P.O. Number), when found in QuickBooks. */
+  CustomField?: QboCustomField[];
   /** The customer's COGS division. */
   DepartmentRef?: Ref;
   SalesTermRef?: Ref;
@@ -192,6 +199,54 @@ function docNumber(wo: BillWorkOrder): { doc: string; note: string } {
   const ref = wo.shopInvoiceRef?.trim() ?? "";
   if (!ref) return { doc: `WO-${wo.woNumber}`, note: "No shop invoice number" };
   return { doc: clip(ref, DOC_NUMBER_MAX), note: `Shop invoice ${ref}` };
+}
+
+/**
+ * The bill memo: "Portal WO-<n>" first (./bill-run finds the portal's own bills by it), the
+ * shop invoice, the customer, then the PO and the unit unless they are in custom fields.
+ */
+export function billMemo(wo: BillWorkOrder, inFields: { po?: boolean; unit?: boolean } = {}): string {
+  const { note } = docNumber(wo);
+  const po = inFields.po ? null : wo.poNumber?.trim();
+  const unit = inFields.unit ? null : wo.unitNumber?.trim();
+  return clip([`Portal WO-${wo.woNumber}`, note, wo.customerName, po && `PO ${po}`, unit && `Unit ${unit}`].filter(Boolean).join(" | "), 4000);
+}
+
+/** Bill custom field names the bill's unit and PO go to (CDS's QuickBooks; matched loosely, ./custom-fields). */
+export const BILL_FLEET_FIELD = "Fleet Number";
+export const BILL_PO_FIELD = "P.O. Number";
+
+/** True when the order has a PO or a unit number for the bill's custom fields. */
+export function hasBillFieldValues(wo: BillWorkOrder): boolean {
+  return !!(wo.poNumber?.trim() || wo.unitNumber?.trim());
+}
+
+/**
+ * The bill with its Fleet Number and P.O. Number custom fields filled where QuickBooks has
+ * the field (defs learned from recent bills), the memo without the values now in fields,
+ * and a note for each value kept in the memo because its field was not found.
+ */
+export function withBillCustomFields(
+  payload: QboBillPayload,
+  wo: BillWorkOrder,
+  defs: BillFieldDefs,
+): { payload: QboBillPayload; notes: string[] } {
+  const fields: QboCustomField[] = [];
+  const notes: string[] = [];
+  const add = (def: BillFieldDefs["fleet"], label: string, value: string | null | undefined): boolean => {
+    const v = value?.trim();
+    if (!v) return false;
+    if (!def) {
+      notes.push(`QuickBooks has no bill custom field named "${label}", so ${label} is in the bill memo.`);
+      return false;
+    }
+    fields.push({ DefinitionId: def.id, Name: def.name, Type: "StringType", StringValue: clip(v, 4000) });
+    return true;
+  };
+  const unit = add(defs.fleet, BILL_FLEET_FIELD, wo.unitNumber);
+  const po = add(defs.po, BILL_PO_FIELD, wo.poNumber);
+  if (!fields.length) return { payload, notes };
+  return { payload: { ...payload, CustomField: fields, PrivateNote: billMemo(wo, { po, unit }) }, notes };
 }
 
 export function buildBillPayload(i: BillInputs): BillBuild {
@@ -253,9 +308,7 @@ export function buildBillPayload(i: BillInputs): BillBuild {
     );
   }
 
-  const { doc, note } = docNumber(wo);
-  const po = wo.poNumber?.trim();
-  const unit = wo.unitNumber?.trim();
+  const { doc } = docNumber(wo);
   return {
     ok: true,
     total,
@@ -263,10 +316,7 @@ export function buildBillPayload(i: BillInputs): BillBuild {
       VendorRef: { value: i.vendor.qboVendorId.trim(), name: i.vendor.qboVendorName },
       TxnDate: billTxnDate(wo.completedAt ?? new Date()),
       DocNumber: doc,
-      PrivateNote: clip(
-        [`Portal WO-${wo.woNumber}`, note, wo.customerName, po && `PO ${po}`, unit && `Unit ${unit}`].filter(Boolean).join(" | "),
-        4000,
-      ),
+      PrivateNote: billMemo(wo),
       ...(i.division ? { DepartmentRef: { value: i.division.id, name: i.division.name } } : {}),
       ...(setting.termsId ? { SalesTermRef: { value: setting.termsId, ...(setting.termsName ? { name: setting.termsName } : {}) } } : {}),
       Line: lines,

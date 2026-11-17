@@ -57,12 +57,15 @@ export function classicCustomFieldDefs(salesFormsPrefs: { CustomField?: unknown[
     .map(([id, name]) => ({ id, name, classic: true }));
 }
 
-type InvoiceField = { DefinitionId?: string; Name?: string };
+type TxnField = { DefinitionId?: string; Name?: string };
 
-/** Custom fields seen on existing invoices (read with include=enhancedAllCustomFields). */
-export function invoiceCustomFieldDefs(invoices: { CustomField?: InvoiceField[] }[]): CustomFieldDef[] {
+/**
+ * Custom fields seen on existing transactions (invoices or bills) read with
+ * include=enhancedAllCustomFields.
+ */
+export function invoiceCustomFieldDefs(txns: { CustomField?: TxnField[] }[]): CustomFieldDef[] {
   const seen = new Map<string, CustomFieldDef>();
-  for (const inv of invoices) {
+  for (const inv of txns) {
     for (const f of inv.CustomField ?? []) {
       const id = f.DefinitionId?.trim();
       const name = f.Name?.trim();
@@ -101,4 +104,36 @@ export function fillCustomFields(
     fields.push({ DefinitionId: def.id, Name: def.name, Type: "StringType", StringValue: text });
   }
   return { fields, missing, clipped };
+}
+
+/**
+ * Bill custom fields (CDS, 2026-11-17: "Fleet Number" and "P.O. Number" on bills).
+ *
+ * Bills are purchase forms: the classic fields in Preferences.SalesFormsPrefs are sales form
+ * fields only, so a bill field's DefinitionId is only learned from recent bills read with
+ * include=enhancedAllCustomFields (./api recentBillCustomFields), and the bill is created with
+ * that include. Names are matched loosely: case, spaces, dots and "#" are ignored, and "PO",
+ * "P.O. Number", "PO Number", "PO #", "PO No", "Purchase Order (Number)" all mean the PO;
+ * "Fleet (Number)", "Fleet #", "Unit (Number)", "Unit #" all mean the fleet number.
+ */
+const BILL_PO_NAMES = new Set(["po", "ponumber", "pono", "purchaseorder", "purchaseordernumber", "purchaseorderno"]);
+const BILL_FLEET_NAMES = new Set(["fleet", "fleetnumber", "fleetno", "unit", "unitnumber", "unitno"]);
+
+const looseKey = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/#/g, "")
+    .replace(/[^a-z0-9]/g, "");
+
+export type BillFieldDefs = { fleet: CustomFieldDef | null; po: CustomFieldDef | null };
+
+/** The bill's Fleet Number and PO fields among the custom fields seen on recent bills (first match wins). */
+export function billCustomFieldDefs(bills: { CustomField?: TxnField[] }[]): BillFieldDefs {
+  const out: BillFieldDefs = { fleet: null, po: null };
+  for (const d of invoiceCustomFieldDefs(bills)) {
+    const k = looseKey(d.name);
+    if (!out.po && BILL_PO_NAMES.has(k)) out.po = d;
+    else if (!out.fleet && BILL_FLEET_NAMES.has(k)) out.fleet = d;
+  }
+  return out;
 }

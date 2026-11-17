@@ -110,12 +110,12 @@ describe("buildBillPayload: one line per item, on the item the customer invoice 
     expect(d).toEqual({
       DetailType: "AccountBasedExpenseLineDetail",
       Amount: -30,
-      Description: expect.stringContaining("2 filters"),
+      Description: "Shared shipping deduction: 2 parts (filters or EGR coolers) x $15.00 round trip",
       AccountBasedExpenseLineDetail: { AccountRef: { value: "88", name: "Freight Savings" }, ClassRef: { value: "12" }, BillableStatus: "NotBillable" },
     });
   });
 
-  it("an item chosen for deductions (fallback) gets one item line with the filters as Qty", () => {
+  it("an item chosen for deductions (fallback) gets one item line with the parts as Qty", () => {
     const r = buildBillPayload(inputs({ setting: { ...setting, deduction: { kind: "item", id: "41", name: "Shipping credit" } }, classId: null }));
     if (!r.ok) throw new Error(r.problems.join(" "));
     expect(r.payload.Line[2]).toMatchObject({

@@ -197,9 +197,32 @@ export async function findBillsByNumber(api: QboApi, docNumber: string): Promise
   return res.QueryResponse?.Bill ?? [];
 }
 
-/** Creates the bill. The same requestId never creates a second bill. */
+/**
+ * The newest bills with every custom field (include=enhancedAllCustomFields), to learn the
+ * DefinitionIds of the bill custom fields ("Fleet Number", "P.O. Number"; ./custom-fields).
+ */
+export async function recentBillCustomFields(api: QboApi): Promise<{ CustomField?: { DefinitionId?: string; Name?: string }[] }[]> {
+  const res = await qboRequest<{ QueryResponse?: { Bill?: { CustomField?: { DefinitionId?: string; Name?: string }[] }[] } }>(
+    api,
+    "GET",
+    "query",
+    { query: { query: "select * from Bill orderby MetaData.LastUpdatedTime desc maxresults 20", include: "enhancedAllCustomFields" } },
+  );
+  return res.QueryResponse?.Bill ?? [];
+}
+
+/**
+ * Creates the bill. The same requestId never creates a second bill.
+ *
+ * include=enhancedAllCustomFields: the bill's custom fields are of the newer experience, and
+ * without it QuickBooks silently drops them (as it did with the invoice's "PO Number").
+ */
 export async function createBill(api: QboApi, payload: QboBillPayload, requestId: string): Promise<CreatedBill> {
-  const res = await qboRequest<{ Bill?: CreatedBill }>(api, "POST", "bill", { body: payload, requestId });
+  const res = await qboRequest<{ Bill?: CreatedBill }>(api, "POST", "bill", {
+    query: { include: "enhancedAllCustomFields" },
+    body: payload,
+    requestId,
+  });
   if (!res.Bill?.Id) throw new Error("QuickBooks did not return the new bill");
   return res.Bill;
 }

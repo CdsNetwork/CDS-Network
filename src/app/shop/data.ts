@@ -157,7 +157,7 @@ export type JobDetailData = {
   inHouse: boolean;
   /** An in-house parts-only order (CDS sells the part): completes without components. */
   partsSale: boolean;
-  /** Automatic deductions on the shop's bill (shipped orders: $15 per filter). */
+  /** Automatic deductions on the shop's bill (shipped orders: $15 per filter or EGR cooler). */
   deductions: ShopDeduction[];
   /** When the shop received the part (inbound delivery, else Picked Up), or null. */
   receivedAt: string | null;

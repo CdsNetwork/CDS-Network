@@ -95,6 +95,9 @@ export function toRow(o: BackupOrder): Cell[] {
   const customerTotal = round2(o.lines.reduce((s, l) => s + (l.customerUnitPrice ?? 0) * l.qty, 0));
   const shippingCosts = o.shipments.map((s) => s.cost).filter((c): c is number => c != null);
   const shipping = round2(shippingCosts.reduce((s, c) => s + c, 0));
+  // FILTER QTY keeps CDS's dispatch sheet meaning: filters only (DPF, DOC, SCR), not EGR
+  // coolers. The shipping deduction counts EGR coolers too (20261119050000), so it can be more
+  // than FILTER QTY x $15; it is already in VENDOR BILL $ AMT and PROFIT.
   const filters = o.components.filter((c) => c.type !== "EGR");
   const soot = filters.map((c) => c.weightRemovedG).filter((w): w is number => w != null);
   const failed = o.components

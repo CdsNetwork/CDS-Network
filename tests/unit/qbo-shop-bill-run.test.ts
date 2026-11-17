@@ -100,7 +100,8 @@ function fakeQbo(
   );
   const listDepartments = vi.fn(over.departments ?? (async () => [{ Id: "3", Name: "RYDER INCOME" }, { Id: "4", Name: "RYDER COGS" }]));
   const listTerms = vi.fn(async () => over.terms ?? [{ Id: "1", Name: "Due on receipt" }, { Id: "3", Name: "Net 30" }]);
-  const qbo = { createBill, findBills, getItems, listDepartments, listTerms };
+  const recentBillCustomFields = vi.fn(async () => []);
+  const qbo = { createBill, findBills, getItems, listDepartments, listTerms, recentBillCustomFields };
   return { ...qbo, api: vi.fn(async () => qbo) };
 }
 
