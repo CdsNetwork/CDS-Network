@@ -1,28 +1,16 @@
-import { Brand } from "@/components/Brand";
-import { CdsNav } from "@/components/CdsNav";
-import { SignOutButton } from "@/components/SignOutButton";
+import { cookies } from "next/headers";
+import { CdsSidebar } from "@/components/CdsSidebar";
 import { requireCds } from "@/lib/auth";
+import { isCollapsed, SIDEBAR_COOKIE } from "@/lib/sidebar";
 
 export default async function CdsLayout({ children }: LayoutProps<"/cds">) {
   const profile = await requireCds();
+  // Read on the server so the first paint already has the chosen sidebar width (no flash).
+  const collapsed = isCollapsed((await cookies()).get(SIDEBAR_COOKIE)?.value);
   return (
-    <>
-      <header className="top-bar">
-        <div className="top">
-          <Brand subtitle="CDS Network Portal" />
-          <div className="spacer" />
-          <span className="chip hide-sm">US operations</span>
-          <span className="chip hide-sm">{profile.full_name}</span>
-          <SignOutButton />
-        </div>
-      </header>
-      <CdsNav mobile />
-      <div className="app">
-        <aside className="sidebar">
-          <CdsNav />
-        </aside>
-        <main className="main">{children}</main>
-      </div>
-    </>
+    <div className="cds-shell">
+      <CdsSidebar fullName={profile.full_name} initialCollapsed={collapsed} />
+      <main className="main cds-main">{children}</main>
+    </div>
   );
 }

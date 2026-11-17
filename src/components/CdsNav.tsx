@@ -15,18 +15,27 @@ const NAV = [
   { href: "/cds/admin", icon: "⚙", label: "Admin" },
 ];
 
-export function CdsNav({ mobile = false }: { mobile?: boolean }) {
+// Collapsed shows the icons only; each link keeps its label as the accessible name and tooltip.
+export function CdsNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
-    <nav className={mobile ? "mobile-nav" : undefined} aria-label="Main">
+    <nav className={`cds-nav${collapsed ? " collapsed" : ""}`} aria-label="Main">
       {NAV.map((item) => {
         const active = item.exact
           ? pathname === item.href || pathname.startsWith("/cds/work-orders/") && !pathname.endsWith("/new") && item.href === "/cds"
           : pathname.startsWith(item.href);
         return (
-          <Link key={item.href} href={item.href} className={`navbtn${active ? " active" : ""}`}>
+          <Link
+            key={item.href}
+            href={item.href}
+            onClick={onNavigate}
+            title={collapsed ? item.label : undefined}
+            aria-label={collapsed ? item.label : undefined}
+            aria-current={active ? "page" : undefined}
+            className={`navbtn${active ? " active" : ""}`}
+          >
             <span aria-hidden>{item.icon}</span>
-            {item.label}
+            {!collapsed && item.label}
           </Link>
         );
       })}
