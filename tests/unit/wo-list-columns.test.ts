@@ -51,4 +51,18 @@ describe("CDS work order list", () => {
     expect(page).toMatch(/invoicedEarly/);
     expect(page).toMatch(/Invoiced \{/);
   });
+
+  it("keeps every row control on the shorter rows: status pill and both selects on one line, WO link with Notes (2026-11-18)", () => {
+    const edits = readFileSync(new URL("../../src/components/cds-wo/ListRowEdits.tsx", import.meta.url), "utf8");
+    expect(page).toMatch(
+      /<div className=\{styles\.statusLine\}>\s*<span className=\{`status \$\{r\.status\}`\}>[\s\S]*?<ListStatusSelect woId=\{r\.id\} moves=\{moves\} \/>\s*<ListInternalStatusSelect[\s\S]*?<\/div>/,
+    );
+    expect(edits).toMatch(/aria-label="Change status"/);
+    expect(edits).toMatch(/aria-label="Internal status \(CDS only\)"/);
+    expect(edits).toMatch(/<option value="">No internal status<\/option>/);
+    expect(page).toMatch(/<div className=\{styles\.woLine\}>\s*<Link[\s\S]*?<\/Link>\s*<ListNotesButton /);
+    expect(page).toMatch(/Question Pending/);
+    expect(page).toMatch(/New from shop/);
+    expect(page).toMatch(/Correction requested/);
+  });
 });

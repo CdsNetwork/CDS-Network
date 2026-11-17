@@ -102,6 +102,13 @@ function idClass(value: string | null): string {
   return (value ?? "").length > ID_NOWRAP ? styles.idCol : styles.idShort;
 }
 
+/** Customer and shop names up to this length (most of them) stay on one line on wide screens. */
+const NAME_NOWRAP = 24;
+
+function nameClass(name: string | null): string {
+  return wrapCell(name) ?? ((name ?? "").length <= NAME_NOWRAP ? styles.nameShort : "");
+}
+
 export default async function DashboardPage({ searchParams }: PageProps<"/cds">) {
   await requireCds();
   const sp = await searchParams;
@@ -341,40 +348,38 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                   return (
                     <tr key={r.id} className={questionOpen ? styles.questionRow : undefined}>
                       <td className="nowrap">
-                        <Link className="link" href={`/cds/work-orders/${r.id}`}>
-                          {woLabel(r.wo_number)}
-                        </Link>
-                        {fromShopNew && (
-                          <div>
-                            <span className="badge pending" title="The shop added a note, a file or a condemned part since CDS last opened this order">
-                              New from shop
-                            </span>
-                          </div>
-                        )}
-                        {correction && (
-                          <div>
-                            <span className="badge rejected" title="The shop asked CDS to correct the invoice (see the notes)">
-                              Correction requested
-                            </span>
-                          </div>
-                        )}
-                        {questionOpen && (
-                          <div>
-                            <span className={styles.questionBadge} title={questionTitle(r.work_order_questions) ?? undefined}>
-                              Question Pending
-                            </span>
-                          </div>
-                        )}
-                        <div>
+                        <div className={styles.woLine}>
+                          <Link className="link" href={`/cds/work-orders/${r.id}`}>
+                            {woLabel(r.wo_number)}
+                          </Link>
                           <ListNotesButton woId={r.id} label={woLabel(r.wo_number)} count={noteCount} />
                         </div>
+                        {(fromShopNew || correction || questionOpen) && (
+                          <div className={styles.cellLine}>
+                            {fromShopNew && (
+                              <span className="badge pending" title="The shop added a note, a file or a condemned part since CDS last opened this order">
+                                New from shop
+                              </span>
+                            )}
+                            {correction && (
+                              <span className="badge rejected" title="The shop asked CDS to correct the invoice (see the notes)">
+                                Correction requested
+                              </span>
+                            )}
+                            {questionOpen && (
+                              <span className={styles.questionBadge} title={questionTitle(r.work_order_questions) ?? undefined}>
+                                Question Pending
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="nowrap">{dateReceived(r)}</td>
-                      <td className={`${styles.textCol} ${wrapCell(customer) ?? ""}`}>{customer}</td>
+                      <td className={`${styles.textCol} ${nameClass(customer)}`}>{customer}</td>
                       <td className={`${styles.textCol} ${wrapCell(r.location_label) ?? ""}`}>{r.location_label}</td>
                       <td className={idClass(r.unit_number)}>{r.unit_number}</td>
                       <td className={idClass(r.po_number)}>{r.po_number ?? <span className="small">Missing</span>}</td>
-                      <td className={`${styles.textCol} ${wrapCell(shop) ?? ""}`}>
+                      <td className={`${styles.textCol} ${nameClass(shop)}`}>
                         {shop ?? <span className="small">Not assigned</span>}
                       </td>
                       <td className="nowrap">
@@ -384,26 +389,22 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                         ))}
                       </td>
                       <td>
-                        <span className={`status ${r.status}`}>
-                          {STATUS_LABEL[r.status] ?? r.status}
-                        </span>
-                        {failed && (
-                          <div>
-                            <span className="badge rejected">{failed}</span>
-                          </div>
-                        )}
-                        {invoicedEarly && (
-                          <div>
+                        <div className={styles.statusLine}>
+                          <span className={`status ${r.status}`}>
+                            {STATUS_LABEL[r.status] ?? r.status}
+                          </span>
+                          {failed && <span className="badge rejected">{failed}</span>}
+                          {invoicedEarly && (
                             <span className="badge internal" title="Invoiced in QuickBooks; moves to Invoiced when the shop completes the job">
                               Invoiced {invoicedEarly}
                             </span>
-                          </div>
-                        )}
-                        <ListStatusSelect woId={r.id} moves={moves} />
-                        <ListInternalStatusSelect
-                          woId={r.id}
-                          value={internal?.internal_status ?? null}
-                        />
+                          )}
+                          <ListStatusSelect woId={r.id} moves={moves} />
+                          <ListInternalStatusSelect
+                            woId={r.id}
+                            value={internal?.internal_status ?? null}
+                          />
+                        </div>
                       </td>
                       <td className="num money">
                         {tbd ? "TBD" : money(f?.shop_subtotal)}

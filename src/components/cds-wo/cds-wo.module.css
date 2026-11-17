@@ -4,9 +4,12 @@
    ordinary values. Cells are a little tighter than the default table, the status pill uses
    a short label, and customer, location and shop wrap between words. WO numbers, statuses
    and money stay on one line. */
-.woTable th,
-.woTable td {
+.woTable th {
   padding: 10px 6px;
+}
+/* Rows stay short so more orders fit on screen. */
+.woTable td {
+  padding: 6px;
 }
 .woTable th:first-child,
 .woTable td:first-child {
@@ -26,9 +29,16 @@
   max-width: 10.5rem;
   overflow-wrap: anywhere;
 }
-/* Customer, location and shop take the space left over and wrap between words. */
+/* Customer, location and shop take the space left over and wrap between words. On wide
+   screens customer and shop names up to 24 characters stay on one line (nameClass on the
+   dashboard); on narrower screens they wrap so the status column stays in view. */
 .woTable td.textCol {
   min-width: 4.5rem;
+}
+@media (min-width: 1600px) {
+  .woTable td.nameShort {
+    white-space: nowrap;
+  }
 }
 
 /* Needs Attention: long reasons stop after three lines; the full text is on the order. */
@@ -141,10 +151,62 @@
   width: auto;
   max-width: 150px;
   margin-top: 6px;
-  padding: 3px 6px;
+  padding: 2px 4px;
   font-size: 12px;
+  line-height: 1.3;
   border-radius: 6px;
   color: var(--muted);
+}
+/* Status column: the status pill and both selects side by side, wrapping only when the
+   column is narrow (then on two lines at most for ordinary statuses). */
+.statusLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 15rem;
+}
+.statusLine > div {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.statusLine [role="status"]:not(:empty) {
+  margin-left: 4px;
+}
+.statusLine .cellSelect {
+  margin-top: 0;
+}
+.statusLine :global(.status),
+.statusLine :global(.badge) {
+  line-height: 1.3;
+}
+.statusLine .cellError {
+  margin-top: 0;
+}
+/* WO column: the WO number with its Notes button, then any marks on one line under it. */
+.woLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.cellLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+.woLine .notesButton {
+  margin-top: 0;
+}
+/* Wide screens have the room to keep the status line and the WO line on one line each. */
+@media (min-width: 1600px) {
+  .statusLine,
+  .woLine {
+    flex-wrap: nowrap;
+  }
 }
 .cellSelectSet {
   color: #344054;
@@ -153,7 +215,7 @@
 }
 /* One shipment leg in the work order list: direction, carrier status, tracking link. */
 .legRow {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 .legLine {
   display: flex;
