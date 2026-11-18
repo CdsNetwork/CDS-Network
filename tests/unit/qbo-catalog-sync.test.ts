@@ -78,7 +78,7 @@ describe("planCatalogSync", () => {
         category: "part",
         tax_class: "parts",
         shop_selectable: true,
-        pass_through: true,
+        pass_through: false,
         price_per_line: false,
         sell_price: 259,
         shop_rate: 189,
@@ -273,6 +273,26 @@ describe("planCatalogSync", () => {
       ["NAES-G-CU", "part", "parts", true],
       ["LAB-HOUR", "service", "labor", true],
       ["CDS-G-2000", "gasket", "exempt", true],
+    ]);
+  });
+
+  it("creates a plain item (not priced per line, not pass through), whatever its category's items are", () => {
+    // RECON DECOMP (2026-11-18) came in as pass through because most parts carry the column
+    // default; a category of per-line items must not turn a new item into one either.
+    const catalog = [
+      ...base.catalog,
+      item({ id: "m1", sku: "CDS-CL-X1", category: "clamp", pass_through: true, price_per_line: true }),
+      item({ id: "m2", sku: "CDS-CL-X2", category: "clamp", pass_through: true, price_per_line: true }),
+      item({ id: "r1", sku: "CDS-DECOMP-RECON0", category: "part", pass_through: false, price_per_line: true }),
+    ];
+    const plan = planCatalogSync({
+      ...base,
+      catalog,
+      qboItems: [qbo({ Id: "1", Name: "CDS-CL-X3", UnitPrice: 30 }), qbo({ Id: "2", Name: "CDS-DECOMP-RECON1", UnitPrice: 500 })],
+    });
+    expect(plan.creates.map((c) => [c.sku, c.category, c.pass_through, c.price_per_line])).toEqual([
+      ["CDS-CL-X3", "clamp", false, false],
+      ["CDS-DECOMP-RECON1", "part", false, false],
     ]);
   });
 

@@ -36,8 +36,12 @@
  *     Service item, else "part".
  *   * tax_class: "exempt" when QuickBooks says not taxable; else the most common taxable class
  *     of that same prefix group, else of the category, else labor (service) or parts.
- *   * shop_selectable, pass_through, price_per_line: the majority of portal items in that
- *     category (none: true, true, false, the column defaults).
+ *   * shop_selectable: the majority of portal items in that category (none: true).
+ *   * pass_through and price_per_line: false, a plain item priced from its Fleet Price. Items
+ *     priced on the order (new and reconditioned filters) and Misc. hardware are set up by
+ *     CDS. Copying the category majority made RECON DECOMP (2026-11-18) pass through, as most
+ *     parts carry the column default (true, which only matters for items priced per line), and
+ *     could have made a new item priced per line.
  *   * Fleet Price (sell_prices, US, from today) = QuickBooks UnitPrice; default Shop Rate
  *     (shop_rates, US, all shops and customers, from today) = QuickBooks PurchaseCost. A price
  *     that is 0 or missing is not set (the Catalog page shows it empty, as CDS leaves it).
@@ -300,14 +304,8 @@ export function planCatalogSync(input: CatalogSyncInput): CatalogSyncPlan {
         sameCategory.map((i) => i.shop_selectable),
         true,
       ),
-      pass_through: majority(
-        sameCategory.map((i) => i.pass_through),
-        true,
-      ),
-      price_per_line: majority(
-        sameCategory.map((i) => i.price_per_line),
-        false,
-      ),
+      pass_through: false,
+      price_per_line: false,
       sell_price: sell,
       shop_rate: price(q.PurchaseCost),
       qbo_item_id: q.Id,
