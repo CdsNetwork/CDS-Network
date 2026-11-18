@@ -66,8 +66,9 @@ describe("completion rule in the database", () => {
     const withFn = files.filter((f) => /function public\.shop_complete_work_order\(/.test(readFileSync(join(migrations, f), "utf8")));
     return { name: withFn.at(-1)!, sql: readFileSync(join(migrations, withFn.at(-1)!), "utf8") };
   };
-  it("is redefined by 20261119040000_egr_no_photo_doc_optional.sql", () => {
-    expect(latest().name).toBe("20261119040000_egr_no_photo_doc_optional.sql");
+  it("is redefined by 20261119040000_egr_no_photo_doc_optional.sql or a later migration", () => {
+    // Later: 20261119090000_parts_only_no_measurements.sql keeps these rules.
+    expect(latest().name >= "20261119040000_egr_no_photo_doc_optional.sql").toBe(true);
   });
   it("asks for measurements on a DPF only and skips the photo for an EGR cooler", () => {
     const { sql } = latest();

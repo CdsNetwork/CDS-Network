@@ -9,6 +9,7 @@ import { isCustomerItem, lineItemFor } from "@/lib/customer-items";
 import { receivedAt, shopCanSeeLabel } from "@/components/shop/shop-dates";
 import type { NoteView } from "@/lib/notes";
 import {
+  isPartsSale,
   TAB_STATUSES,
   type AttachmentView,
   type AuthRequestRow,
@@ -155,7 +156,7 @@ export type JobDetailData = {
   authOptions: (CatalogOption & { kind: "service" | "part" })[];
   /** The job belongs to CDS's in-house shop: no invoice number asked on completion. */
   inHouse: boolean;
-  /** An in-house parts-only order (CDS sells the part): completes without components. */
+  /** A parts-only order (any shop): completes without components or measurements. */
   partsSale: boolean;
   /** Automatic deductions on the shop's bill (shipped orders: $15 per filter or EGR cooler). */
   deductions: ShopDeduction[];
@@ -345,7 +346,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     partOptions,
     authOptions,
     inHouse,
-    partsSale: inHouse && w.request_type === "parts_only",
+    partsSale: isPartsSale(w.request_type),
     deductions,
     receivedAt: receivedAt(job, ships.data ?? []),
   };

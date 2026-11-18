@@ -334,7 +334,9 @@ describe("completing an in-house order", () => {
   });
 });
 
-describe("an in-house parts sale (request type parts_only) completes without components", () => {
+// Since 20261119090000_parts_only_no_measurements.sql (Sarah, CDS, 2026-11-18: "Filter sales do
+// not need measurement info") every parts-only order skips the component checks, at any shop.
+describe("a parts sale (request type parts_only) completes without components", () => {
   async function bareWo(shop: string, requestType: "service" | "parts_only") {
     const wo = await newWo(shop, f.ryder, "accepted", requestType);
     await addLine(wo.id, f.gesi);
@@ -354,9 +356,30 @@ describe("an in-house parts sale (request type parts_only) completes without com
     expect(error?.message).toMatch(/Add at least one component/);
   });
 
-  it("outside shop parts_only: still needs a component", async () => {
+  it("outside shop parts_only: completes with no component, with the shop's own reference", async () => {
     const wo = await bareWo(f.shopA, "parts_only");
-    const { error } = await shopA.client.rpc("shop_complete_work_order", { p_work_order: wo.id, p_invoice_ref: "INV-2" });
+    await must(shopA.client.rpc("shop_complete_work_order", { p_work_order: wo.id, p_invoice_ref: "INV-2" }));
+    const after = await must(admin.from("work_orders").select("status, affiliate_invoice_ref").eq("id", wo.id).single());
+    expect(after).toEqual({ status: "completed", affiliate_invoice_ref: "INV-2" });
+  });
+
+  it("outside shop parts_only: a component without measurements does not block completion", async () => {
+    const wo = await bareWo(f.shopA, "parts_only");
+    await must(admin.from("work_order_components").insert({ work_order_id: wo.id, seq: 1, component_type: "DPF" }));
+    await must(shopA.client.rpc("shop_complete_work_order", { p_work_order: wo.id, p_invoice_ref: "INV-3" }));
+    const after = await must(admin.from("work_orders").select("status").eq("id", wo.id).single());
+    expect(after).toEqual({ status: "completed" });
+  });
+
+  it("outside shop parts_only: still needs the shop's reference number", async () => {
+    const wo = await bareWo(f.shopA, "parts_only");
+    const { error } = await shopA.client.rpc("shop_complete_work_order", { p_work_order: wo.id, p_invoice_ref: "" });
+    expect(error?.message).toMatch(/Enter your invoice or reference number/);
+  });
+
+  it("outside shop service order: still needs a component", async () => {
+    const wo = await bareWo(f.shopA, "service");
+    const { error } = await shopA.client.rpc("shop_complete_work_order", { p_work_order: wo.id, p_invoice_ref: "INV-4" });
     expect(error?.message).toMatch(/Add at least one component/);
   });
 

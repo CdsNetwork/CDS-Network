@@ -13,6 +13,14 @@ export const TAB_STATUSES: Record<QueueTab, WoStatus[]> = {
 
 export const EDITABLE_STATUSES: WoStatus[] = ["accepted", "picked_up", "in_process"];
 
+/**
+ * A parts-only order is a parts sale at any shop: it completes without components,
+ * measurements or photos (20261119090000_parts_only_no_measurements.sql).
+ */
+export function isPartsSale(requestType: string): boolean {
+  return requestType === "parts_only";
+}
+
 /** What a status change sends back in the URL (?done=), so the outcome is still shown after the page re-renders. */
 export type DoneKey = "accepted" | "picked_up" | "in_process" | "completed";
 

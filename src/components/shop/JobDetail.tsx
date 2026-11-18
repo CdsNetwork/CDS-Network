@@ -454,12 +454,16 @@ export function JobDetail({
           {/* ------------------------------------------------ components */}
           <section className="section">
             <h3>Components Received</h3>
-            <p className="small">
-              Add every DPF, DOC, SCR or EGR actually received, one item per component. A DPF needs pressure and weight before
-              and after; DOC and SCR measurements are optional; EGR coolers are Pass / Condemned only. Every required field must
-              be filled in before completion.
-            </p>
-            {editable && (
+            {data.partsSale ? (
+              <p className="small">Parts-only order: no components or measurements are needed.</p>
+            ) : (
+              <p className="small">
+                Add every DPF, DOC, SCR or EGR actually received, one item per component. A DPF needs pressure and weight before
+                and after; DOC and SCR measurements are optional; EGR coolers are Pass / Condemned only. Every required field must
+                be filled in before completion.
+              </p>
+            )}
+            {editable && !data.partsSale && (
               <ActionForm
                 action={addComponent.bind(null, id)}
                 submitLabel="+ Add Item"
@@ -477,7 +481,7 @@ export function JobDetail({
                 </div>
               </ActionForm>
             )}
-            {components.length === 0 && <p className="small">No components added yet.</p>}
+            {components.length === 0 && !data.partsSale && <p className="small">No components added yet.</p>}
             {components.map((c) =>
               editable ? (
                 <ComponentCard
@@ -515,8 +519,9 @@ export function JobDetail({
                 ) : (
                   <>
                     <p className="small">
-                      Work cannot be completed until all required component data and the affiliate invoice/reference number are
-                      entered. Save each component first.
+                      {data.partsSale
+                        ? "Parts-only order: no components are needed. Enter your invoice or reference number to complete."
+                        : "Work cannot be completed until all required component data and the affiliate invoice/reference number are entered. Save each component first."}
                     </p>
                     <div className="field" style={{ maxWidth: 420 }}>
                       <label htmlFor="invoice-ref">
