@@ -127,7 +127,7 @@
   "function public.shipstation_record_webhook(text,text,text,text,public.shipment_status,timestamp with time zone,jsonb,jsonb,timestamp with time zone)": {
     "service_role": "EXECUTE"
   },
-  "function public.shop_accept_work_order(uuid,public.pickup_window)": {
+  "function public.shop_accept_work_order(uuid,public.pickup_window,date)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
@@ -156,6 +156,10 @@
     "service_role": "EXECUTE"
   },
   "function public.shop_save_component(uuid,uuid,public.component_type,text,text,text,numeric,numeric,numeric,numeric,public.component_result,text)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_set_pickup(uuid,date,public.pickup_window)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },

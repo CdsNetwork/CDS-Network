@@ -2,7 +2,8 @@ import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
 import { one } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
-import { pickupWindowLabel, woLabel, type WoStatus, wrapCell } from "@/lib/format";
+import { woLabel, type WoStatus, wrapCell } from "@/lib/format";
+import { pickupEtaLabel } from "@/lib/pickup";
 import { createClient } from "@/lib/supabase/server";
 
 type PickupRow = {
@@ -13,6 +14,7 @@ type PickupRow = {
   location_label: string;
   site_address: string | null;
   pickup_window: string | null;
+  pickup_date: string | null;
   customers: { name: string } | { name: string }[] | null;
   affiliates: { display_name: string } | { display_name: string }[] | null;
 };
@@ -24,7 +26,7 @@ export default async function PickupPage() {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("work_orders")
-    .select("id, wo_number, market, status, location_label, site_address, pickup_window, customers(name), affiliates(display_name)")
+    .select("id, wo_number, market, status, location_label, site_address, pickup_window, pickup_date, customers(name), affiliates(display_name)")
     .eq("fulfillment", "pickup")
     .neq("status", "cancelled")
     .order("created_at", { ascending: false })
@@ -73,7 +75,7 @@ export default async function PickupPage() {
               <th>Location</th>
               <th>Affiliate</th>
               <th>Pickup Address</th>
-              <th>Pickup Window</th>
+              <th>Pickup Day / Window</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -97,7 +99,7 @@ export default async function PickupPage() {
                 <td>{one(r.affiliates)?.display_name ?? <span className="small">Not assigned</span>}</td>
                 <td className={wrapCell(r.site_address)}>{r.site_address ?? "-"}</td>
                 <td>
-                  <b>{pickupWindowLabel(r.pickup_window)}</b>
+                  <b>{pickupEtaLabel(r.pickup_window, r.pickup_date)}</b>
                 </td>
                 <td>
                   <div className="row" style={{ gap: 6 }}>

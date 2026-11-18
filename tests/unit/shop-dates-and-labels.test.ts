@@ -112,7 +112,9 @@ describe("shop queue and job page", () => {
     expect(queue).toMatch(/Received \{date\(j\.received_at\)\}/);
     expect(queue).toMatch(/Completed \{date\(j\.completed_at\)\}/);
     const detail = src("components/shop/JobDetail.tsx");
-    expect(detail).toMatch(/Received/);
-    expect(detail).toMatch(/date\(data\.receivedAt\)/);
+    // Since 2026-11-18 (Clyde) the job page shows every step that happened, Received among them
+    // (shopTimeline, tests/unit/shop-calendar.test.ts).
+    expect(detail).toMatch(/data\.timeline\.map\(/);
+    expect(src("components/shop/shop-dates.ts")).toMatch(/label: "Received", at: receivedAt\(job, legs\)/);
   });
 });

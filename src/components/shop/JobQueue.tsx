@@ -35,7 +35,12 @@ export function JobQueue({
   const current = TABS.find((t) => t.key === tab)!;
   return (
     <section className="section" style={{ marginTop: 0 }}>
-      <h3>Assigned work</h3>
+      <div className={styles.viewHead}>
+        <h3>Assigned work</h3>
+        <Link className="link" href="/shop/calendar">
+          Calendar
+        </Link>
+      </div>
       <form action="/shop" method="get" role="search" className={styles.queueSearch}>
         <input type="hidden" name="tab" value={tab} />
         <label htmlFor="queue-q" className={styles.srOnly}>
@@ -86,6 +91,11 @@ export function JobQueue({
           aria-current={j.id === selectedId ? "true" : undefined}
         >
           <div className={`wo ${styles.nowrap}`}>{woLabel(j.wo_number)}</div>
+          {j.dispatched_at && (
+            <div className="small">
+              Dispatched {date(j.dispatched_at)}
+            </div>
+          )}
           <div style={{ margin: "4px 0" }}>
             <strong>{j.customer_name}</strong> - {j.location_label}
           </div>

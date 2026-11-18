@@ -5,17 +5,16 @@ import {
   COMPONENT_RESULT_LABEL,
   DIRECTION_LABEL,
   FULFILLMENT_LABEL,
-  PICKUP_WINDOWS,
   SHIP_STATUS_LABEL,
   SHIPMENT_STATUS_LABEL,
   date,
   measurementText,
   money,
-  pickupWindowLabel,
   woLabel,
 } from "@/lib/format";
 import {
   acceptJob,
+  changePickup,
   addComponent,
   addNote,
   addPart,
@@ -44,6 +43,8 @@ import { TestBadge } from "@/components/shipping/TestBadge";
 import { NotesList } from "@/components/WorkOrderNotes";
 import { NOTE_MAX_LENGTH } from "@/lib/notes";
 import { canRequestCorrection, CORRECTION_REASON_MAX } from "@/lib/invoice-correction";
+import { pacificToday } from "@/lib/dates";
+import { addDays, PICKUP_DAYS_AHEAD, pickupEtaLabel, SHOP_PICKUP_WINDOWS } from "@/lib/pickup";
 import styles from "./shop.module.css";
 import { EDITABLE_STATUSES, componentLabel, doneNotice, type ComponentRow, type DoneKey, type LineRow } from "./types";
 
@@ -61,6 +62,42 @@ const AUTH_STATUS_LABEL: Record<string, string> = {
 };
 
 const qtyText = (n: number) => String(n);
+
+/** Pickup day (Pacific, today or later; default today) and window, both required. */
+function PickupFields({ today, day = today, window = "", idPrefix = "" }: { today: string; day?: string; window?: string; idPrefix?: string }) {
+  return (
+    <>
+      <div className="field">
+        <label htmlFor={`${idPrefix}pickup-date`}>
+          Pickup day <span className="req">*</span>
+        </label>
+        <input
+          className="input"
+          id={`${idPrefix}pickup-date`}
+          name="pickup_date"
+          type="date"
+          required
+          min={today}
+          max={addDays(today, PICKUP_DAYS_AHEAD)}
+          defaultValue={day}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor={`${idPrefix}pickup-window`}>
+          Pickup ETA / Window <span className="req">*</span>
+        </label>
+        <select id={`${idPrefix}pickup-window`} name="pickup_window" required defaultValue={window}>
+          <option value="">Select pickup window...</option>
+          {SHOP_PICKUP_WINDOWS.map((w) => (
+            <option key={w.value} value={w.value}>
+              {w.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    </>
+  );
+}
 
 export function JobDetail({
   data,
@@ -92,6 +129,7 @@ export function JobDetail({
   const componentName = new Map(components.map((c) => [c.id, componentLabel(c)]));
   const notice = doneNotice(done, job.status);
   const doneHref = (key: DoneKey) => queueHref(key === "completed" ? "completed" : "active", search, id, key);
+  const today = pacificToday();
   // On a pickup job the next step after accepting is Picked Up, then In Process.
   const nextIsPickup = isPickup && job.status === "accepted";
 
@@ -118,9 +156,16 @@ export function JobDetail({
         <div>
           Unit {job.unit_number ?? "-"} • PO {job.po_number || "-"}
         </div>
-        <div className="small" style={{ marginTop: 4 }}>
-          Received {date(data.receivedAt)} • Completed {date(job.completed_at)}
-        </div>
+        {data.timeline.length > 0 && (
+          <div className="small" style={{ marginTop: 4 }}>
+            {data.timeline.map((s, i) => (
+              <span key={s.label} className={styles.nowrap}>
+                {i > 0 && " • "}
+                {s.label} {date(s.at)}
+              </span>
+            ))}
+          </div>
+        )}
         {job.site_address && <div className="small" style={{ marginTop: 4 }}>{job.site_address}</div>}
         <div className="row" style={{ marginTop: 10 }}>
           {isShipping ? (
@@ -194,29 +239,37 @@ export function JobDetail({
                 successText="Job accepted. CDS was notified."
                 successHref={doneHref("accepted")}
               >
-                {isPickup && (
-                  <div className="field">
-                    <label htmlFor="pickup-window">
-                      Pickup ETA / Window <span className="req">*</span>
-                    </label>
-                    <select id="pickup-window" name="pickup_window" required defaultValue="">
-                      <option value="">Select pickup window...</option>
-                      {PICKUP_WINDOWS.map((w) => (
-                        <option key={w.value} value={w.value}>
-                          {w.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                {isPickup && <PickupFields today={today} />}
               </ActionForm>
             </div>
           )}
 
           {isPickup && job.pickup_window && !awaiting && (
             <div className="notice">
-              <strong>Pickup estimate:</strong> {pickupWindowLabel(job.pickup_window)}
+              <strong>Pickup estimate:</strong> {pickupEtaLabel(job.pickup_window, job.pickup_date)}
             </div>
+          )}
+
+          {/* The shop may move the pickup until the part is picked up (public.shop_set_pickup). */}
+          {isPickup && job.status === "accepted" && (
+            <details style={{ marginTop: 10 }}>
+              <summary className="link" style={{ cursor: "pointer", minHeight: 44, display: "flex", alignItems: "center" }}>
+                Change pickup day / window
+              </summary>
+              <ActionForm
+                action={changePickup.bind(null, id)}
+                submitLabel="Save pickup"
+                pendingLabel="Saving..."
+                successText="Pickup updated. CDS sees the change."
+              >
+                <PickupFields
+                  today={today}
+                  day={job.pickup_date && job.pickup_date >= today ? job.pickup_date : today}
+                  window={job.pickup_window && SHOP_PICKUP_WINDOWS.some((w) => w.value === job.pickup_window) ? job.pickup_window : ""}
+                  idPrefix="change-"
+                />
+              </ActionForm>
+            </details>
           )}
 
           {(job.status === "accepted" || job.status === "picked_up") && (

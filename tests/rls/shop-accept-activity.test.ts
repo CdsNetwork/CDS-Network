@@ -9,6 +9,7 @@
  * Fixtures are created with the service role under a per-run id and removed afterwards.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { pacificToday } from "@/lib/dates";
 import { admin, createLogin, deleteLogins, must, runId, type Login } from "./helpers";
 
 let shop: string;
@@ -42,8 +43,13 @@ const activity = async (wo: string) =>
     shop_activity: string | null;
   } | null;
 
+// A pickup job is accepted with a pickup day too (20261119130000_shop_pickup_date.sql).
 const accept = (wo: string, window: string | null) =>
-  shopLogin.client.rpc("shop_accept_work_order", { p_work_order: wo, p_pickup_window: window });
+  shopLogin.client.rpc("shop_accept_work_order", {
+    p_work_order: wo,
+    p_pickup_window: window,
+    p_pickup_date: window ? pacificToday() : null,
+  });
 
 beforeAll(async () => {
   shop = (await insertOne("affiliates", { short_code: `AA-${runId}`, display_name: `Accept Shop ${runId}` })).id;

@@ -10,6 +10,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { pacificToday } from "@/lib/dates";
 import { admin, createLogin, deleteLogins, must, runId, type Login } from "./helpers";
 
 let shop: string;
@@ -121,9 +122,14 @@ describe("DOC measurements", () => {
 });
 
 describe("Tomorrow pickup window", () => {
+  // Since 20261119130000_shop_pickup_date.sql (Clyde, 2026-11-18) the shop chooses the pickup
+  // day: "tomorrow" is tomorrow's date with a window (tests/rls/shop-pickup-date.test.ts).
   it("a shop accepts a pickup job for tomorrow", async () => {
     const wo = await job("T-1", [], "pickup", "awaiting_acceptance");
-    await must(shopLogin.client.rpc("shop_accept_work_order", { p_work_order: wo, p_pickup_window: "tomorrow" }));
-    expect(await statusOf(wo)).toEqual({ status: "accepted", pickup_window: "tomorrow" });
+    const tomorrow = pacificToday(new Date(Date.now() + 86_400_000));
+    await must(
+      shopLogin.client.rpc("shop_accept_work_order", { p_work_order: wo, p_pickup_window: "coordinate", p_pickup_date: tomorrow }),
+    );
+    expect(await statusOf(wo)).toEqual({ status: "accepted", pickup_window: "coordinate" });
   });
 });

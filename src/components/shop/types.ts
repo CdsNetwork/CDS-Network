@@ -53,6 +53,8 @@ export type QueueJob = {
   unit_number: string;
   po_number: string | null;
   customer_name: string;
+  /** When CDS dispatched the order to this shop. */
+  dispatched_at: string | null;
   /** When the shop received the part (shop-dates receivedAt), or null. */
   received_at: string | null;
   completed_at: string | null;
@@ -70,10 +72,15 @@ export type JobRow = {
   po_number: string | null;
   requested_work: string;
   pickup_window: string | null;
+  /** The day the shop picks the part up (pickup jobs; null on orders accepted before 2026-11-19). */
+  pickup_date: string | null;
   shop_ship_status: string | null;
   affiliate_invoice_ref: string | null;
+  dispatched_at: string | null;
+  accepted_at: string | null;
   picked_up_at: string | null;
   completed_at: string | null;
+  delivered_at: string | null;
   customer_name: string;
 };
 

@@ -11,7 +11,6 @@ import {
   FULFILLMENT_LABEL,
   measurementText,
   money,
-  pickupWindowLabel,
   SHIP_STATUS_LABEL,
   SHIPMENT_STATUS_LABEL,
   SHOP_STATUS_LABEL,
@@ -19,6 +18,7 @@ import {
   woLabel,
   type WoStatus,
 } from "@/lib/format";
+import { pickupEtaLabel } from "@/lib/pickup";
 import type { createClient } from "@/lib/supabase/server";
 import {
   SHOP_DEDUCTION_COLUMNS,
@@ -69,6 +69,7 @@ type Job = {
   po_number: string | null;
   requested_work: string;
   pickup_window: string | null;
+  pickup_date: string | null;
   shop_ship_status: string | null;
   affiliate_invoice_ref: string | null;
   completed_at: string | null;
@@ -129,7 +130,7 @@ export async function loadPreview(supabase: Supabase, shopId: string, woId: stri
     .from("work_orders")
     .select(
       "id, wo_number, status, fulfillment, location_label, site_address, unit_number, po_number, " +
-        "requested_work, pickup_window, shop_ship_status, affiliate_invoice_ref, completed_at, customers(name)",
+        "requested_work, pickup_window, pickup_date, shop_ship_status, affiliate_invoice_ref, completed_at, customers(name)",
     )
     .eq("id", woId)
     .eq("affiliate_id", shopId)
@@ -290,7 +291,7 @@ export function ShopPreview({ data }: { data: PreviewData }) {
               label="Fulfillment"
               value={isShipping ? "Carrier shipment" : isPickup ? "Affiliate pickup / local delivery" : FULFILLMENT_LABEL[job.fulfillment]}
             />
-            {isPickup && <Fact label="Pickup ETA / Window" value={job.pickup_window ? pickupWindowLabel(job.pickup_window) : "Not accepted yet"} />}
+            {isPickup && <Fact label="Pickup ETA / Window" value={pickupEtaLabel(job.pickup_window, job.pickup_date)} />}
             {isShipping && (
               <Fact label="Shipping workflow status" value={job.shop_ship_status ? SHIP_STATUS_LABEL[job.shop_ship_status] : "Not set"} />
             )}

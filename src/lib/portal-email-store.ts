@@ -16,7 +16,7 @@
  * or was abandoned while sending (reclaimRow); a sent or skipped email stays as it is.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { pickupWindowLabel } from "@/lib/format";
+import { pickupEtaLabel } from "@/lib/pickup";
 import type { PortalEmailDetails, PortalEmailStore, PortalEvent } from "./portal-email";
 
 /** The work_order_events.event_type each status change logs (database functions). */
@@ -47,11 +47,12 @@ export function componentLabel(c: { component_type: string; manufacturer?: strin
 }
 
 /**
- * The pickup ETA / window the acceptance email gives: the window the shop chose on a pickup
- * job, null on a shipping job (it has no pickup ETA).
+ * The pickup ETA / window the acceptance email gives: the day and window the shop chose on a
+ * pickup job ("Fri 2026-11-20, 8:00 AM - 10:00 AM"; the window alone on an order accepted
+ * before the day existed), null on a shipping job (it has no pickup ETA).
  */
-export function acceptedEta(pickupWindow: string | null | undefined): string | null {
-  return pickupWindow ? pickupWindowLabel(pickupWindow) : null;
+export function acceptedEta(pickupWindow: string | null | undefined, pickupDate: string | null = null): string | null {
+  return pickupWindow ? pickupEtaLabel(pickupWindow, pickupDate) : null;
 }
 
 /**
@@ -71,7 +72,7 @@ export function supabasePortalEmailStore(db: SupabaseClient): PortalEmailStore {
     async details(event, workOrderId, componentId) {
       const { data: wo, error: woError } = await db
         .from("work_orders")
-        .select("id, wo_number, location_label, unit_number, po_number, affiliate_id, affiliate_invoice_ref, pickup_window, customers(name), affiliates(display_name)")
+        .select("id, wo_number, location_label, unit_number, po_number, affiliate_id, affiliate_invoice_ref, pickup_window, pickup_date, customers(name), affiliates(display_name)")
         .eq("id", workOrderId)
         .maybeSingle();
       if (woError) throw new Error(`work order not read: ${woError.message}`);
@@ -143,7 +144,7 @@ export function supabasePortalEmailStore(db: SupabaseClient): PortalEmailStore {
         at: change.at,
         declineReason: event === "declined" ? (message.startsWith(prefix) ? message.slice(prefix.length) : message) || null : null,
         shopReference: wo.affiliate_invoice_ref ?? null,
-        eta: event === "accepted" ? acceptedEta(wo.pickup_window) : null,
+        eta: event === "accepted" ? acceptedEta(wo.pickup_window, wo.pickup_date) : null,
       };
       return { ...details, key: `${event}:${wo.affiliate_id ?? "none"}:${anchor?.id ?? 0}` };
     },

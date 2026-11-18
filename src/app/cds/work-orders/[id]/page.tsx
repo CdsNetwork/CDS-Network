@@ -43,7 +43,6 @@ import {
   FULFILLMENT_LABEL,
   measurementText,
   money,
-  pickupWindowLabel,
   SHIP_STATUS_LABEL,
   SHIPMENT_STATUS_LABEL,
   shipmentEta,
@@ -53,6 +52,7 @@ import {
   type WoStatus,
   wrapCell,
 } from "@/lib/format";
+import { pickupEtaLabel } from "@/lib/pickup";
 import { htmlToText } from "@/lib/intake/email";
 import { internalNotesHistory, NOTE_MAX_LENGTH, ORDER_CREATED_NOTE_ID, type NoteView } from "@/lib/notes";
 import { NotesList } from "@/components/WorkOrderNotes";
@@ -131,6 +131,8 @@ type WorkOrder = {
   requested_date: string | null;
   return_to_location: boolean;
   pickup_window: string | null;
+  /** The pickup day the shop chose (null on orders accepted before 2026-11-19). */
+  pickup_date: string | null;
   shop_ship_status: string | null;
   affiliate_invoice_ref: string | null;
   dispatched_at: string | null;
@@ -1127,7 +1129,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               <Fact label="Request Type">{REQUEST_TYPE_LABEL[wo.request_type] ?? wo.request_type}</Fact>
               <Fact label="Fulfillment">{FULFILLMENT_LABEL[wo.fulfillment] ?? wo.fulfillment}</Fact>
               {wo.fulfillment === "pickup" ? (
-                <Fact label="Pickup window">{pickupWindowLabel(wo.pickup_window)}</Fact>
+                <Fact label="Pickup day / window">{pickupEtaLabel(wo.pickup_window, wo.pickup_date)}</Fact>
               ) : (
                 <Fact label="Shop shipping status">{wo.shop_ship_status ? SHIP_STATUS_LABEL[wo.shop_ship_status] : null}</Fact>
               )}

@@ -3,10 +3,12 @@ import { loadShopDeductions, type ShopDeduction } from "@/lib/shop-deductions";
 import { createClient } from "@/lib/supabase/server";
 import { CATEGORY_LABEL, money } from "@/lib/format";
 import { pacificToday } from "@/lib/dates";
+import { addDays } from "@/lib/pickup";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { pickShopRatesByItem } from "@/lib/shop-rates";
 import { isCustomerItem, lineItemFor } from "@/lib/customer-items";
-import { receivedAt, shopCanSeeLabel } from "@/components/shop/shop-dates";
+import { receivedAt, shopCanSeeLabel, shopTimeline, type TimelineStep } from "@/components/shop/shop-dates";
+import { monthRange, type CalendarJob } from "@/components/shop/calendar";
 import type { NoteView } from "@/lib/notes";
 import {
   isPartsSale,
@@ -64,7 +66,7 @@ export async function loadQueue(
   const supabase = await createClient();
   // The inbound legs' delivery times give the Received date (shop-dates receivedAt).
   const cols =
-    "id, wo_number, status, location_label, requested_work, unit_number, po_number, picked_up_at, completed_at, customers(name), shipments(direction, delivered_at)";
+    "id, wo_number, status, location_label, requested_work, unit_number, po_number, dispatched_at, picked_up_at, completed_at, customers(name), shipments(direction, delivered_at)";
 
   // One OR filter shared by the three queries. Customer names are looked up first (RLS
   // only returns customers on this shop's own work orders).
@@ -116,6 +118,7 @@ export async function loadQueue(
     unit_number: (r.unit_number as string | null) ?? "",
     po_number: (r.po_number as string | null) ?? null,
     customer_name: (r.customers as Named)?.name ?? "",
+    dispatched_at: (r.dispatched_at as string | null) ?? null,
     received_at: receivedAt(
       { picked_up_at: (r.picked_up_at as string | null) ?? null },
       r.shipments as { direction: string; delivered_at: string | null }[] | null,
@@ -141,6 +144,76 @@ export async function loadQueue(
   };
 }
 
+const CALENDAR_STATUSES = [...TAB_STATUSES.awaiting, ...TAB_STATUSES.active, ...TAB_STATUSES.completed];
+const CALENDAR_COLS =
+  "id, wo_number, status, fulfillment, location_label, unit_number, pickup_date, pickup_window, picked_up_at, customers(name), shipments(direction, delivered_at)";
+
+/**
+ * The shop's jobs with a calendar date in `month` (YYYY-MM): pickup jobs whose pickup day is in
+ * the month, and other jobs whose part arrived at the shop around the month (the calendar keeps
+ * the Pacific days of the month). Same jobs as the job list: this shop's own (RLS), list statuses.
+ */
+export async function loadCalendar(month: string): Promise<CalendarJob[]> {
+  const supabase = await createClient();
+  const { first, last } = monthRange(month);
+
+  const [pickups, arrivals] = await Promise.all([
+    fetchAll((from, to) =>
+      supabase
+        .from("work_orders")
+        .select(CALENDAR_COLS)
+        .eq("fulfillment", "pickup")
+        .in("status", CALENDAR_STATUSES)
+        .gte("pickup_date", first)
+        .lte("pickup_date", last)
+        .order("id")
+        .range(from, to),
+    ),
+    // Inbound deliveries with a day of margin either side of the month (Pacific vs UTC).
+    fetchAll((from, to) =>
+      supabase
+        .from("shipments")
+        .select("work_order_id")
+        .eq("direction", "customer_to_affiliate")
+        .gte("delivered_at", `${addDays(first, -1)}T00:00:00Z`)
+        .lt("delivered_at", `${addDays(last, 2)}T00:00:00Z`)
+        .order("id")
+        .range(from, to),
+    ),
+  ]);
+
+  const ids = [...new Set(arrivals.map((r) => r.work_order_id as string))];
+  const shipped: Record<string, unknown>[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = required(
+      await supabase
+        .from("work_orders")
+        .select(CALENDAR_COLS)
+        .in("id", ids.slice(i, i + 100))
+        .neq("fulfillment", "pickup")
+        .in("status", CALENDAR_STATUSES),
+      "the shipped jobs",
+    );
+    shipped.push(...((chunk ?? []) as unknown as Record<string, unknown>[]));
+  }
+
+  return [...(pickups as Record<string, unknown>[]), ...shipped].map((r) => ({
+    id: r.id as string,
+    wo_number: r.wo_number as number,
+    status: r.status as CalendarJob["status"],
+    fulfillment: r.fulfillment as string,
+    customer_name: (r.customers as Named)?.name ?? "",
+    location_label: r.location_label as string,
+    unit_number: (r.unit_number as string | null) ?? "",
+    pickup_date: (r.pickup_date as string | null) ?? null,
+    pickup_window: (r.pickup_window as string | null) ?? null,
+    received_at: receivedAt(
+      { picked_up_at: (r.picked_up_at as string | null) ?? null },
+      r.shipments as { direction: string; delivered_at: string | null }[] | null,
+    ),
+  }));
+}
+
 export type JobDetailData = {
   job: JobRow;
   lines: LineRow[];
@@ -162,6 +235,8 @@ export type JobDetailData = {
   deductions: ShopDeduction[];
   /** When the shop received the part (inbound delivery, else Picked Up), or null. */
   receivedAt: string | null;
+  /** The steps that happened (Dispatched, Accepted, Picked up or Received, Completed, Returned). */
+  timeline: TimelineStep[];
 };
 
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -175,7 +250,8 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
       .from("work_orders")
       .select(
         "id, wo_number, status, market, fulfillment, location_label, site_address, unit_number, po_number, " +
-          "requested_work, pickup_window, shop_ship_status, affiliate_invoice_ref, picked_up_at, completed_at, customer_id, affiliate_id, request_type, customers(name)",
+          "requested_work, pickup_window, pickup_date, shop_ship_status, affiliate_invoice_ref, dispatched_at, accepted_at, picked_up_at, completed_at, delivered_at, " +
+          "customer_id, affiliate_id, request_type, customers(name)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -349,6 +425,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     partsSale: isPartsSale(w.request_type),
     deductions,
     receivedAt: receivedAt(job, ships.data ?? []),
+    timeline: shopTimeline(job, ships.data ?? []),
   };
 }
 

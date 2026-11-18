@@ -192,3 +192,121 @@
     margin-bottom: 8px;
   }
 }
+
+/* "Assigned work" with the Calendar link next to it (and the calendar's own heading). */
+.viewHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.viewHead.viewHead h3 {
+  margin: 0;
+}
+.viewHead :global(.link) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------- calendar */
+
+.calNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.calNav.calNav h3 {
+  margin: 0 auto 0 0;
+}
+
+/* Month grid on wider screens; a list of days with jobs on phones. */
+.calGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+.calWeekday {
+  padding: 6px;
+  font-size: 12px;
+  font-weight: 750;
+  color: #5e6a72;
+  background: #f7f9fa;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.calCell {
+  min-height: 110px;
+  padding: 6px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  min-width: 0;
+}
+.calCellOut {
+  background: #f7f9fa;
+}
+.calToday {
+  background: #f3f8ff;
+  box-shadow: inset 0 3px 0 var(--blue);
+}
+.calDayNum {
+  font-size: 12px;
+  font-weight: 750;
+  color: #5e6a72;
+  margin-bottom: 4px;
+}
+.calEntry {
+  display: block;
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.3;
+  border-left: 3px solid var(--green2);
+  background: #edf7e5;
+  overflow-wrap: anywhere;
+}
+.calEntry:hover {
+  filter: brightness(0.97);
+}
+.calEntryReceived {
+  border-left-color: var(--blue);
+  background: #e8f1ff;
+}
+.calEntryDone {
+  opacity: 0.65;
+}
+.calEntry strong {
+  color: var(--blue);
+}
+
+.calList {
+  display: none;
+}
+.calListDay {
+  margin: 14px 0 6px;
+  font-size: 14px;
+}
+.calListDay:first-child {
+  margin-top: 0;
+}
+.calList .calEntry {
+  font-size: 14px;
+  padding: 10px;
+  min-height: 44px;
+}
+
+@media (max-width: 700px) {
+  .calGrid {
+    display: none;
+  }
+  .calList {
+    display: block;
+  }
+}

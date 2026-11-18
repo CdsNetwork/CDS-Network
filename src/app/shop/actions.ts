@@ -7,7 +7,9 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { emailCdsAfter } from "@/lib/portal-email-send";
 import { createShopBillAfter } from "@/lib/qbo/bill-server";
-import { PICKUP_WINDOWS, SHIP_STATUS_LABEL } from "@/lib/format";
+import { SHIP_STATUS_LABEL } from "@/lib/format";
+import { pacificToday } from "@/lib/dates";
+import { pickupChoiceError } from "@/lib/pickup";
 import {
   checkFile,
   checkMeta,
@@ -67,16 +69,43 @@ async function guard(workOrderId: string) {
 export async function acceptJob(workOrderId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
   const bad = await guard(workOrderId);
   if (bad) return bad;
+  // A pickup job's form sends the pickup day and window (both required; the database checks
+  // the job is a pickup job). A shipped job's form sends neither.
+  const day = text(fd, "pickup_date");
   const window = text(fd, "pickup_window");
-  if (window && !PICKUP_WINDOWS.some((w) => w.value === window)) return { error: "Choose a pickup window." };
+  if (day || window) {
+    const bad = pickupChoiceError(day, window, pacificToday());
+    if (bad) return { error: bad };
+  }
   const supabase = await createClient();
   const { error } = await supabase.rpc("shop_accept_work_order", {
     p_work_order: workOrderId,
+    p_pickup_date: day || null,
     p_pickup_window: window || null,
   });
   // dispatch@ hears about the acceptance and the ETA. emailCdsAfter runs after the response
   // and never throws, so an email failure cannot undo or block the accept.
   if (!error) emailCdsAfter("accepted", workOrderId);
+  return done(error);
+}
+
+/**
+ * Changes the pickup day and window of an accepted pickup job, until the part is picked up
+ * (public.shop_set_pickup). CDS sees the change as "New from shop" ('eta').
+ */
+export async function changePickup(workOrderId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
+  const bad = await guard(workOrderId);
+  if (bad) return bad;
+  const day = text(fd, "pickup_date");
+  const window = text(fd, "pickup_window");
+  const wrong = pickupChoiceError(day, window, pacificToday());
+  if (wrong) return { error: wrong };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("shop_set_pickup", {
+    p_work_order: workOrderId,
+    p_pickup_date: day,
+    p_pickup_window: window,
+  });
   return done(error);
 }
 
