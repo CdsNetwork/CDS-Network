@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
-import { isUuid, LINES_LOCKED_STATUSES, PO_IN_QUICKBOOKS_NOTE, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
+import { canEditRequestTypeOnly, isUuid, LINES_LOCKED_STATUSES, PO_IN_QUICKBOOKS_NOTE, REQUEST_TYPE_LABEL, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
 import { parseWoNumber } from "@/components/cds-wo/linked-orders";
 import { money, woLabel } from "@/lib/format";
 import { requireCds } from "@/lib/auth";
@@ -277,6 +277,43 @@ export async function updateWorkOrderPo(woId: string, _prev: ActionState, formDa
   });
   const inQuickBooks = qbInvoiceIdOf(current.work_order_internal) !== null;
   return done(woId, inQuickBooks ? `PO saved. ${PO_IN_QUICKBOOKS_NOTE}` : "PO saved.");
+}
+
+/**
+ * The request type alone, while the shop has the job (Sarah, CDS, 2026-11-18: a filter failed
+ * and a part is sold instead, so the order becomes Parts Only and the shop is not asked for
+ * measurements). Only request_type changes: fulfillment and the lines stay as they are. In
+ * review the Edit order box saves it with the other fields; once the shop completed the job,
+ * or the order is invoiced or cancelled, it is fixed (canEditRequestTypeOnly). The shop's job
+ * page and shop_complete_work_order read request_type, so they follow at once.
+ */
+export async function updateWorkOrderRequestType(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const requestType = text(formData.get("request_type"));
+  if (!REQUEST_TYPES.includes(requestType)) return { error: "Choose a request type." };
+
+  const supabase = await createClient();
+  const { data: current, error: readError } = await supabase.from("work_orders").select("status, request_type").eq("id", woId).maybeSingle();
+  if (readError) return { error: "The work order could not be read. Try again." };
+  if (!current) return { error: "Work order not found." };
+  if (!canEditRequestTypeOnly(current.status as string)) {
+    return { error: "The request type can only change here while the shop has the job, before it is completed." };
+  }
+  const before = current.request_type as string;
+  if (before === requestType) return done(woId, "Request type unchanged.");
+
+  const { error } = await supabase.from("work_orders").update({ request_type: requestType }).eq("id", woId);
+  if (error) return { error: error.message };
+  const label = (t: string) => REQUEST_TYPE_LABEL[t] ?? t;
+  await supabase.from("work_order_events").insert({
+    work_order_id: woId,
+    actor_id: profile.id,
+    event_type: "edit",
+    message: `Request type changed by CDS: ${label(before)} to ${label(requestType)}`,
+    shop_visible: false,
+  });
+  return done(woId, "Request type saved.");
 }
 
 /**

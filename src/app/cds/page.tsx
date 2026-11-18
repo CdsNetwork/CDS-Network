@@ -128,10 +128,11 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
   if (range.from) invoicedQuery = invoicedQuery.gte("invoiced_at", range.from.toISOString());
   if (range.to) invoicedQuery = invoicedQuery.lt("invoiced_at", range.to.toISOString());
 
-  // Work order table query (same filters and order as the CSV export): most pressing status
-  // first, newest first within a status.
+  // Work order table query (same filters as the CSV export): the orders marked New from shop
+  // first (Sarah, CDS, 2026-11-18), then most pressing status first, newest first within a
+  // status (the export's order).
   // correction_notes: only the shop's invoice correction requests (Correction requested mark).
-  const list = (await filteredWorkOrders(supabase, filters, LIST_COLUMNS)).query
+  const list = (await filteredWorkOrders(supabase, filters, LIST_COLUMNS, { newFromShopFirst: true })).query
     .like("correction_notes.body", `${INVOICE_CORRECTION_PREFIX}%`)
     .limit(200);
 
@@ -179,7 +180,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
         <div className="title">
           <h1>Operations Dashboard</h1>
           <p>
-            Most pressing orders first in the table below; completed activity shown for {range.label}.
+            New from shop and most pressing orders first in the table below; completed activity shown for {range.label}.
           </p>
         </div>
         <div style={{ display: "grid", gap: 8, width: 220 }}>

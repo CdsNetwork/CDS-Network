@@ -18,6 +18,7 @@ import styles from "@/components/cds-wo/cds-wo.module.css";
 import type { SearchOption } from "@/components/SearchSelect";
 import {
   canEditPoOnly,
+  canEditRequestTypeOnly,
   CUSTOMER_APPROVAL_LABEL,
   dispatchShopDefault,
   isUuid,
@@ -108,6 +109,7 @@ import {
   updateCustomerShipping,
   updateWorkOrderFields,
   updateWorkOrderPo,
+  updateWorkOrderRequestType,
 } from "./actions";
 
 type MaybeOne<T> = T | T[] | null;
@@ -1126,7 +1128,34 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </Fact>
               <Fact label="Affiliate Invoice / Reference #">{wo.affiliate_invoice_ref}</Fact>
               <Fact label="Pickup / ship-to address">{wo.site_address}</Fact>
-              <Fact label="Request Type">{REQUEST_TYPE_LABEL[wo.request_type] ?? wo.request_type}</Fact>
+              <Fact label="Request Type">
+                {REQUEST_TYPE_LABEL[wo.request_type] ?? wo.request_type}
+                {canEditRequestTypeOnly(wo.status) && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary className="small link">Change request type</summary>
+                    <ActionForm
+                      action={updateWorkOrderRequestType.bind(null, wo.id)}
+                      submitLabel="Save type"
+                      buttonClass="btn btn-secondary"
+                      inline
+                    >
+                      <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                        <label htmlFor="edit-type-only">Request Type</label>
+                        <select id="edit-type-only" name="request_type" defaultValue={wo.request_type}>
+                          {Object.entries(REQUEST_TYPE_LABEL).map(([v, l]) => (
+                            <option key={v} value={v}>
+                              {l}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </ActionForm>
+                    <p className="small" style={{ margin: "4px 0 0" }}>
+                      Parts Only: the shop is not asked for components or measurements.
+                    </p>
+                  </details>
+                )}
+              </Fact>
               <Fact label="Fulfillment">{FULFILLMENT_LABEL[wo.fulfillment] ?? wo.fulfillment}</Fact>
               {wo.fulfillment === "pickup" ? (
                 <Fact label="Pickup day / window">{pickupEtaLabel(wo.pickup_window, wo.pickup_date)}</Fact>

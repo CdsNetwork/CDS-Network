@@ -117,8 +117,12 @@ const MAX_FLAGGED = 200;
  * number, PO, unit, location, customer name and the shipments' tracking numbers (spaces and
  * case ignored). Wrapped in an object because the query builder is thenable and an async
  * function would otherwise run it.
+ *
+ * newFromShopFirst (the dashboard, Sarah, CDS, 2026-11-18): the orders marked New from shop
+ * (work_order_list.new_from_shop) come first, each group in the order above. The CSV export
+ * keeps the sheet order.
  */
-export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, columns: string) {
+export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, columns: string, opts: { newFromShopFirst?: boolean } = {}) {
   // Condemned: an inner join on the condemned components keeps only the orders that have one
   // (under its own name, so the row's own component list stays complete).
   // Shipped: the same with the outbound legs that are with the carrier.
@@ -127,9 +131,9 @@ export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, colum
     : f.shipped
       ? `${columns}, shipped_legs:shipments!inner(id)`
       : columns;
-  let list = supabase
-    .from("work_order_list")
-    .select(select)
+  let list = supabase.from("work_order_list").select(select);
+  if (opts.newFromShopFirst) list = list.order("new_from_shop", { ascending: false });
+  list = list
     .order("list_rank", { ascending: true })
     .order("created_at", { ascending: false })
     .order("id");

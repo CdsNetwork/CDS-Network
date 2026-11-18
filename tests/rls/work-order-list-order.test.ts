@@ -55,8 +55,11 @@ async function workOrder(unit: string, status: string, opts: { question?: boolea
   if (opts.tracking) {
     await must(admin.from("shipments").insert({ work_order_id: wo.id, direction: "affiliate_to_customer", tracking_number: opts.tracking }));
   }
+  ids.set(unit, wo.id);
   return wo.id;
 }
+
+const ids = new Map<string, string>();
 
 const LIST_COLUMNS =
   "id, unit_number, status, list_rank, customers(name), affiliates(display_name, is_in_house), work_order_internal(internal_status), work_order_shop_activity(is_new), work_order_components(result), work_order_questions(question_pending, note)";
@@ -82,6 +85,18 @@ beforeAll(async () => {
   await workOrder("U-declined", "rejected_by_affiliate");
   await workOrder("U-question", "in_process", { question: true, condemned: true });
   await workOrder("U-pending", "pending_review", { question: true });
+
+  // New from shop (Sarah, CDS, 2026-11-18): shop activity CDS has not opened yet on two orders,
+  // and activity CDS already opened on a third.
+  const now = Date.now();
+  const at = (ms: number) => new Date(now + ms).toISOString();
+  await must(
+    admin.from("work_order_shop_activity").insert([
+      { work_order_id: ids.get("U-completed"), shop_activity_at: at(0), shop_activity: "note" },
+      { work_order_id: ids.get("U-accepted-old"), shop_activity_at: at(0), shop_activity: "file", cds_viewed_at: at(-60_000) },
+      { work_order_id: ids.get("U-picked-up"), shop_activity_at: at(-60_000), shop_activity: "note", cds_viewed_at: at(0) },
+    ]),
+  );
 }, 120_000);
 
 afterAll(async () => {
@@ -115,6 +130,29 @@ describe("work_order_list", () => {
       "U-cancelled",
     ]);
     expect(rows[0].customers?.name).toBe(`List Order Customer ${runId}`);
+  });
+
+  it("dashboard: New from shop orders first, each group in the sheet order", async () => {
+    const { query } = await filteredWorkOrders(cds.client as never, parseFilters({ q: LABEL }), LIST_COLUMNS, { newFromShopFirst: true });
+    const rows = (await must(query)) as unknown as { unit_number: string; new_from_shop: boolean }[];
+    expect(rows.map((r) => r.unit_number)).toEqual([
+      "U-accepted-old",
+      "U-completed",
+      "U-pending",
+      "U-question",
+      "U-declined",
+      "U-awaiting",
+      "U-accepted-new",
+      "U-picked-up",
+      "U-in-process",
+      "U-delivered",
+      "U-ready",
+      "U-condemned",
+      "U-invoiced",
+      "U-cancelled",
+    ]);
+    const flagged = await must(cds.client.from("work_order_list").select("unit_number").eq("location_label", LABEL).eq("new_from_shop", true));
+    expect((flagged as { unit_number: string }[]).map((r) => r.unit_number).sort()).toEqual(["U-accepted-old", "U-completed"]);
   });
 
   it("keeps the order across pages (the CSV export pages through it)", async () => {

@@ -61,6 +61,16 @@ export function canEditPoOnly(status: string): boolean {
   return !REVIEW_STATUSES.includes(status) && status !== "cancelled";
 }
 
+/**
+ * Whether the work order page offers the request-type-only change (Sarah, CDS, 2026-11-18: a
+ * filter failed and a part is sold instead, so the shop must not be asked for measurements):
+ * while the shop has the job, before it is completed. In review the Edit order box has the
+ * request type with the other fields.
+ */
+export function canEditRequestTypeOnly(status: string): boolean {
+  return !REVIEW_STATUSES.includes(status) && !LINES_LOCKED_STATUSES.includes(status);
+}
+
 /** Shown with the PO edit when the order already has its QuickBooks invoice (the portal never changes it). */
 export const PO_IN_QUICKBOOKS_NOTE = "This invoice is already in QuickBooks. Change the PO there too.";
 
