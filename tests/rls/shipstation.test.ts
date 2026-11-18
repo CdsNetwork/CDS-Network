@@ -344,9 +344,11 @@ describe("removing a leg added by mistake", () => {
     expect(byShop.error).not.toBeNull();
     expect(await must(admin.from("shipments").select("id").eq("id", leg.id))).toHaveLength(1);
 
-    // It keeps a leg whose label status says a label exists or is being made.
+    // It keeps a leg whose label is being bought right now (a live claim). Its label status
+    // alone no longer keeps it (20261119100000_remove_shipment_hand_tracking.sql).
     const labelled = await insertOne("shipments", { work_order_id: f.wo, direction: "cds_to_customer", label_status: "ready" });
     removedRowIds.push(labelled.id);
+    await must(cds.client.rpc("cds_claim_shipstation", { p_kind: "label", p_target: labelled.id }));
     const kept = await cds.client.rpc("cds_remove_shipment", { p_work_order: f.wo, p_shipment: labelled.id });
     expect(kept.error?.message).toMatch(/label/);
     await must(admin.from("shipments").delete().eq("id", labelled.id));

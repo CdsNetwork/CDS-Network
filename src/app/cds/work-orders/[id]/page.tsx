@@ -7,7 +7,8 @@ import { ActionMessageGroup } from "@/components/cds-wo/ActionMessageGroup";
 import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
 import { MarkSeen } from "@/components/cds-wo/MarkSeen";
 import { ListInternalStatusSelect } from "@/components/cds-wo/ListRowEdits";
-import { addShipmentHelp, canAddShipment } from "@/components/cds-wo/add-shipment";
+import { addShipmentHelp, defaultShipmentDirection, noShipmentsNotice } from "@/components/cds-wo/add-shipment";
+import { shipmentRemoval, voidAndRemoveConfirm } from "@/components/cds-wo/remove-shipment";
 import { QUESTION_NOTE_MAX } from "@/components/cds-wo/question-pending";
 import type { LocationOption } from "@/components/cds-wo/NewWorkOrderForm";
 import { OrderLocationFields } from "@/components/cds-wo/OrderLocationFields";
@@ -25,7 +26,6 @@ import {
   one,
   PO_IN_QUICKBOOKS_NOTE,
   PRICE_SOURCE_LABEL,
-  REMOVABLE_LABEL_STATUSES,
   REQUEST_TYPE_LABEL,
   REVIEW_STATUSES,
   round2,
@@ -99,6 +99,7 @@ import {
   removeLine,
   removePassThroughLine,
   removeShipment,
+  voidLabelAndRemoveShipment,
   setAttachmentShopVisible,
   setStatus,
   linkWorkOrder,
@@ -1156,15 +1157,15 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
             <h3>Logistics</h3>
             {shipments.length === 0 &&
               (wo.fulfillment === "pickup" ? (
-                <div className="notice">
-                  <b>Affiliate Pickup / Local Delivery.</b> The shop picks up and returns the part; no shipment legs needed.
-                </div>
+                <div className="notice">{noShipmentsNotice(wo.fulfillment)}</div>
               ) : (
-                <p className="small">No shipment legs yet. Add one below when a tracking number is known.</p>
+                <p className="small">{noShipmentsNotice(wo.fulfillment)}</p>
               ))}
             <div style={{ display: "grid", gap: 10 }}>
               {shipments.map((s) => {
                 const si = one(s.shipment_internal);
+                const activeLabel = labels.get(s.id) ?? null;
+                const removal = shipmentRemoval({ activeLabel: labels.has(s.id), invoiced: invoiceLockedNow });
                 return (
                   <div key={s.id} className="summarybox">
                     <div className="row between">
@@ -1258,7 +1259,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                         pkg={packageForShipment(s, packageDefaults)}
                       />
                     </div>
-                    {!labels.has(s.id) && !s.tracking_number && REMOVABLE_LABEL_STATUSES.includes(s.label_status) && !invoiceLockedNow && (
+                    {removal === "remove" && (
                       <div style={{ marginTop: 8 }}>
                         <ActionForm
                           action={removeShipment.bind(null, wo.id, s.id)}
@@ -1269,74 +1270,81 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                         />
                       </div>
                     )}
+                    {removal === "void_and_remove" && activeLabel && (
+                      <div style={{ marginTop: 8 }}>
+                        <ActionForm
+                          action={voidLabelAndRemoveShipment.bind(null, wo.id, s.id)}
+                          submitLabel="Void label and remove"
+                          pendingLabel="Voiding..."
+                          buttonClass="remove"
+                          confirmText={voidAndRemoveConfirm(activeLabel)}
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
-            {canAddShipment(wo.fulfillment) && (
-              <>
-                <details style={{ marginTop: 14 }}>
-                  <summary className="link">Add shipment</summary>
-                  <ActionForm action={addShipment.bind(null, wo.id)} submitLabel="Save Shipment" resetOnSuccess className="summarybox">
-                    <div className="grid3">
-                      <div className="field">
-                        <label htmlFor="ship-direction">Direction</label>
-                        <select id="ship-direction" name="direction" defaultValue={wo.fulfillment === "supplier_direct" ? "supplier_to_customer" : "customer_to_affiliate"}>
-                          {Object.entries(DIRECTION_LABEL).map(([v, l]) => (
-                            <option key={v} value={v}>
-                              {l}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field">
-                        <label htmlFor="ship-carrier">Carrier</label>
-                        <select id="ship-carrier" name="carrier" defaultValue="UPS">
-                          <option value="UPS">UPS</option>
-                          <option value="FedEx">FedEx</option>
-                          <option value="USPS">USPS</option>
-                          <option value="Other">Other</option>
-                        </select>
-                      </div>
-                      <div className="field">
-                        <label htmlFor="ship-service">Service level</label>
-                        <input id="ship-service" name="service_level" className="input" placeholder="Ground" maxLength={100} />
-                      </div>
-                      <div className="field">
-                        <label htmlFor="ship-tracking">Tracking #</label>
-                        <input id="ship-tracking" name="tracking_number" className="input" maxLength={100} />
-                      </div>
-                      <div className="field">
-                        <label htmlFor="ship-status">Status</label>
-                        <select id="ship-status" name="status" defaultValue={NEW_SHIPMENT_STATUS}>
-                          {Object.entries(SHIPMENT_STATUS_LABEL).map(([v, l]) => (
-                            <option key={v} value={v}>
-                              {l}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field">
-                        <label htmlFor="ship-quoted">Quoted cost</label>
-                        <input id="ship-quoted" name="quoted_cost" className="input" type="number" min="0" step="0.01" />
-                      </div>
-                      <div className="field">
-                        <label htmlFor="ship-actual">Actual cost</label>
-                        <input id="ship-actual" name="actual_cost" className="input" type="number" min="0" step="0.01" />
-                      </div>
-                    </div>
-                    <div className="field">
-                      <label htmlFor="ship-notes">Notes (CDS only)</label>
-                      <input id="ship-notes" name="notes" className="input" maxLength={2000} />
-                    </div>
-                  </ActionForm>
-                </details>
-                <p className="small" style={{ marginTop: 12 }}>
-                  {addShipmentHelp(shipments.length)} Addresses come from the customer location and the shop (Shipping settings
-                  hold CDS&apos;s phone and address).
-                </p>
-              </>
-            )}
+            <details style={{ marginTop: 14 }}>
+              <summary className="link">Add shipment</summary>
+              <ActionForm action={addShipment.bind(null, wo.id)} submitLabel="Save Shipment" resetOnSuccess className="summarybox">
+                <div className="grid3">
+                  <div className="field">
+                    <label htmlFor="ship-direction">Direction</label>
+                    <select id="ship-direction" name="direction" defaultValue={defaultShipmentDirection(wo.fulfillment)}>
+                      {Object.entries(DIRECTION_LABEL).map(([v, l]) => (
+                        <option key={v} value={v}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="ship-carrier">Carrier</label>
+                    <select id="ship-carrier" name="carrier" defaultValue="UPS">
+                      <option value="UPS">UPS</option>
+                      <option value="FedEx">FedEx</option>
+                      <option value="USPS">USPS</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="ship-service">Service level</label>
+                    <input id="ship-service" name="service_level" className="input" placeholder="Ground" maxLength={100} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="ship-tracking">Tracking #</label>
+                    <input id="ship-tracking" name="tracking_number" className="input" maxLength={100} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="ship-status">Status</label>
+                    <select id="ship-status" name="status" defaultValue={NEW_SHIPMENT_STATUS}>
+                      {Object.entries(SHIPMENT_STATUS_LABEL).map(([v, l]) => (
+                        <option key={v} value={v}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="ship-quoted">Quoted cost</label>
+                    <input id="ship-quoted" name="quoted_cost" className="input" type="number" min="0" step="0.01" />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="ship-actual">Actual cost</label>
+                    <input id="ship-actual" name="actual_cost" className="input" type="number" min="0" step="0.01" />
+                  </div>
+                </div>
+                <div className="field">
+                  <label htmlFor="ship-notes">Notes (CDS only)</label>
+                  <input id="ship-notes" name="notes" className="input" maxLength={2000} />
+                </div>
+              </ActionForm>
+            </details>
+            <p className="small" style={{ marginTop: 12 }}>
+              {addShipmentHelp(shipments.length)} Addresses come from the customer location and the shop (Shipping settings
+              hold CDS&apos;s phone and address).
+            </p>
           </section>
 
           {wo.request_type !== "parts_only" && (

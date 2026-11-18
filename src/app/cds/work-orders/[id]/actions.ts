@@ -376,23 +376,69 @@ export async function addShipment(woId: string, _prev: ActionState, formData: Fo
 }
 
 /**
- * Removes a shipment leg added by mistake. Only while it has no active label, no tracking
- * number and its label status says no label (needed or voided), and the order is not
- * invoiced: public.cds_remove_shipment checks this under a lock, deletes the leg and logs it
- * (20261118040000_remove_shipment_rpc.sql). Its notes, costs and tracking events go with it
- * (cascade); voided labels on it too.
+ * Removes a shipment leg added by mistake. Only while it has no active label (a tracking
+ * number typed by hand is fine) and the order is not invoiced: public.cds_remove_shipment
+ * checks this under a lock, deletes the leg and logs it (20261118040000_remove_shipment_rpc.sql,
+ * 20261119100000_remove_shipment_hand_tracking.sql). Its notes, costs and tracking events go
+ * with it (cascade); voided labels on it too.
  */
 export async function removeShipment(woId: string, shipmentId: string): Promise<ActionState> {
   await requireCds();
   if (!isUuid(woId) || !isUuid(shipmentId)) return { error: "Shipment not found." };
   const supabase = await createClient();
+  const why = await removeShipmentRow(supabase, woId, shipmentId);
+  return why ? { error: why } : done(woId, "Shipment removed.");
+}
+
+/** Runs cds_remove_shipment; the reason it was refused, or null when the leg is gone. */
+async function removeShipmentRow(supabase: Awaited<ReturnType<typeof createClient>>, woId: string, shipmentId: string): Promise<string | null> {
   const { error } = await supabase.rpc("cds_remove_shipment", { p_work_order: woId, p_shipment: shipmentId });
-  if (error) {
-    // Raised by the function: written for users.
-    if (error.code === "P0001" || error.code === "P0002") return { error: error.message };
-    return { error: "The shipment could not be removed. Try again." };
+  if (!error) return null;
+  // Raised by the function: written for users.
+  if (error.code === "P0001" || error.code === "P0002") return error.message;
+  return "The shipment could not be removed. Try again.";
+}
+
+/**
+ * "Void label and remove" (Sarah, CDS, 2026-11-18: a label made by mistake). Voids the leg's
+ * label in use through the usual void path (ShipStation, then cds_void_shipment_label; refused
+ * while a carrier pickup is booked), then removes the leg. When the void fails nothing is
+ * removed. An invoiced order is refused before anything is voided.
+ */
+export async function voidLabelAndRemoveShipment(woId: string, shipmentId: string): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId) || !isUuid(shipmentId)) return { error: "Shipment not found." };
+  const supabase = await createClient();
+  const order = await orderState(supabase, woId);
+  if (!order) return { error: "Work order not found." };
+  if (order.invoiced) return { error: "Shipments cannot be removed after the order is invoiced." };
+
+  const { data: label, error } = await supabase
+    .from("shipment_labels")
+    .select("id")
+    .eq("shipment_id", shipmentId)
+    .eq("work_order_id", woId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) return { error: "The shipment could not be read. Try again." };
+
+  if (label) {
+    // Loaded here, not at the top: the ShipStation module needs the server environment when it loads.
+    const { voidLabel } = await import("@/lib/shipstation/labels");
+    const voided = await voidLabel(supabase, label.id as string);
+    revalidatePath("/cds/shipping");
+    if (!voided.ok) {
+      revalidatePath(`/cds/work-orders/${woId}`);
+      return { error: `${voided.error} The shipment was not removed.` };
+    }
   }
-  return done(woId, "Shipment removed.");
+  const why = await removeShipmentRow(supabase, woId, shipmentId);
+  if (why) {
+    revalidatePath(`/cds/work-orders/${woId}`);
+    return { error: label ? `The label was voided, but the shipment was not removed: ${why}` : why };
+  }
+  revalidatePath("/cds/shipping");
+  return done(woId, label ? "Label voided and shipment removed." : "Shipment removed.");
 }
 
 export async function addLine(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {

@@ -1,9 +1,12 @@
 /**
  * Staff created shipment legs by accident and could not delete them. A leg can be removed
- * only while it has no active label and no tracking number and the order is not invoiced. The
- * database checks this (public.cds_remove_shipment, 20261118040000_remove_shipment_rpc.sql;
- * tests/rls/remove-shipment.test.ts): the action calls it and never deletes the row itself,
- * since a plain DELETE through the Data API skipped these checks (review 2026-11-16).
+ * while it has no active label and the order is not invoiced; a tracking number typed by hand
+ * no longer blocks it (Sarah, CDS, 2026-11-18). The database checks this
+ * (public.cds_remove_shipment, 20261118040000_remove_shipment_rpc.sql and
+ * 20261119100000_remove_shipment_hand_tracking.sql; tests/rls/remove-shipment.test.ts): the
+ * action calls it and never deletes the row itself, since a plain DELETE through the Data API
+ * skipped these checks (review 2026-11-16). A leg with a label in use: see
+ * tests/unit/void-and-remove-shipment.test.ts.
  */
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,8 +43,7 @@ describe("removeShipment", () => {
 
   it.each([
     "This shipment has a label. Void the label first, then remove the shipment.",
-    "This shipment has a tracking number, so it cannot be removed.",
-    "This shipment has a label or one is being made. Void the label first, then remove the shipment.",
+    "A label is being created for this shipment. Refresh in a moment, then try again.",
     "Shipments cannot be removed after the order is invoiced.",
   ])("shows the database's refusal: %s", async (message) => {
     answer = { data: null, error: { code: "P0001", message } };
@@ -63,10 +65,11 @@ describe("removeShipment", () => {
 });
 
 describe("work order page", () => {
-  it("offers Remove on a leg only without a label or tracking number, after a confirm", () => {
+  it("offers Remove on a leg without a label in use (a tracking number typed by hand is fine), after a confirm", () => {
     const page = readFileSync(new URL("../../src/app/cds/work-orders/[id]/page.tsx", import.meta.url), "utf8");
     expect(page).toMatch(/removeShipment\.bind\(null, wo\.id, s\.id\)/);
-    expect(page).toMatch(/!labels\.has\(s\.id\) && !s\.tracking_number && REMOVABLE_LABEL_STATUSES\.includes\(s\.label_status\)/);
+    expect(page).toMatch(/removal === "remove"/);
+    expect(page).not.toMatch(/!s\.tracking_number && REMOVABLE_LABEL_STATUSES/);
     expect(page).toMatch(/confirmText="Remove this shipment/);
   });
 });

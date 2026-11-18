@@ -6,6 +6,11 @@
  * by any CDS login, skipping the checks of the Remove button (order not invoiced, no label in
  * use, no tracking number, label status needed or voided). The checks now run in the database.
  *
+ * Sarah, CDS, 2026-11-18 (20261119100000_remove_shipment_hand_tracking.sql): a leg with no
+ * label in use is removed also when its tracking number was typed by hand (no label made in the
+ * portal) and whatever its label status says. Still refused: a label in use (the page voids it
+ * first), a label being bought right now, and an invoiced order.
+ *
  * Fixtures are created with the service role under a per-run id and removed afterwards.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -82,11 +87,45 @@ describe("cds_remove_shipment", () => {
     expect(await exists(s)).toBe(false);
   });
 
-  it("refuses a tracking number, a label in use or being made, an invoiced order, and another order's leg", async () => {
+  it("removes a leg whose tracking number was typed by hand, whatever its label status", async () => {
     const wo = await order();
-    const tracked = await shipment(wo, { tracking_number: `1Z${runId}b` });
-    expect((await remove(cds, wo, tracked)).error?.message).toBe("This shipment has a tracking number, so it cannot be removed.");
+    // As the Add shipment form saves a leg with a tracking number.
+    const typed = await shipment(wo, { tracking_number: `1Z${runId}h`, label_status: "ready" });
+    const sent = await shipment(wo, { tracking_number: `1Z${runId}s`, label_status: "sent" });
+    expect((await remove(cds, wo, typed)).error).toBeNull();
+    expect((await remove(cds, wo, sent)).error).toBeNull();
+    expect(await exists(typed)).toBe(false);
+    expect(await exists(sent)).toBe(false);
+  });
 
+  it("removes a leg after its portal label was voided", async () => {
+    const wo = await order();
+    const s = await shipment(wo);
+    const label = await insertOne("shipment_labels", {
+      shipment_id: s,
+      work_order_id: wo,
+      shipstation_label_id: `se-${runId}-vd`,
+      shipstation_carrier_id: "se-7157832",
+      carrier: "FedEx",
+      service_code: "fedex_ground",
+      is_test: true,
+      ship_from_summary: "Test",
+    });
+    await must(cds.client.rpc("cds_void_shipment_label", { p_label: label.id, p_message: "Test void" }));
+    expect((await remove(cds, wo, s)).error).toBeNull();
+    expect(await exists(s)).toBe(false);
+  });
+
+  it("refuses while a label is being bought for the leg", async () => {
+    const wo = await order();
+    const s = await shipment(wo, { tracking_number: `1Z${runId}c`, label_status: "ready" });
+    await must(cds.client.rpc("cds_claim_shipstation", { p_kind: "label", p_target: s }));
+    expect((await remove(cds, wo, s)).error?.message).toBe("A label is being created for this shipment. Refresh in a moment, then try again.");
+    expect(await exists(s)).toBe(true);
+  });
+
+  it("refuses a label in use, an invoiced order, and another order's leg", async () => {
+    const wo = await order();
     const labelled = await shipment(wo);
     await must(
       admin.from("shipment_labels").insert({
@@ -102,21 +141,18 @@ describe("cds_remove_shipment", () => {
     );
     expect((await remove(cds, wo, labelled)).error?.message).toBe("This shipment has a label. Void the label first, then remove the shipment.");
 
-    const ready = await shipment(wo, { label_status: "ready" });
-    expect((await remove(cds, wo, ready)).error?.message).toBe(
-      "This shipment has a label or one is being made. Void the label first, then remove the shipment.",
-    );
-
     const other = await order();
-    expect((await remove(cds, other, ready)).error?.message).toBe("Shipment not found.");
+    expect((await remove(cds, other, labelled)).error?.message).toBe("Shipment not found.");
 
-    // Invoiced in QuickBooks while the shop is still working on it.
+    // Invoiced in QuickBooks while the shop is still working on it; also a typed tracking number.
     const invoiced = await order("in_process");
     await must(cds.client.rpc("cds_mark_invoiced", { p_work_order: invoiced, p_qb_invoice_id: `RMS${runId}`, p_qb_invoice_number: null }));
     const late = await shipment(invoiced);
+    const lateTyped = await shipment(invoiced, { tracking_number: `1Z${runId}i`, label_status: "ready" });
     expect((await remove(cds, invoiced, late)).error?.message).toBe("Shipments cannot be removed after the order is invoiced.");
+    expect((await remove(cds, invoiced, lateTyped)).error?.message).toBe("Shipments cannot be removed after the order is invoiced.");
 
-    for (const id of [tracked, labelled, ready, late]) expect(await exists(id)).toBe(true);
+    for (const id of [labelled, late, lateTyped]) expect(await exists(id)).toBe(true);
   });
 
   it("is refused for shops", async () => {
