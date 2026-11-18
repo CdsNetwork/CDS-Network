@@ -242,10 +242,13 @@ export async function saveCustomer(id: string | null, _prev: ActionState, formDa
   }
   const { error: billingError } = await supabase
     .from("customer_billing")
-    .upsert({ customer_id: customerId, billing_email: billingEmail || null }, { onConflict: "customer_id" });
+    .upsert(
+      { customer_id: customerId, billing_email: billingEmail || null, charge_shipping: checkbox(formData, "charge_shipping") },
+      { onConflict: "customer_id" },
+    );
   if (billingError) {
     revalidatePath("/cds/admin");
-    return { error: "The customer was saved, but the billing email was not." };
+    return { error: "The customer was saved, but the billing email and shipping setting were not." };
   }
   return done(id ? "Customer saved." : `${customer.name} added.`);
 }

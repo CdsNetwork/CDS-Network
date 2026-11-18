@@ -68,6 +68,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteConfirmText } from "@/lib/work-order-delete";
 import { createClient } from "@/lib/supabase/server";
 import { SHOP_DEDUCTION_COLUMNS, deductionLabel, shopPayable, toShopDeductions } from "@/lib/shop-deductions";
+import { automaticShippingText, CUSTOMER_SHIPPING_COLUMNS, toCustomerShipping } from "@/lib/customer-shipping";
 import { LabelPanel, type LabelView } from "@/components/shipping/LabelPanel";
 import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/shipstation/views";
 import { labelShop, labelShopMismatch, missingLegEnds, shopEnd } from "@/lib/shipstation/ends";
@@ -104,6 +105,7 @@ import {
   setStatus,
   linkWorkOrder,
   updateTax,
+  updateCustomerShipping,
   updateWorkOrderFields,
   updateWorkOrderPo,
 } from "./actions";
@@ -421,8 +423,15 @@ function CombinedOrders({ combined, woId }: { combined: CombinedInvoice; woId: s
           ) : (
             <div className="small">No lines yet.</div>
           )}
+          {o.shipping > 0 && <div className="small">Shipping: {money(o.shipping)}</div>}
         </div>
       ))}
+      {combined.orders.some((o) => o.shipping > 0) && (
+        <div className="small" style={{ marginTop: 8 }}>
+          The invoice carries the shipping of both (Shipping box, and Shipping and Handling (G) for GESi filters):{" "}
+          <b>{money(combined.orders.reduce((sum, o) => sum + o.shipping, 0))}</b>.
+        </div>
+      )}
     </div>
   );
 }
@@ -681,6 +690,15 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     .eq("work_order_id", id);
   const deductions = toShopDeductions(deductionRows as Record<string, unknown>[] | null);
 
+  // The shipping charge for the customer invoice's Shipping box (CDS only, computed in the
+  // database: 20261119120000_customer_shipping_charge.sql).
+  const { data: customerShippingRow } = await supabase
+    .from("work_order_customer_shipping")
+    .select(CUSTOMER_SHIPPING_COLUMNS)
+    .eq("work_order_id", id)
+    .maybeSingle();
+  const customerShipping = toCustomerShipping(customerShippingRow as Record<string, unknown> | null);
+
   // "Question Pending" (CDS only): a customer question CDS is following up with the shop.
   const { data: questionData } = await supabase
     .from("work_order_questions")
@@ -856,11 +874,17 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   };
   const rate = customerTaxExempt ? 0 : Number(internal?.tax_rate ?? 0);
   const shopTotal = shopPayable(lines, deductions);
+  // Before the QuickBooks invoice exists, the estimate includes the Shipping box. Once it
+  // exists, QuickBooks's own tax and total are shown (they include what was sent).
+  const shippingInEstimate = !invoiceLockedNow && customerShipping ? customerShipping.amount : 0;
   const estimate = taxSummary(
-    lines.map((l) => {
-      const p = one(l.work_order_line_pricing);
-      return { amount: (p?.customer_unit_price ?? 0) * l.qty, taxClass: p?.tax_class ?? null };
-    }),
+    [
+      ...lines.map((l) => {
+        const p = one(l.work_order_line_pricing);
+        return { amount: (p?.customer_unit_price ?? 0) * l.qty, taxClass: p?.tax_class ?? null };
+      }),
+      ...(shippingInEstimate > 0 ? [{ amount: shippingInEstimate, taxClass: "shipping" }] : []),
+    ],
     taxFlags,
     rate,
   );
@@ -2073,6 +2097,20 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
           <section className="section">
             <h3>Customer invoice &amp; tax</h3>
             <div className="summarybox">
+              {!invoiceLockedNow && customerShipping && (
+                <div className="summaryrow">
+                  <span>
+                    Shipping (
+                    {customerShipping.gesiAmount > 0 && customerShipping.boxAmount > 0
+                      ? "Shipping box and Shipping and Handling (G)"
+                      : customerShipping.gesiAmount > 0
+                        ? "QuickBooks item Shipping and Handling (G)"
+                        : "QuickBooks Shipping box"}
+                    {customerShipping.overrideAmount !== null ? ", set by hand" : ""})
+                  </span>
+                  <b className="money">{money(customerShipping.amount)}</b>
+                </div>
+              )}
               <div className="summaryrow">
                 <span>Subtotal</span>
                 <b className="money">{priceMissing ? "TBD" : money(subtotal)}</b>
@@ -2099,6 +2137,42 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </div>
             </div>
             {taxView.note && <p className="small">{taxView.note}</p>}
+            {!invoiceLockedNow && customerShipping && (
+              <div style={{ marginTop: 12 }}>
+                <p className="small">
+                  {customerShipping.overrideAmount !== null
+                    ? `Shipping set by hand to ${money(customerShipping.overrideAmount)}. ${automaticShippingText(customerShipping, customer?.name ?? "the customer")}`
+                    : automaticShippingText(customerShipping, customer?.name ?? "the customer")}{" "}
+                  It goes in the Shipping box of the QuickBooks invoice (GESi filters sold: on the item Shipping and Handling (G), where an amount set by hand goes too); 0 means no shipping on the invoice.
+                </p>
+                <ActionForm
+                  action={updateCustomerShipping.bind(null, wo.id, "set")}
+                  submitLabel="Save shipping"
+                  buttonClass="btn btn-secondary"
+                  inline
+                >
+                  <label className="small" htmlFor="customer-shipping">
+                    Shipping charge ($)
+                  </label>
+                  <input
+                    id="customer-shipping"
+                    name="amount"
+                    className="input"
+                    inputMode="decimal"
+                    required
+                    defaultValue={customerShipping.amount.toFixed(2)}
+                    style={{ maxWidth: 120 }}
+                  />
+                </ActionForm>
+                {customerShipping.overrideAmount !== null && (
+                  <ActionForm
+                    action={updateCustomerShipping.bind(null, wo.id, "auto")}
+                    submitLabel={`Back to automatic (${money(customerShipping.automaticAmount)})`}
+                    buttonClass="btn btn-secondary btn-small"
+                  />
+                )}
+              </div>
+            )}
             {customerTaxExempt && (
               <div className="notice">
                 {TAX_FROZEN_STATUSES.includes(taxStatus) ? (

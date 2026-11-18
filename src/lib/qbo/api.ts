@@ -80,8 +80,8 @@ export function listSubCustomers(api: QboApi, parentFqn: string): Promise<QboCus
 }
 
 /** Preferences.SalesFormsPrefs: the classic sales form custom fields (see ./custom-fields). */
-export async function salesFormsPrefs(api: QboApi): Promise<{ CustomField?: unknown[] } | null> {
-  const res = await qboRequest<{ Preferences?: { SalesFormsPrefs?: { CustomField?: unknown[] } } }>(api, "GET", "preferences");
+export async function salesFormsPrefs(api: QboApi): Promise<{ CustomField?: unknown[]; AllowShipping?: boolean } | null> {
+  const res = await qboRequest<{ Preferences?: { SalesFormsPrefs?: { CustomField?: unknown[]; AllowShipping?: boolean } } }>(api, "GET", "preferences");
   return res.Preferences?.SalesFormsPrefs ?? null;
 }
 
@@ -114,6 +114,11 @@ export async function getItems(api: QboApi, ids: string[]): Promise<QboItemDetai
   return res.QueryResponse?.Item ?? [];
 }
 
+/** The active items whose Name is exactly this (the GESi shipping item, ./invoice-qbo). */
+export function findItemsByName(api: QboApi, name: string): Promise<QboItem[]> {
+  return queryAll<QboItem>(api, "Item", `Name = ${qboQuoted(name)} AND Active = true`);
+}
+
 /** The active Classes (read only; CDS has about 80, inactive ones filtered by the caller too). */
 export async function listClasses(api: QboApi): Promise<QboClass[]> {
   const res = await qboRequest<{ QueryResponse?: { Class?: QboClass[] } }>(api, "GET", "query", {
@@ -130,6 +135,7 @@ export function qboLookups(api: QboApi): QboLookups {
     salesFormsPrefs: () => salesFormsPrefs(api),
     recentInvoiceCustomFields: () => recentInvoiceCustomFields(api),
     getItems: (ids) => getItems(api, ids),
+    findItemsByName: (name) => findItemsByName(api, name),
   };
 }
 

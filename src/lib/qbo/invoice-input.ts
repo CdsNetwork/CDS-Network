@@ -61,6 +61,8 @@ export type CombinedOrder = {
   qbInvoiceId: string | null;
   qbInvoiceNumber: string | null;
   lines: { sku: string; name: string; description: string | null; qty: number; amount: number | null }[];
+  /** This work order's shipping charge: its share of the Shipping box plus its Shipping and Handling (G) line (public.work_order_customer_shipping). */
+  shipping: number;
 };
 
 export type CombinedInvoice = {
@@ -135,6 +137,7 @@ export async function loadInvoice(supabase: Supabase, woId: string): Promise<Inv
           qty: l.qty,
           amount: l.customerUnitPrice === null ? null : Math.round(l.qty * l.customerUnitPrice * 100) / 100,
         })),
+        shipping: (p.part.workOrder.shippingCharge ?? 0) + (p.part.workOrder.gesiShipping?.amount ?? 0),
       })),
     },
   });
@@ -214,7 +217,7 @@ async function loadPart(supabase: Supabase, woId: string): Promise<LoadedPart | 
     }>;
   };
 
-  const [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes, syncRes, refs] = await Promise.all([
+  const [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes, syncRes, shippingRes, refs] = await Promise.all([
     supabase
       .from("work_order_internal")
       .select("tax_parts, tax_labor, tax_shipping, qb_invoice_id, qb_invoice_number, invoiced_at")
@@ -247,12 +250,26 @@ async function loadPart(supabase: Supabase, woId: string): Promise<LoadedPart | 
       .eq("status", "ok")
       .order("at", { ascending: false })
       .limit(5),
+    // The invoice's Shipping box (20261119120000_customer_shipping_charge.sql).
+    supabase
+      .from("work_order_customer_shipping")
+      .select("box_amount, gesi_amount, gesi_filters, gesi_unit_amount, overnight")
+      .eq("work_order_id", woId)
+      .maybeSingle(),
     loadRefs(supabase, wo.customer_id, wo.affiliate_id),
   ]);
-  for (const r of [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes, syncRes]) {
+  for (const r of [internalRes, billingRes, linesRes, customerMapRes, componentsRes, measurementRes, syncRes, shippingRes]) {
     if (r.error) throw new Error(`Could not read the invoice details: ${r.error.message}`);
   }
 
+  // The customer shipping (20261119120000_customer_shipping_charge.sql): numeric may be strings.
+  const shipping = shippingRes.data as {
+    box_amount: number | string | null;
+    gesi_amount: number | string | null;
+    gesi_filters: number | null;
+    gesi_unit_amount: number | string | null;
+    overnight: boolean | null;
+  } | null;
   const internal = internalRes.data as {
     tax_parts: boolean;
     tax_labor: boolean;
@@ -369,6 +386,16 @@ async function loadPart(supabase: Supabase, woId: string): Promise<LoadedPart | 
     taxLabor: internal?.tax_labor ?? false,
     taxShipping: internal?.tax_shipping ?? false,
     customerTaxExempt: (billingRes.data as { tax_exempt: boolean } | null)?.tax_exempt ?? false,
+    shippingCharge: Number(shipping?.box_amount ?? 0),
+    gesiShipping:
+      Number(shipping?.gesi_amount ?? 0) > 0
+        ? {
+            qty: Number(shipping?.gesi_filters ?? 0),
+            unitAmount: Number(shipping?.gesi_unit_amount ?? 0),
+            amount: Number(shipping?.gesi_amount ?? 0),
+            overnight: shipping?.overnight === true,
+          }
+        : null,
   };
   const lines: InvoiceLine[] = rawLines.map((l) => {
     const item = one(l.catalog_items);

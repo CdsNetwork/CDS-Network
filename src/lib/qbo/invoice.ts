@@ -2,6 +2,7 @@ import { missingPriceSkus, setPriceMessage } from "@/lib/line-price";
 import { isTaxable, type TaxClass } from "@/lib/tax";
 import type { QboCustomField } from "./custom-fields";
 import type { QboAddress } from "./sub-customer";
+import { gesiShippingLine, shippingLine, type GesiShipping, type QboShippingLine } from "./invoice-shipping";
 
 /**
  * Builds the QuickBooks Online Invoice for a work order. Pure: no database, no network.
@@ -33,6 +34,13 @@ import type { QboAddress } from "./sub-customer";
  * Department ("Division" in CDS's company) of the customer and the Class of the shop that
  * handled the order (qbo_customer_division, qbo_affiliate_class). CDS's company tracks
  * classes per transaction, not per line. Either is left off when it is not mapped.
+ *
+ * Shipping (CDS, 2026-11-18): the order's customer shipping charge
+ * (public.work_order_customer_shipping) goes in the invoice's own Shipping box, as the last
+ * line (./invoice-shipping), taxed by the order's "Tax shipping" setting. No line when it is 0.
+ * GESi filters sold are charged on the item "Shipping and Handling (G)" instead, a normal
+ * item line just before the Shipping box, taxed the same way; its QuickBooks id is filled in
+ * by ./invoice-qbo before sending.
  */
 
 export { isTaxable, type TaxClass };
@@ -50,6 +58,13 @@ export type InvoiceWorkOrder = {
   taxShipping: boolean;
   /** customer_billing.tax_exempt: every line is non-taxable. */
   customerTaxExempt: boolean;
+  /**
+   * The amount for the invoice's Shipping box (public.work_order_customer_shipping.amount).
+   * 0 or missing: no shipping line.
+   */
+  shippingCharge?: number | null;
+  /** The GESi shipping (public.work_order_customer_shipping gesi_*); null or 0: no line. */
+  gesiShipping?: GesiShipping | null;
 };
 
 export type InvoiceLine = {
@@ -119,12 +134,15 @@ export type InvoiceLocation = {
 
 type Ref = { value: string; name?: string };
 
-export type QboInvoiceLine = {
+export type QboItemLine = {
   DetailType: "SalesItemLineDetail";
   Amount: number;
   Description: string;
   SalesItemLineDetail: { ItemRef: Ref; Qty: number; UnitPrice: number; TaxCodeRef: { value: "TAX" | "NON" } };
 };
+
+/** An item line, or the Shipping box (./invoice-shipping). */
+export type QboInvoiceLine = QboItemLine | QboShippingLine;
 
 /** QuickBooks ids for the invoice header; empty or missing means not sent. */
 export type InvoiceRefs = {
@@ -348,6 +366,12 @@ export function buildInvoicePayload(
   const unpriced = missingPriceSkus(lines.map((l) => ({ sku: l.sku, qty: l.qty, price: hasPrice(l) ? Number(l.customerUnitPrice) : null })));
   if (unpriced.length) problems.push(setPriceMessage(unpriced));
 
+  const shipping = workOrder.shippingCharge ?? 0;
+  const gesi = workOrder.gesiShipping ?? null;
+  if (!Number.isFinite(shipping) || shipping < 0 || (gesi && (!Number.isFinite(gesi.amount) || gesi.amount < 0))) {
+    problems.push("The shipping charge must be an amount of $0 or more. Correct it in the Customer invoice box.");
+  }
+
   const unmapped = new Set<string>();
   const qboLines: QboInvoiceLine[] = [];
   const itemText: ItemTextLine[] = [];
@@ -413,6 +437,9 @@ export function buildInvoicePayload(
   }
 
   if (problems.length || !customerMap || !shipAddr) return { ok: false, problems, warnings };
+  // Last, after the measurements: the itemText indexes above stay right.
+  if (gesi && gesi.amount > 0) qboLines.push(gesiShippingLine(gesi, isTaxable("shipping", workOrder)));
+  if (shipping > 0) qboLines.push(shippingLine(cents(shipping), isTaxable("shipping", workOrder)));
 
   const po = workOrder.poNumber?.trim();
   const unit = workOrder.unitNumber?.trim();

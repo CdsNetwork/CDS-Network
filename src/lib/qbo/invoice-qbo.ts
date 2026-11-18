@@ -10,12 +10,27 @@
  * parent, no custom field, our item names) and adds a note that is shown to CDS and kept on
  * the sync row.
  * Only an expired or revoked token is passed on, so the caller can refresh it and retry.
+ * One exception: an invoice with a shipping charge for a company whose sales forms do not
+ * allow shipping (Preferences.SalesFormsPrefs.AllowShipping false) is stopped with
+ * ShippingNotAllowedError (./invoice-shipping) before anything is sent. When the preference
+ * cannot be read the invoice is sent, and a refusal is explained by shippingRefusalMessage.
+ * A GESi shipping line ("Shipping and Handling (G)") gets the id of the active QuickBooks item
+ * with that name; when there is none, or it cannot be looked up, GesiShippingItemError stops
+ * the invoice before anything is sent.
  *
  * The QuickBooks calls are passed in (QboLookups, see ./api), so this file has no network
  * code of its own.
  */
 import type { createClient } from "@/lib/supabase/server";
 import { lineDescription, type ItemTextLine, type QboInvoicePayload } from "./invoice";
+import {
+  GESI_SHIPPING_ITEM_NAME,
+  GesiShippingItemError,
+  isGesiShippingLine,
+  isShippingLine,
+  shippingAmountOf,
+  ShippingNotAllowedError,
+} from "./invoice-shipping";
 import { classicCustomFieldDefs, fillCustomFields, invoiceCustomFieldDefs, type CustomFieldDef } from "./custom-fields";
 import { billAddrFrom, ownName, pickSubCustomer, siteNumberOf, type QboCustomerRecord } from "./sub-customer";
 
@@ -37,9 +52,11 @@ export type QboLookups = {
   getCustomer(id: string): Promise<QboCustomerRecord | null>;
   /** Active customers whose FullyQualifiedName starts with "<parentFqn>:". */
   listSubCustomers(parentFqn: string): Promise<QboCustomerRecord[]>;
-  salesFormsPrefs(): Promise<{ CustomField?: unknown[] } | null>;
+  salesFormsPrefs(): Promise<{ CustomField?: unknown[]; AllowShipping?: boolean } | null>;
   /** Recent invoices read with include=enhancedAllCustomFields. */
   recentInvoiceCustomFields(): Promise<{ CustomField?: { DefinitionId?: string; Name?: string }[] }[]>;
+  /** The items whose Name is exactly this (QuickBooks returns active items only). */
+  findItemsByName?(name: string): Promise<{ Id: string; Name: string; Active?: boolean }[]>;
   /** The items with these ids (one query), for their sales description. */
   getItems(ids: string[]): Promise<{ Id: string; Description?: string }[]>;
 };
@@ -106,7 +123,7 @@ async function resolveSubCustomer(
  * no 31-character limit. The classic ids from Preferences remain the fallback, for example
  * in a company without invoices yet.
  */
-async function customFieldDefs(lookups: QboLookups): Promise<CustomFieldDef[]> {
+async function customFieldDefs(lookups: Pick<QboLookups, "salesFormsPrefs" | "recentInvoiceCustomFields">): Promise<CustomFieldDef[]> {
   const classic = classicCustomFieldDefs(await lookups.salesFormsPrefs());
   try {
     return [...invoiceCustomFieldDefs(await lookups.recentInvoiceCustomFields()), ...classic];
@@ -127,7 +144,7 @@ async function applyItemText(lookups: QboLookups, payload: QboInvoicePayload, it
     for (const t of itemText) {
       const description = text.get(t.qboItemId);
       const line = lines[t.index];
-      if (!description || line?.SalesItemLineDetail.ItemRef.value !== t.qboItemId) continue;
+      if (!description || !line || isShippingLine(line) || line.SalesItemLineDetail.ItemRef.value !== t.qboItemId) continue;
       lines[t.index] = { ...line, Description: lineDescription(t.line, t.alias, description) };
     }
     payload.Line = lines;
@@ -136,6 +153,23 @@ async function applyItemText(lookups: QboLookups, payload: QboInvoicePayload, it
     if (unauthorized(e)) throw e;
     return `The QuickBooks item descriptions could not be read (${why(e)}), so the lines show our item names.`;
   }
+}
+
+/** The lines with the QuickBooks id of "Shipping and Handling (G)" on the GESi shipping line. */
+async function withGesiShippingItem(lookups: QboLookups, lines: QboInvoicePayload["Line"]): Promise<QboInvoicePayload["Line"]> {
+  if (!lookups.findItemsByName) throw new GesiShippingItemError("the portal cannot look it up in QuickBooks");
+  let items: { Id: string; Name: string; Active?: boolean }[];
+  try {
+    items = await lookups.findItemsByName(GESI_SHIPPING_ITEM_NAME);
+  } catch (e) {
+    if (unauthorized(e)) throw e;
+    throw new GesiShippingItemError(`it could not be looked up in QuickBooks (${why(e)})`);
+  }
+  const found = items.filter((i) => i.Name === GESI_SHIPPING_ITEM_NAME && i.Active !== false);
+  if (found.length === 0) throw new GesiShippingItemError("QuickBooks has no active item with that name");
+  if (found.length > 1) throw new GesiShippingItemError("QuickBooks has more than one active item with that name");
+  const ref = { value: found[0].Id, name: GESI_SHIPPING_ITEM_NAME };
+  return lines.map((l) => (isGesiShippingLine(l) ? { ...l, SalesItemLineDetail: { ...l.SalesItemLineDetail, ItemRef: ref } } : l)) as QboInvoicePayload["Line"];
 }
 
 /**
@@ -153,6 +187,22 @@ export async function resolveInvoiceQbo(
   const notes: string[] = [];
   let subCustomer: ResolvedInvoice["subCustomer"] = null;
   const parentName = base.CustomerRef.name ?? `id ${base.CustomerRef.value}`;
+  // Preferences are read once for the shipping check and the custom fields.
+  let prefs: ReturnType<QboLookups["salesFormsPrefs"]> | null = null;
+  const prefsOnce: QboLookups["salesFormsPrefs"] = () => (prefs ??= lookups.salesFormsPrefs());
+
+  const shipping = shippingAmountOf(base);
+  if (shipping > 0) {
+    let allowed: boolean | undefined;
+    try {
+      allowed = (await prefsOnce())?.AllowShipping;
+    } catch (e) {
+      if (unauthorized(e)) throw e;
+      prefs = null;
+    }
+    if (allowed === false) throw new ShippingNotAllowedError(shipping);
+  }
+  if (base.Line.some(isGesiShippingLine)) payload.Line = await withGesiShippingItem(lookups, base.Line);
 
   try {
     const r = await resolveSubCustomer(lookups, base.CustomerRef.value, parentName, target, cachedSubCustomerId);
@@ -175,7 +225,7 @@ export async function resolveInvoiceQbo(
   ].filter((v) => v.value?.trim());
   if (values.length) {
     try {
-      const defs = await customFieldDefs(lookups);
+      const defs = await customFieldDefs({ ...lookups, salesFormsPrefs: prefsOnce });
       const filled = fillCustomFields(defs, values);
       if (filled.fields.length) payload.CustomField = filled.fields;
       for (const name of filled.missing) {

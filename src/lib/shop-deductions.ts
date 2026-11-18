@@ -3,6 +3,9 @@
  * public.work_order_shop_deductions, 20261111030000_shop_filter_shipping_deduction.sql and
  * 20261119050000_shipping_deduction_egr.sql): $15 per part shipped (every DPF, DOC, SCR and
  * EGR cooler component) on shipped orders, never on pickup orders or for the in-house shop.
+ * An order with no components counts the filters sold on it instead (reconditioned, new and
+ * GESi filters; also on supplier direct orders) while its shop bill is not in QuickBooks
+ * (20261119140000_shipping_deduction_sold_filters.sql).
  * The amount per part is private.shop_shipping_deduction_per_filter() there. This file only
  * reads, labels and adds them up; it never decides them.
  *

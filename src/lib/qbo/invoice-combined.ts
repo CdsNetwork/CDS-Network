@@ -1,6 +1,9 @@
 import { woLabel } from "@/lib/format";
+import { isTaxable } from "@/lib/tax";
+import { shippingLine } from "./invoice-shipping";
 import {
   buildInvoicePayload,
+  cents,
   type BuildResult,
   type CustomerAlias,
   type CustomerMapping,
@@ -27,7 +30,10 @@ import {
  *     since CDS's company has one Class per invoice;
  *   * the lines are the first work order's (billable, then measurements), then the other's,
  *     each taxed by its own work order's tax settings;
- *   * the internal note names both WO numbers ("Portal WO-104101 + WO-104102 | PO ...").
+ *   * the internal note names both WO numbers ("Portal WO-104101 + WO-104102 | PO ...");
+ *   * one Shipping box with the sum of both work orders' shipping charges, taxed by the
+ *     "Tax shipping" setting of the order(s) that have a charge (CDS must align the setting
+ *     when both have a charge and tax it differently).
  * Both work orders must be ready to invoice by today's rules (./invoice-lock): not cancelled,
  * not invoiced, no QuickBooks invoice of their own. CDS may invoice before a shop completes,
  * as for one work order.
@@ -169,15 +175,18 @@ export function buildCombinedInvoicePayload(parts: [InvoicePart, InvoicePart]): 
   ].filter((m): m is string => !!m);
   const header = mismatches(first, second);
 
+  // Each part is built without its shipping charge: the invoice has one Shipping box, added below.
   const build = (p: InvoicePart, workOrder: InvoiceWorkOrder) =>
-    buildInvoicePayload(workOrder, p.lines, p.customerMap, p.itemMap, p.aliases, p.location, p.components, p.measurementMap, p.refs);
+    buildInvoicePayload({ ...workOrder, shippingCharge: 0 }, p.lines, p.customerMap, p.itemMap, p.aliases, p.location, p.components, p.measurementMap, p.refs);
   const a = build(first, { ...first.workOrder, unitNumber: unit });
   const b = build(second, second.workOrder);
   const la = woLabel(first.workOrder.woNumber);
   const lb = woLabel(second.workOrder.woNumber);
+  const shipping = combinedShipping(first, second);
   const problems = [
     ...readiness,
     ...header,
+    ...shipping.problems,
     ...labelled([
       { label: la, messages: a.ok ? [] : a.problems },
       { label: lb, messages: b.ok ? [] : b.problems },
@@ -191,11 +200,42 @@ export function buildCombinedInvoicePayload(parts: [InvoicePart, InvoicePart]): 
 
   const payload: QboInvoicePayload = {
     ...a.payload,
-    Line: [...a.payload.Line, ...b.payload.Line],
+    Line: [...a.payload.Line, ...b.payload.Line, ...(shipping.amount > 0 ? [shippingLine(shipping.amount, shipping.taxable)] : [])],
     PrivateNote: combinedPrivateNote([first.workOrder.woNumber, second.workOrder.woNumber], first.workOrder.poNumber),
   };
   const itemText = [...a.itemText, ...b.itemText.map((t) => ({ ...t, index: t.index + a.payload.Line.length }))];
   return { ok: true, payload, warnings, itemText, primaryId: first.workOrder.id, unitNumber: unit };
+}
+
+/**
+ * The Shipping box of the invoice of both: the sum of the two charges. It is taxable as the
+ * order(s) with a charge say; when both have a charge and one taxes shipping and the other
+ * does not, CDS is asked to align the setting (one line has one tax code).
+ */
+function combinedShipping(first: InvoicePart, second: InvoicePart): { amount: number; taxable: boolean; problems: string[] } {
+  const charge = (p: InvoicePart) => p.workOrder.shippingCharge ?? 0;
+  const invalid = [first, second].filter((p) => !Number.isFinite(charge(p)) || charge(p) < 0);
+  if (invalid.length) {
+    return {
+      amount: 0,
+      taxable: false,
+      problems: invalid.map((p) => `${woLabel(p.workOrder.woNumber)}: the shipping charge must be an amount of $0 or more. Correct it in the Customer invoice box.`),
+    };
+  }
+  const charged = [first, second].filter((p) => charge(p) > 0);
+  const amount = cents(charge(first) + charge(second));
+  const taxes = charged.map((p) => isTaxable("shipping", p.workOrder));
+  if (taxes.length === 2 && taxes[0] !== taxes[1]) {
+    const [yes, no] = taxes[0] ? [first, second] : [second, first];
+    return {
+      amount,
+      taxable: false,
+      problems: [
+        `${woLabel(yes.workOrder.woNumber)} taxes shipping and ${woLabel(no.workOrder.woNumber)} does not, but one invoice has one Shipping box. Set Tax shipping the same on both work orders.`,
+      ],
+    };
+  }
+  return { amount, taxable: taxes[0] ?? false, problems: [] };
 }
 
 /**

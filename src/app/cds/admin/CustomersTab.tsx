@@ -5,12 +5,14 @@ import { createClient } from "@/lib/supabase/server";
 import { saveCustomer } from "./actions";
 import { wrapCell } from "@/lib/format";
 
+type Billing = { billing_email: string | null; charge_shipping: boolean };
+
 type Customer = {
   id: string;
   code: string;
   name: string;
   active: boolean;
-  customer_billing: { billing_email: string | null } | { billing_email: string | null }[] | null;
+  customer_billing: Billing | Billing[] | null;
   customer_locations: { count: number }[] | null;
 };
 
@@ -18,7 +20,7 @@ export async function CustomersTab({ edit }: { edit?: string }) {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("customers")
-    .select("id, code, name, active, customer_billing(billing_email), customer_locations(count)")
+    .select("id, code, name, active, customer_billing(billing_email, charge_shipping), customer_locations(count)")
     .order("name");
   const customers = (data ?? []) as Customer[];
   const editing = edit ? customers.find((c) => c.id === edit) : undefined;
@@ -117,6 +119,13 @@ function CustomerFields({ customer }: { customer?: Customer }) {
           defaultValue={customer ? (one(customer.customer_billing)?.billing_email ?? "") : ""}
           placeholder="ap@fleet.example"
         />
+      </div>
+      <div className="field">
+        <label style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 500 }}>
+          <input type="checkbox" name="charge_shipping" defaultChecked={customer ? (one(customer.customer_billing)?.charge_shipping ?? true) : true} />{" "}
+          Charge shipping on shipped orders
+        </label>
+        <div className="small">In the QuickBooks invoice Shipping box: per filter and per EGR cooler, round trip.</div>
       </div>
       {customer && (
         <div className="field">

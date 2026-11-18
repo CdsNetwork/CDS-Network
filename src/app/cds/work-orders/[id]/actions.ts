@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
 import { isUuid, LINES_LOCKED_STATUSES, PO_IN_QUICKBOOKS_NOTE, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
 import { parseWoNumber } from "@/components/cds-wo/linked-orders";
-import { woLabel } from "@/lib/format";
+import { money, woLabel } from "@/lib/format";
 import { requireCds } from "@/lib/auth";
 import { recordSync } from "@/lib/integration-sync";
 import { noteBody } from "@/lib/notes";
@@ -18,6 +18,8 @@ import { createShopBill, createShopBillAfter } from "@/lib/qbo/bill-server";
 import { QboError } from "@/lib/qbo/client";
 import { changedSinceNote, claimInvoice, finishInvoice, invoiceSnapshot } from "@/lib/qbo/invoice-claim";
 import type { ItemTextLine, QboInvoicePayload } from "@/lib/qbo/invoice";
+import { GesiShippingItemError, shippingRefusalMessage, ShippingNotAllowedError } from "@/lib/qbo/invoice-shipping";
+import { parseShippingOverride } from "@/lib/customer-shipping";
 import { loadInvoice, type CombinedInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
 import {
   cachedSubCustomer,
@@ -904,6 +906,37 @@ export async function updateTax(woId: string, _prev: ActionState, formData: Form
   return done(woId, "Tax settings saved.");
 }
 
+/**
+ * The shipping charge for the customer invoice's Shipping box (public.work_order_customer_shipping):
+ * "set" stores the amount CDS typed for this order (0 = no shipping), "auto" goes back to the
+ * automatic amount. Not once the order is invoiced or has a QuickBooks invoice; the database
+ * refuses too, and while the invoice is being created.
+ */
+export async function updateCustomerShipping(woId: string, mode: "set" | "auto", _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  let override: number | null = null;
+  if (mode === "set") {
+    const parsed = parseShippingOverride(text(formData.get("amount")));
+    if (!parsed.ok) return { error: parsed.error };
+    override = parsed.amount;
+  }
+  const supabase = await createClient();
+  const order = await orderState(supabase, woId);
+  if (!order) return { error: "Work order not found." };
+  if (order.invoiced) return { error: "The shipping charge cannot change after the order is invoiced." };
+  const { error } = await supabase.from("work_order_internal").update({ customer_shipping_override: override }).eq("work_order_id", woId);
+  if (error) return { error: error.message };
+  await supabase.from("work_order_events").insert({
+    work_order_id: woId,
+    actor_id: profile.id,
+    event_type: "invoice",
+    message: override === null ? "Customer shipping charge set back to automatic" : `Customer shipping charge set to ${money(override)}`,
+    shop_visible: false,
+  });
+  return done(woId, override === null ? "Shipping charge is automatic again." : "Shipping charge saved.");
+}
+
 // ---------------------------------------------------------------- QuickBooks invoice
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -1099,11 +1132,17 @@ async function sendInvoice(
     // Otherwise QuickBooks may have created it: the next attempt asks again with the same id.
     const outcome = qbo?.rejected ? "refused" : !sent || qbo?.faultType === "Config" || qbo?.unauthorized ? "not_sent" : "unconfirmed";
     if (qbo?.faultType === "Config") return { ok: false, outcome, log: null, error: message };
+    // An invoice with a shipping charge for a company that does not allow shipping: stopped
+    // before sending (@/lib/qbo/invoice-qbo), or refused by QuickBooks because of it.
+    if (e instanceof ShippingNotAllowedError || e instanceof GesiShippingItemError) return { ok: false, outcome: "not_sent", log: null, error: e.message };
+    const shipping = qbo?.rejected ? shippingRefusalMessage(message, payload) : null;
     return {
       ok: false,
       outcome,
       log: { status: qbo?.rejected ? "rejected" : "error", message: `${message}${qbo?.intuitTid ? ` (intuit_tid ${qbo.intuitTid})` : ""}` },
-      error: qbo?.rejected
+      error: shipping
+        ? shipping
+        : qbo?.rejected
         ? `QuickBooks refused the invoice: ${message}`
         : `QuickBooks did not confirm the invoice (${message}). Try again: a retry never creates a second invoice.`,
     };

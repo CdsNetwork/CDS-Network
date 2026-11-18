@@ -113,13 +113,18 @@ describe("pages show the deduction and use it in the shop total", () => {
     expect(page).toContain("deductionLabel(");
   });
 
-  it("the CDS work order page, with the customer invoice from the lines only", () => {
+  it("the CDS work order page, with the customer invoice from the lines and the customer shipping charge only", () => {
     const page = read("app/cds/work-orders/[id]/page.tsx");
     expect(page).toContain("work_order_shop_deductions");
     expect(page).toContain("shopPayable(lines, deductions)");
     expect(page).toContain("deductionLabel(");
-    // The customer side (subtotal, tax, invoice total) is computed from the lines alone.
-    expect(page).toMatch(/taxSummary\(\s*lines\.map/);
+    // The customer side (subtotal, tax, invoice total) is computed from the lines and the
+    // customer's own shipping charge (20261119120000_customer_shipping_charge.sql), never
+    // from the shop's deductions.
+    const summary = page.slice(page.indexOf("const estimate = taxSummary("), page.indexOf("taxFlags,", page.indexOf("const estimate = taxSummary(")));
+    expect(summary).toMatch(/lines\.map/);
+    expect(summary).toContain("shippingInEstimate");
+    expect(summary).not.toContain("deduction");
   });
 
   it("the Sheets backup loads the deductions", () => {
