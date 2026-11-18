@@ -177,6 +177,13 @@
   gap: 4px 6px;
   max-width: 22rem;
 }
+/* Wide screens (sidebar included): room for the pill and Change status on one line and the
+   internal status under them, so most rows take two short lines. */
+@media (min-width: 1800px) {
+  .statusLine {
+    min-width: 16rem;
+  }
+}
 .statusLine > div {
   display: inline-flex;
   flex-wrap: wrap;

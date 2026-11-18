@@ -95,8 +95,8 @@ const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_interna
 
 const embeddedCount = (c: Count) => c?.[0]?.count ?? 0;
 
-/** Unit and PO numbers up to this length stay on one line in the table. */
-const ID_NOWRAP = 22;
+/** Unit and PO numbers up to this length stay on one line in the table; longer values (a unit number with a note) wrap so they do not widen the column. */
+const ID_NOWRAP = 12;
 
 function idClass(value: string | null): string {
   return (value ?? "").length > ID_NOWRAP ? styles.idCol : styles.idShort;
