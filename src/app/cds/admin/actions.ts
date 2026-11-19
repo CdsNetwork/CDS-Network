@@ -173,6 +173,19 @@ export async function setShopActive(
   return done(active ? "Shop activated." : "Shop deactivated. Its login can no longer see jobs.");
 }
 
+/**
+ * "Email this shop about its jobs" (Sarah, CDS, 2026-11-19): notices and reminders go to the
+ * shop's dispatch contacts only while this is on (20261120200000_shop_emails.sql). Reminders
+ * count from when it was turned on. The database refuses it for CDS's in-house shop.
+ */
+export async function setShopEmails(id: string, enabled: boolean): Promise<ActionState> {
+  await requireCds();
+  const supabase = await createClient();
+  const { error } = await supabase.from("affiliates").update({ shop_emails_enabled: enabled }).eq("id", id);
+  if (error) return { error: dbMessage(error) };
+  return done(enabled ? "Emails to this shop turned on." : "Emails to this shop turned off.");
+}
+
 export async function inviteShopLogin(affiliateId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
   await requireCds();
   const existing = await activeShopLogin(affiliateId);

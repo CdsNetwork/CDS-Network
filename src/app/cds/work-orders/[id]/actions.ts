@@ -11,6 +11,7 @@ import { recordSync } from "@/lib/integration-sync";
 import { noteBody } from "@/lib/notes";
 import { customerPriceInput, passThroughInput, pricedLineInput, shopRateInput } from "@/lib/pass-through";
 import { emailCdsAfter } from "@/lib/portal-email-send";
+import { emailShopAfter } from "@/lib/shop-email-send";
 import { INTERNAL_STATUS_LABEL, parseInternalStatus } from "@/lib/internal-status";
 import { invoiceBlockReason, invoicedOutcome, invoiceLocked, movesToInvoiced, qbInvoiceIdOf } from "@/lib/invoice-lock";
 import { createInvoice, getInvoice, listClasses, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
@@ -101,6 +102,8 @@ export async function dispatchWorkOrder(woId: string, _prev: ActionState, formDa
   const { error } = await supabase.rpc("cds_dispatch_work_order", { p_work_order: woId, p_affiliate: shop });
   if (error) return { error: error.message };
   emailCdsAfter("sent", woId);
+  // The shop's own new job email, when CDS turned its emails on (queued by the database).
+  emailShopAfter(woId);
   return done(woId, "Dispatched. The shop can now see this work order.");
 }
 
@@ -666,6 +669,7 @@ export async function addNote(woId: string, _prev: ActionState, formData: FormDa
     .from("work_order_notes")
     .insert({ work_order_id: woId, author_id: profile.id, body: note.body });
   if (error) return { error: error.message };
+  emailShopAfter(woId);
   return done(woId, "Note added.");
 }
 
@@ -934,6 +938,7 @@ export async function decideAuthorization(
     p_customer_approved_by: approve ? approvedBy : null,
   });
   if (error) return { error: error.message };
+  emailShopAfter(woId);
   return done(woId, approve ? "Extra work approved and added to the order." : "Extra work declined.");
 }
 

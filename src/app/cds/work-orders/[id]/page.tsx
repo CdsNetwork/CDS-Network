@@ -6,6 +6,7 @@ import { ActionForm } from "@/components/cds-wo/ActionForm";
 import { ActionMessageGroup } from "@/components/cds-wo/ActionMessageGroup";
 import { FormSearchSelect } from "@/components/cds-wo/FormSearchSelect";
 import { MarkSeen } from "@/components/cds-wo/MarkSeen";
+import { ShopEmailHistory } from "@/components/cds-wo/ShopEmailHistory";
 import { ListInternalStatusSelect } from "@/components/cds-wo/ListRowEdits";
 import { addShipmentHelp, defaultShipmentDirection, noShipmentsNotice } from "@/components/cds-wo/add-shipment";
 import { shipmentRemoval, voidAndRemoveConfirm } from "@/components/cds-wo/remove-shipment";
@@ -2024,6 +2025,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               </div>
             )}
           </section>
+          {wo.affiliate_id && !inHouse && <ShopEmailHistory workOrderId={wo.id} />}
           {profile.can_delete_work_orders && (
             <section className="section" id="delete-work-order">
               <h3>Delete work order</h3>

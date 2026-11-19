@@ -9,6 +9,7 @@ import {
   sendShopPasswordLink,
   setProfileActive,
   setShopActive,
+  setShopEmails,
   setShopRecoveryEmail,
 } from "./actions";
 import { suggestUsername, USERNAME_LOGINS_OFF } from "@/lib/shop-login";
@@ -30,6 +31,10 @@ export type Shop = {
   can_oil_soaked: boolean | null;
   can_one_box: boolean | null;
   hours_note: string | null;
+  /** CDS's own in-house shop: never emailed. */
+  is_in_house: boolean;
+  /** "Email this shop about its jobs" (20261120200000_shop_emails.sql). */
+  shop_emails_enabled: boolean;
 };
 type ShopRow = Shop & { customer_locations: { count: number }[] | null };
 export type ShopFilters = { q: string; kind: string; status: string };
@@ -57,7 +62,7 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
     supabase
       .from("affiliates")
       .select(
-        "id, short_code, display_name, kind, active, address_line1, city, region, postal_code, can_egr, can_oil_soaked, can_one_box, hours_note, customer_locations(count)",
+        "id, short_code, display_name, kind, active, address_line1, city, region, postal_code, can_egr, can_oil_soaked, can_one_box, hours_note, is_in_house, shop_emails_enabled, customer_locations(count)",
       )
       .order("display_name"),
     // Logins and contacts grow with every shop: read in pages past the 1000 row cap.
@@ -81,6 +86,7 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
   const contacts = (contactData ?? []) as Contact[];
   const loginsFor = (id: string) => logins.filter((l) => l.affiliate_id === id);
   const dispatchFor = (id: string) => contacts.find((c) => c.affiliate_id === id)?.email ?? "";
+  const emailsFor = (id: string) => contacts.filter((c) => c.affiliate_id === id).map((c) => c.email);
 
   const editing = edit === "new" ? null : shops.find((s) => s.id === edit);
   const locationCount = (s: ShopRow) => s.customer_locations?.[0]?.count ?? 0;
@@ -107,6 +113,7 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
         <ShopEditor
           shop={editing}
           dispatchEmail={dispatchFor(editing.id)}
+          dispatchEmails={emailsFor(editing.id)}
           logins={loginsFor(editing.id)}
           usernameLogins={usernameLogins}
         />
@@ -223,7 +230,16 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
                       login.email
                     )}
                   </td>
-                  <td>{s.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}</td>
+                  <td>
+                    {s.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}
+                    {s.shop_emails_enabled && (
+                      <div>
+                        <span className="tag blue" title="This shop gets emails about its jobs">
+                          Emails on
+                        </span>
+                      </div>
+                    )}
+                  </td>
                   <td>
                     <Link className="link small" href={`/cds/admin?tab=shops&edit=${s.id}`}>
                       Edit
@@ -259,11 +275,14 @@ function Capabilities({ shop }: { shop: Shop }) {
 function ShopEditor({
   shop,
   dispatchEmail,
+  dispatchEmails,
   logins,
   usernameLogins,
 }: {
   shop: Shop;
   dispatchEmail: string;
+  /** Every contact marked to receive dispatch emails: the shop emails go to all of them. */
+  dispatchEmails: string[];
   logins: Login[];
   /** The shop_username_logins switch: off hides creating username logins and their password links. */
   usernameLogins: boolean;
@@ -406,6 +425,7 @@ function ShopEditor({
             </div>
           )}
         </div>
+        <ShopEmails shop={shop} emails={dispatchEmails} />
         <div className="summarybox">
           <b>Shop status</b>
           <p className="small">
@@ -421,6 +441,42 @@ function ShopEditor({
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** "Email this shop about its jobs" (Sarah, CDS, 2026-11-19). */
+function ShopEmails({ shop, emails }: { shop: Shop; emails: string[] }) {
+  if (shop.is_in_house) {
+    return (
+      <div className="summarybox">
+        <b>Emails to this shop</b>
+        <p className="small">CDS&apos;s in-house shop is never emailed about its jobs.</p>
+      </div>
+    );
+  }
+  const on = shop.shop_emails_enabled;
+  return (
+    <div className="summarybox">
+      <b>Email this shop about its jobs</b>
+      <p className="small">
+        {on ? "On" : "Off"}. When on, the portal emails the shop when CDS sends it a job, decides its extra work, adds a note it can see or
+        changes its services or parts, and reminds it when a job is not accepted, not updated or not completed in time (weekdays only). No
+        prices are ever in these emails.
+      </p>
+      {emails.length ? (
+        <p className="small">Goes to: {emails.join(", ")}</p>
+      ) : (
+        <p className="small">
+          <b>No dispatch email for this shop:</b> nothing is sent until one is saved above.
+        </p>
+      )}
+      <ActionForm
+        key={`${shop.id}-emails-${on}`}
+        action={setShopEmails.bind(null, shop.id, !on)}
+        submitLabel={on ? "Turn emails off" : "Turn emails on"}
+        submitClassName={`btn btn-small ${on ? "btn-secondary" : "btn-primary"}`}
+      />
     </div>
   );
 }

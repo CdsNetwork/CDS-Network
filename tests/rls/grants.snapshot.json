@@ -489,5 +489,18 @@
   "table public.work_order_links": {
     "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.shop_emails": {
+    "authenticated": "SELECT",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "sequence public.shop_emails_id_seq": {
+    "service_role": "SELECT,UPDATE,USAGE"
+  },
+  "function public.shop_email_claim(bigint,integer)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_email_reminder_candidates()": {
+    "service_role": "EXECUTE"
   }
 }
