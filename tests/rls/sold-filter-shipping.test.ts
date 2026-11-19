@@ -11,7 +11,7 @@
  *     CDS-NEW-FILTER) or a GESi filter (CDS-DPF/DOC/SCR-GESI...);
  *   * the shop gets the $15 credit per filter sold, GESi included (never the in-house shop);
  *   * the customer pays $28 per filter sold in the Shipping box, except GESi filters: those
- *     are charged on the "Shipping and Handling (G)" item, $28 each, $150 each when the order
+ *     are charged on the "Shipping & Handling Fee (G)" item, $28 each, $150 each when the order
  *     has an overnight label; First Student is not charged, CDS's override wins;
  *   * an order with components keeps today's count (components only);
  *   * an order whose shop bill (or customer invoice) is already in QuickBooks keeps what it had.
@@ -207,7 +207,7 @@ describe("a shipped order that sells a filter and records no components", () => 
 });
 
 describe("a GESi filter sold", () => {
-  it("gives the shop the $15 credit and the customer a $28 Shipping and Handling (G) charge, not the box", async () => {
+  it("gives the shop the $15 credit and the customer a $28 Shipping & Handling Fee (G) charge, not the box", async () => {
     const wo = await newWo();
     await addLine(wo, f.gesi);
     expect(await deduction(wo)).toEqual({ filters: 1, amount: -15 });

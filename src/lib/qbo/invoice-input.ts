@@ -61,7 +61,7 @@ export type CombinedOrder = {
   qbInvoiceId: string | null;
   qbInvoiceNumber: string | null;
   lines: { sku: string; name: string; description: string | null; qty: number; amount: number | null }[];
-  /** This work order's shipping charge: its share of the Shipping box plus its Shipping and Handling (G) line (public.work_order_customer_shipping). */
+  /** This work order's shipping charge: its share of the Shipping box plus its Shipping & Handling Fee (G) line (public.work_order_customer_shipping). */
   shipping: number;
 };
 

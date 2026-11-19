@@ -14,7 +14,7 @@
  * allow shipping (Preferences.SalesFormsPrefs.AllowShipping false) is stopped with
  * ShippingNotAllowedError (./invoice-shipping) before anything is sent. When the preference
  * cannot be read the invoice is sent, and a refusal is explained by shippingRefusalMessage.
- * A GESi shipping line ("Shipping and Handling (G)") gets the id of the active QuickBooks item
+ * A GESi shipping line ("Shipping & Handling Fee (G)") gets the id of the active QuickBooks item
  * with that name; when there is none, or it cannot be looked up, GesiShippingItemError stops
  * the invoice before anything is sent.
  *
@@ -190,7 +190,7 @@ async function applyItemText(lookups: QboLookups, payload: QboInvoicePayload, it
   }
 }
 
-/** The lines with the QuickBooks id of "Shipping and Handling (G)" on the GESi shipping line. */
+/** The lines with the QuickBooks id of "Shipping & Handling Fee (G)" on the GESi shipping line. */
 async function withGesiShippingItem(lookups: QboLookups, lines: QboInvoicePayload["Line"]): Promise<QboInvoicePayload["Line"]> {
   if (!lookups.findItemsByName) throw new GesiShippingItemError("the portal cannot look it up in QuickBooks");
   let items: { Id: string; Name: string; Active?: boolean }[];

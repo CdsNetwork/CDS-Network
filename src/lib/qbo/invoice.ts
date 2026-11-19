@@ -38,7 +38,7 @@ import { gesiShippingLine, shippingLine, type GesiShipping, type QboShippingLine
  * Shipping (CDS, 2026-11-18): the order's customer shipping charge
  * (public.work_order_customer_shipping) goes in the invoice's own Shipping box, as the last
  * line (./invoice-shipping), taxed by the order's "Tax shipping" setting. No line when it is 0.
- * GESi filters sold are charged on the item "Shipping and Handling (G)" instead, a normal
+ * GESi filters sold are charged on the item "Shipping & Handling Fee (G)" instead, a normal
  * item line just before the Shipping box, taxed the same way; its QuickBooks id is filled in
  * by ./invoice-qbo before sending.
  */

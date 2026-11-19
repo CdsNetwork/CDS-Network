@@ -8,7 +8,7 @@
  * customer_billing.charge_shipping false (First Student), and CDS's override per order
  * (work_order_internal.customer_shipping_override) wins. CDS only: shops never read it.
  * When the order has no components, the filters sold on it are counted instead (Sarah,
- * 2026-11-18). GESi filters sold go on the QuickBooks item "Shipping and Handling (G)":
+ * 2026-11-18). GESi filters sold go on the QuickBooks item "Shipping & Handling Fee (G)":
  * $28 each, $150 each when the order has an overnight label.
  * This file only reads and labels it.
  */
@@ -26,7 +26,7 @@ export type CustomerShipping = {
   /** DPF, DOC and SCR components counted, or non-GESi filters sold. */
   filters: number;
   egrCoolers: number;
-  /** GESi filters sold (the "Shipping and Handling (G)" line). */
+  /** GESi filters sold (the "Shipping & Handling Fee (G)" line). */
   gesiFilters: number;
   /** The order has an overnight label: the GESi rate is the overnight one. */
   overnight: boolean;
@@ -40,7 +40,7 @@ export type CustomerShipping = {
   overrideAmount: number | null;
   /** For the invoice's Shipping box. */
   boxAmount: number;
-  /** For the "Shipping and Handling (G)" line. */
+  /** For the "Shipping & Handling Fee (G)" line. */
   gesiAmount: number;
   /** The whole shipping charge: boxAmount + gesiAmount. */
   amount: number;
@@ -82,7 +82,7 @@ export function automaticShippingText(s: CustomerShipping, customerName: string)
   const parts = [
     box.length > 0 && `${box.join(" + ")} round trip in the Shipping box`,
     s.gesiFilters > 0 &&
-      `${s.gesiFilters} GESi ${s.gesiFilters === 1 ? "filter" : "filters"} x ${money(s.gesiUnitAmount)}${s.overnight ? " (overnight label)" : ""} on Shipping and Handling (G)`,
+      `${s.gesiFilters} GESi ${s.gesiFilters === 1 ? "filter" : "filters"} x ${money(s.gesiUnitAmount)}${s.overnight ? " (overnight label)" : ""} on Shipping & Handling Fee (G)`,
   ].filter(Boolean);
   if (!parts.length) return "Automatic: no filters or EGR coolers from the shop, and no filters sold, on this order yet.";
   return `Automatic: ${parts.join(" + ")} = ${money(s.automaticAmount)}.`;

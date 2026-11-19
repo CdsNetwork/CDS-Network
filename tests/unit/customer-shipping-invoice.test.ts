@@ -236,7 +236,7 @@ describe("the work order's shipping charge", () => {
   });
 });
 
-describe("GESi filter sold: the Shipping and Handling (G) item line", () => {
+describe("GESi filter sold: the Shipping & Handling Fee (G) item line", () => {
   const gesi = (over: Partial<NonNullable<InvoiceWorkOrder["gesiShipping"]>> = {}) => ({ qty: 2, unitAmount: 28, amount: 56, overnight: false, ...over });
 
   it("is a normal item line before the Shipping box, named for the QuickBooks item, taxed as shipping", () => {
@@ -245,7 +245,7 @@ describe("GESi filter sold: the Shipping and Handling (G) item line", () => {
     expect(p.Line[1]).toEqual({
       DetailType: "SalesItemLineDetail",
       Amount: 56,
-      Description: "Shipping and Handling (G): 2 GESi filters x $28.00",
+      Description: "Shipping & Handling Fee (G): 2 GESi filters x $28.00",
       SalesItemLineDetail: { ItemRef: { value: "", name: GESI_SHIPPING_ITEM_NAME }, Qty: 2, UnitPrice: 28, TaxCodeRef: { value: "TAX" } },
     });
     expect(p.Line[2].SalesItemLineDetail.ItemRef.value).toBe(SHIPPING_ITEM_ID);
@@ -256,7 +256,7 @@ describe("GESi filter sold: the Shipping and Handling (G) item line", () => {
     const p = payloadOf(build(wo({ taxShipping: false, gesiShipping: gesi({ qty: 1, unitAmount: 150, amount: 150, overnight: true }) })));
     expect(p.Line[1]).toMatchObject({
       Amount: 150,
-      Description: "Shipping and Handling (G): 1 GESi filter x $150.00 (overnight)",
+      Description: "Shipping & Handling Fee (G): 1 GESi filter x $150.00 (overnight)",
       SalesItemLineDetail: { Qty: 1, UnitPrice: 150, TaxCodeRef: { value: "NON" } },
     });
     expect(payloadOf(build(wo({ gesiShipping: gesi({ amount: 0 }) }))).Line).toHaveLength(1);
@@ -267,7 +267,7 @@ describe("GESi filter sold: the Shipping and Handling (G) item line", () => {
     const p = payloadOf(build(wo({ gesiShipping: gesi({ amount: 100 }) })));
     expect(p.Line[1]).toMatchObject({
       Amount: 100,
-      Description: "Shipping and Handling (G)",
+      Description: "Shipping & Handling Fee (G)",
       SalesItemLineDetail: { Qty: 1, UnitPrice: 100 },
     });
   });
@@ -293,8 +293,8 @@ describe("GESi filter sold: the Shipping and Handling (G) item line", () => {
 
   it("gets the QuickBooks item id by its name before sending", async () => {
     const p = payloadOf(build(wo({ gesiShipping: gesi() })));
-    const r = await resolveInvoiceQbo(withItems([{ Id: "912", Name: "Shipping and Handling (G)", Active: true }]), p, target, null);
-    expect(r.payload.Line[1].SalesItemLineDetail.ItemRef).toEqual({ value: "912", name: "Shipping and Handling (G)" });
+    const r = await resolveInvoiceQbo(withItems([{ Id: "912", Name: "Shipping & Handling Fee (G)", Active: true }]), p, target, null);
+    expect(r.payload.Line[1].SalesItemLineDetail.ItemRef).toEqual({ value: "912", name: "Shipping & Handling Fee (G)" });
     // The built payload is not changed (the claim snapshot is taken from it).
     expect(p.Line[1].SalesItemLineDetail.ItemRef.value).toBe("");
   });
@@ -302,8 +302,8 @@ describe("GESi filter sold: the Shipping and Handling (G) item line", () => {
   it("stops with a message naming the item when QuickBooks has no such active item", async () => {
     const p = payloadOf(build(wo({ gesiShipping: gesi() })));
     await expect(resolveInvoiceQbo(withItems([]), p, target, null)).rejects.toBeInstanceOf(GesiShippingItemError);
-    await expect(resolveInvoiceQbo(withItems([{ Id: "9", Name: "Shipping and Handling (G)", Active: false }]), p, target, null)).rejects.toThrow(
-      /"Shipping and Handling \(G\)"/,
+    await expect(resolveInvoiceQbo(withItems([{ Id: "9", Name: "Shipping & Handling Fee (G)", Active: false }]), p, target, null)).rejects.toThrow(
+      /"Shipping & Handling Fee \(G\)"/,
     );
     await expect(resolveInvoiceQbo(withItems(new Error("timeout")), p, target, null)).rejects.toBeInstanceOf(GesiShippingItemError);
     await expect(resolveInvoiceQbo(lookups({ AllowShipping: true }), p, target, null)).rejects.toBeInstanceOf(GesiShippingItemError);
@@ -313,5 +313,13 @@ describe("GESi filter sold: the Shipping and Handling (G) item line", () => {
     const p = payloadOf(build(wo({ shippingCharge: 28 })));
     const r = await resolveInvoiceQbo(withItems(new Error("not called")), p, target, null);
     expect(r.payload.Line).toHaveLength(2);
+  });
+});
+
+// Sarah (CDS, 2026-11-19): the QuickBooks item is named exactly "Shipping & Handling Fee (G)".
+describe("GESi shipping item name", () => {
+  it("is the exact QuickBooks name CDS uses", async () => {
+    const { GESI_SHIPPING_ITEM_NAME } = await import("@/lib/qbo/invoice-shipping");
+    expect(GESI_SHIPPING_ITEM_NAME).toBe("Shipping & Handling Fee (G)");
   });
 });

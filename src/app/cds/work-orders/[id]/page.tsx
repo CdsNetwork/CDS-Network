@@ -439,7 +439,7 @@ function CombinedOrders({ combined, woId }: { combined: CombinedInvoice; woId: s
       ))}
       {combined.orders.some((o) => o.shipping > 0) && (
         <div className="small" style={{ marginTop: 8 }}>
-          The invoice carries the shipping of both (Shipping box, and Shipping and Handling (G) for GESi filters):{" "}
+          The invoice carries the shipping of both (Shipping box, and Shipping & Handling Fee (G) for GESi filters):{" "}
           <b>{money(combined.orders.reduce((sum, o) => sum + o.shipping, 0))}</b>.
         </div>
       )}
@@ -2178,9 +2178,9 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   <span>
                     Shipping (
                     {customerShipping.gesiAmount > 0 && customerShipping.boxAmount > 0
-                      ? "Shipping box and Shipping and Handling (G)"
+                      ? "Shipping box and Shipping & Handling Fee (G)"
                       : customerShipping.gesiAmount > 0
-                        ? "QuickBooks item Shipping and Handling (G)"
+                        ? "QuickBooks item Shipping & Handling Fee (G)"
                         : "QuickBooks Shipping box"}
                     {customerShipping.overrideAmount !== null ? ", set by hand" : ""})
                   </span>
@@ -2219,7 +2219,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   {customerShipping.overrideAmount !== null
                     ? `Shipping set by hand to ${money(customerShipping.overrideAmount)}. ${automaticShippingText(customerShipping, customer?.name ?? "the customer")}`
                     : automaticShippingText(customerShipping, customer?.name ?? "the customer")}{" "}
-                  It goes in the Shipping box of the QuickBooks invoice (GESi filters sold: on the item Shipping and Handling (G), where an amount set by hand goes too); 0 means no shipping on the invoice.
+                  It goes in the Shipping box of the QuickBooks invoice (GESi filters sold: on the item Shipping & Handling Fee (G), where an amount set by hand goes too); 0 means no shipping on the invoice.
                 </p>
                 <ActionForm
                   action={updateCustomerShipping.bind(null, wo.id, "set")}

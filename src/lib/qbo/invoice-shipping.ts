@@ -15,14 +15,14 @@ import type { QboInvoicePayload } from "./invoice";
  * The amount comes from public.work_order_customer_shipping (the database decides it).
  *
  * GESi filters sold (Sarah, CDS, 2026-11-18) are charged on a normal item line instead, the
- * QuickBooks item "Shipping and Handling (G)": $28 per GESi filter, $150 when overnighted
+ * QuickBooks item "Shipping & Handling Fee (G)": $28 per GESi filter, $150 when overnighted
  * (the view's gesi_amount). The portal catalog has no such item (the QuickBooks catalog sync
  * skips names with spaces, and qbo_item_map links portal items only), so the line is built
  * with an empty ItemRef value and the item name, and resolveInvoiceQbo (./invoice-qbo) puts
  * in the id of the active QuickBooks item with exactly that name, or stops the invoice with
  * GesiShippingItemError before anything is sent:
  *   { DetailType: "SalesItemLineDetail", Amount, Description,
- *     SalesItemLineDetail: { ItemRef: { value: "<id>", name: "Shipping and Handling (G)" },
+ *     SalesItemLineDetail: { ItemRef: { value: "<id>", name: "Shipping & Handling Fee (G)" },
  *                            Qty, UnitPrice, TaxCodeRef: { value: "TAX" | "NON" } } }
  */
 
@@ -53,7 +53,7 @@ export function shippingAmountOf(payload: Pick<QboInvoicePayload, "Line">): numb
   return payload.Line.filter(isShippingLine).reduce((sum, l) => sum + l.Amount, 0);
 }
 
-export const GESI_SHIPPING_ITEM_NAME = "Shipping and Handling (G)";
+export const GESI_SHIPPING_ITEM_NAME = "Shipping & Handling Fee (G)";
 
 /** The GESi shipping of one work order (public.work_order_customer_shipping). */
 export type GesiShipping = {
