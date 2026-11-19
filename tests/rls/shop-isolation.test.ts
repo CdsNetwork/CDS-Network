@@ -762,11 +762,13 @@ describe("CDS login", () => {
         [r.customer_subtotal, r.shop_subtotal, r.shipping_cost, r.margin_before_shipping, r.margin].map(Number),
       ]),
     );
-    // A: customer X override 280 + 2 x 12 = 304; shop 200 + 2 x 10 = 220, less the $15 shipping
-    // deduction for its one filter (shipped order) = 205; shipping 40.
-    expect(byId[f.woA]).toEqual([304, 205, 40, 99, 59]);
-    // B: fleet 300 + 12 = 312; shop B's own rate 210 + 10 = 220, less $15 for its one filter = 205; shipping 40.
-    expect(byId[f.woB]).toEqual([312, 205, 40, 107, 67]);
+    // A: customer X override 280 + 2 x 12 = 304, plus the $28 customer shipping charge for its
+    // one filter (shipped order) = 332; shop 200 + 2 x 10 = 220, less the $15 shipping
+    // deduction for that filter = 205; shipping 40.
+    expect(byId[f.woA]).toEqual([332, 205, 40, 127, 87]);
+    // B: fleet 300 + 12 = 312, plus $28 shipping charge = 340; shop B's own rate 210 + 10 = 220,
+    // less $15 for its one filter = 205; shipping 40.
+    expect(byId[f.woB]).toEqual([340, 205, 40, 135, 95]);
   });
 
   it("keeps prices snapshotted on existing lines when the price list changes", async () => {

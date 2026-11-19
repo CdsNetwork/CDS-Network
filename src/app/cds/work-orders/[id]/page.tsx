@@ -186,6 +186,10 @@ type Financials = {
   margin_before_shipping: number;
   margin: number;
   supplier_cost_tbd: boolean;
+  /** The automatic customer shipping charge, part of customer_subtotal until the order has its own QuickBooks invoice. */
+  customer_shipping: number;
+  /** customer_subtotal is the QuickBooks invoice's total - tax (20261119230000_financials_customer_shipping.sql). */
+  customer_from_invoice: boolean;
 };
 
 type Line = {
@@ -615,7 +619,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         .maybeSingle(),
       supabase
         .from("work_order_financials")
-        .select("customer_subtotal, shop_subtotal, shipping_cost, margin_before_shipping, margin, supplier_cost_tbd")
+        .select("customer_subtotal, shop_subtotal, shipping_cost, margin_before_shipping, margin, supplier_cost_tbd, customer_shipping, customer_from_invoice")
         .eq("work_order_id", id)
         .maybeSingle(),
       supabase
@@ -1051,6 +1055,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
         <div className="card">
           <div className="small">CUSTOMER SUBTOTAL (BEFORE TAX)</div>
           <div className="bigAmount">{priceMissing ? "TBD" : money(fin?.customer_subtotal ?? subtotal)}</div>
+          {!priceMissing && fin?.customer_from_invoice ? (
+            <div className="small">QuickBooks invoice{internal?.qb_invoice_number ? ` ${internal.qb_invoice_number}` : ""} total less tax</div>
+          ) : (
+            !priceMissing &&
+            fin &&
+            Number(fin.customer_shipping) > 0 && <div className="small">Incl. {money(fin.customer_shipping)} shipping charge</div>
+          )}
         </div>
         <div className="card">
           <div className="small">GROSS MARGIN</div>
@@ -2178,7 +2189,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               )}
               <div className="summaryrow">
                 <span>Subtotal</span>
-                <b className="money">{priceMissing ? "TBD" : money(subtotal)}</b>
+                <b className="money">{priceMissing ? "TBD" : money(fin?.customer_from_invoice ? fin.customer_subtotal : subtotal)}</b>
               </div>
               <div className="summaryrow">
                 <span>Taxable amount</span>

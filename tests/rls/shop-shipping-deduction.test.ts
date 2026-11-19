@@ -82,7 +82,7 @@ const financials = async (wo: string) =>
   must(
     cds.client
       .from("work_order_financials")
-      .select("customer_subtotal, shop_subtotal, margin_before_shipping, shop_deductions")
+      .select("customer_subtotal, lines_subtotal, shop_subtotal, margin_before_shipping, shop_deductions")
       .eq("work_order_id", wo)
       .single(),
   );
@@ -109,14 +109,17 @@ describe("shared shipping deduction", () => {
     expect(await deductions(cds, wo)).toEqual([]);
   });
 
-  it("is in the shop subtotal and the margin, and leaves the customer subtotal alone", async () => {
+  it("is in the shop subtotal and the margin, and leaves the customer lines alone", async () => {
     const wo = await newWo(f.shopA);
     await addComponents(wo, ["DPF", "SCR"]);
     const fin = await financials(wo);
-    expect(Number(fin.customer_subtotal)).toBe(300);
+    // The customer lines stay 300; the customer subtotal adds the $56 customer shipping
+    // charge for the two filters (20261119230000_financials_customer_shipping.sql).
+    expect(Number(fin.lines_subtotal)).toBe(300);
+    expect(Number(fin.customer_subtotal)).toBe(356);
     expect(Number(fin.shop_subtotal)).toBe(70);
     expect(Number(fin.shop_deductions)).toBe(-30);
-    expect(Number(fin.margin_before_shipping)).toBe(230);
+    expect(Number(fin.margin_before_shipping)).toBe(286);
     // Not a line: no customer price, nothing for the invoice.
     const lines = await must(admin.from("work_order_lines").select("id").eq("work_order_id", wo));
     const priced = await must(admin.from("work_order_line_pricing").select("line_id").eq("work_order_id", wo));
