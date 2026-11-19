@@ -44,7 +44,7 @@ export async function loadBillInputs(
 
   const [linesRes, vendorRes, classRes, settingRes, billRes, incomeRes, cogsRes, deductions] = await Promise.all([
     db.from("work_order_lines").select("catalog_item_id, qty, shop_unit_rate, description, catalog_items(sku, name)").eq("work_order_id", woId).order("created_at"),
-    db.from("qbo_affiliate_vendor").select("qbo_vendor_id, qbo_vendor_name").eq("affiliate_id", affiliateId).maybeSingle(),
+    db.from("qbo_affiliate_vendor").select("qbo_vendor_id, qbo_vendor_name, linked_at").eq("affiliate_id", affiliateId).maybeSingle(),
     db.from("qbo_affiliate_class").select("qbo_class_id").eq("affiliate_id", affiliateId).maybeSingle(),
     db.from("app_settings").select("value").eq("key", BILL_SETTING_KEY).maybeSingle(),
     db
@@ -86,7 +86,7 @@ export async function loadBillInputs(
     : { data: [], error: null };
   if (itemMapRes.error) throw new Error(`Could not read the item mappings: ${itemMapRes.error.message}`);
   const cogs = cogsRes.data as { qbo_department_id: string; qbo_department_name: string } | null;
-  const vendor = vendorRes.data as { qbo_vendor_id: string; qbo_vendor_name: string } | null;
+  const vendor = vendorRes.data as { qbo_vendor_id: string; qbo_vendor_name: string; linked_at: string | null } | null;
   const bill = billRes.data as {
     status: BillRecord["status"];
     qb_bill_id: string | null;
@@ -110,12 +110,13 @@ export async function loadBillInputs(
         poNumber: wo.po_number,
         unitNumber: wo.unit_number,
         shopName: shop?.display_name ?? "The shop",
-        // No shop on the order: nothing to bill, as for CDS's own shop.
+        // CDS's own shop: billed only once linked to a QuickBooks vendor (./bill billState).
+        // No shop on the order: never linked (no vendor row), so nothing to bill.
         shopInHouse: !wo.affiliate_id || !!shop?.is_in_house,
       },
       lines,
       deductions,
-      vendor: vendor ? { qboVendorId: vendor.qbo_vendor_id, qboVendorName: vendor.qbo_vendor_name } : null,
+      vendor: vendor ? { qboVendorId: vendor.qbo_vendor_id, qboVendorName: vendor.qbo_vendor_name, linkedAt: vendor.linked_at } : null,
       setting: parseBillSetting((settingRes.data as { value: unknown } | null)?.value),
       classId: (classRes.data as { qbo_class_id: string } | null)?.qbo_class_id ?? null,
       division: cogs ? { id: cogs.qbo_department_id, name: cogs.qbo_department_name } : null,

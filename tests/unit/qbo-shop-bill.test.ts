@@ -266,8 +266,8 @@ describe("billState: when a bill is created", () => {
     expect(shouldAutoCreate(s, none)).toBe(false);
   });
 
-  it("CDS's own shop: never", () => {
-    expect(billState(inputs({}, { shopInHouse: true }), none).kind).toBe("none");
+  it("CDS's own shop with no QuickBooks vendor linked: never (linked: tests/unit/qbo-in-house-shop-bill.test.ts)", () => {
+    expect(billState(inputs({ vendor: null }, { shopInHouse: true }), none).kind).toBe("none");
   });
 
   it("completed before bills were turned on: no automatic bill (CDS typed those by hand), the button still works", () => {

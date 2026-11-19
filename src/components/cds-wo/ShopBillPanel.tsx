@@ -7,7 +7,7 @@ import { ActionForm } from "./ActionForm";
 /**
  * The shop's bill in QuickBooks on the CDS work order page (M3): its number and total once
  * created, why it is waiting, or QuickBooks's reason with a Retry. Nothing for an order
- * that gets no bill (not completed yet, cancelled, CDS's own shop).
+ * that gets no bill (not completed yet, cancelled, CDS's own shop with no vendor linked).
  */
 export function ShopBillPanel({ woId, status, state, loadError }: { woId: string; status: string; state: BillState | null; loadError: boolean }) {
   if (loadError) {
@@ -89,7 +89,9 @@ export function ShopBillPanel({ woId, status, state, loadError }: { woId: string
             Bill {state.payload.DocNumber} to {state.payload.VendorRef.name ?? "the shop's vendor"} for {money(state.total)}
             {state.payload.DepartmentRef ? `, Division ${state.payload.DepartmentRef.name}` : ""}.
             {state.beforeSince && !lastError
-              ? " This order was completed before QuickBooks bills were turned on: create the bill only if it is not in QuickBooks yet."
+              ? state.beforeVendorLink
+                ? " This in-house order was completed before CDS Inc (in-house) was linked to its QuickBooks vendor: create the bill only if it is not in QuickBooks yet."
+                : " This order was completed before QuickBooks bills were turned on: create the bill only if it is not in QuickBooks yet."
               : ""}
           </p>
           <ActionForm

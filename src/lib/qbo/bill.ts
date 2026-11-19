@@ -31,6 +31,10 @@ import { cents, linkedItem, unlinkedItemMessage, type ItemMappings } from "./inv
  *   * SalesTermRef: the terms, when they are part of that setting; else the QuickBooks term
  *     named Net 30 (all CDS vendors are Net 30, CDS 2026-11-16), added when sending
  *     (defaultBillTerm, ./bill-run); without such a term, the vendor's own.
+ * CDS's in-house shop (CDS selling GESi filters itself) gets a bill only once CDS links it to a
+ * vendor on Admin > Shop bills (CDS, 2026-11-19), built the same way: its line amounts are the
+ * in-house line rates (CDS's own cost), it has no shipping deduction, and only orders completed
+ * after the link are billed automatically (20261120000000_in_house_shop_bills.sql).
  * A line whose item is not linked to a QuickBooks item stops the bill (the same message as the
  * invoice); an item without an expense account in QuickBooks is checked right before sending
  * (itemsWithoutExpenseAccount, ./bill-run).
@@ -111,6 +115,11 @@ export type BillWorkOrder = {
   poNumber: string | null;
   unitNumber: string | null;
   shopName: string;
+  /**
+   * CDS's in-house shop (or no shop on the order). It gets a bill only once it is linked to a
+   * QuickBooks vendor (the vendor CDS buys the parts from, GESi), at the in-house line amounts
+   * (CDS's own cost) and with no shipping deduction (the deduction view has none for it).
+   */
   shopInHouse: boolean;
 };
 
@@ -123,7 +132,15 @@ export type BillLine = {
   shopUnitRate: number | null;
 };
 
-export type VendorLink = { qboVendorId: string; qboVendorName: string };
+export type VendorLink = {
+  qboVendorId: string;
+  qboVendorName: string;
+  /**
+   * qbo_affiliate_vendor.linked_at: when CDS linked the shop. For the in-house shop, orders
+   * completed before it get no automatic bill (null: treated as now).
+   */
+  linkedAt?: string | null;
+};
 
 export type BillInputs = {
   workOrder: BillWorkOrder;
@@ -387,7 +404,7 @@ const DONE = ["completed", "delivered", "ready_to_invoice", "invoiced"];
 export const CLAIM_EXPIRES_MS = 5 * 60 * 1000;
 
 export type BillState =
-  /** No bill for this order: not completed yet, cancelled, or CDS's own shop. */
+  /** No bill for this order: not completed yet, cancelled, or CDS's own shop with no QuickBooks vendor linked. */
   | { kind: "none" }
   /** Completed, but CDS has not turned shop bills on yet. */
   | { kind: "not_set_up" }
@@ -409,8 +426,10 @@ export type BillState =
       payload: QboBillPayload;
       total: number;
       lastError: string | null;
-      /** Completed before bills were turned on: no automatic bill, CDS decides. */
+      /** Completed before bills were turned on (or, in-house, before its vendor was linked): no automatic bill, CDS decides. */
       beforeSince: boolean;
+      /** In-house order completed before the in-house shop was linked to its QuickBooks vendor. */
+      beforeVendorLink: boolean;
     };
 
 export function billState(i: BillInputs, record: BillRecord | null, now: Date = new Date()): BillState {
@@ -428,7 +447,9 @@ export function billState(i: BillInputs, record: BillRecord | null, now: Date = 
     };
   }
   const wo = i.workOrder;
-  if (wo.shopInHouse || wo.status === "cancelled" || !wo.completedAt || !DONE.includes(wo.status)) return { kind: "none" };
+  // CDS's own shop: no bill until CDS links it to a QuickBooks vendor (Admin > Shop bills).
+  if (wo.shopInHouse && !i.vendor) return { kind: "none" };
+  if (wo.status === "cancelled" || !wo.completedAt || !DONE.includes(wo.status)) return { kind: "none" };
   if (!i.setting) return { kind: "not_set_up" };
   if (record?.status === "creating" && record.claimedAt && now.getTime() - Date.parse(record.claimedAt) < CLAIM_EXPIRES_MS) {
     return { kind: "creating" };
@@ -436,15 +457,19 @@ export function billState(i: BillInputs, record: BillRecord | null, now: Date = 
   const lastError = record?.status === "failed" ? record.error : null;
   const built = buildBillPayload(i);
   if (!built.ok) return { kind: "blocked", problems: built.problems, lastError };
+  const completed = Date.parse(wo.completedAt);
   const since = i.setting.since ? Date.parse(i.setting.since) : null;
-  const beforeSince = since !== null && Date.parse(wo.completedAt) < since;
-  return { kind: "ready", payload: built.payload, total: built.total, lastError, beforeSince };
+  const linked = i.vendor?.linkedAt ? Date.parse(i.vendor.linkedAt) : NaN;
+  const beforeVendorLink = wo.shopInHouse && !(completed >= (Number.isFinite(linked) ? linked : now.getTime()));
+  const beforeSince = (since !== null && completed < since) || beforeVendorLink;
+  return { kind: "ready", payload: built.payload, total: built.total, lastError, beforeSince, beforeVendorLink };
 }
 
 /**
  * Automatic creation (after the shop completes, or after CDS enters the last TBD shop rate):
- * only for an order that never had an attempt and was completed after bills were turned on.
- * After a failure CDS retries by hand.
+ * only for an order that never had an attempt and was completed after bills were turned on
+ * (in-house: and after the in-house shop was linked to its vendor). After a failure CDS
+ * retries by hand.
  */
 export function shouldAutoCreate(state: BillState, record: BillRecord | null): boolean {
   return state.kind === "ready" && !state.beforeSince && record === null;

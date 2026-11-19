@@ -3,7 +3,8 @@
  * vendor links are CDS only: a shop and an anonymous caller read nothing and write nothing.
  * Only the server (service role) can claim and finish a bill: not a shop, not a CDS login
  * directly. One claim per order, also for two claims at the same moment; never a second
- * bill once one is recorded; a cancelled, unfinished or in-house order is refused; a
+ * bill once one is recorded; a cancelled or unfinished order, an order with no shop, and an
+ * in-house order while the in-house shop has no QuickBooks vendor are refused; a
  * QuickBooks refusal moves to the next request id, an unclear failure keeps it.
  *
  * Fixtures are created with the service role under a per-run id and removed afterwards.
@@ -161,9 +162,42 @@ describe("qbo_shop_bills and qbo_affiliate_vendor", () => {
     expect((await claim(await order({ status: "invoiced", completed_at: null }))).error?.message).toBe("The shop has not completed this work order yet.");
     // Invoiced early, then completed: allowed.
     expect((await claim(await order({ status: "invoiced" }))).error).toBeNull();
-    const inHouse = await must(admin.from("affiliates").select("id").eq("is_in_house", true).limit(1));
-    if (inHouse.length) {
-      expect((await claim(await order({ affiliate_id: inHouse[0].id }))).error?.message).toBe("CDS's own shop does not get a bill.");
+    // No shop on the order (a completed order always has one; this guards the function itself).
+    expect((await claim(await order({ affiliate_id: null, status: "pending_review", affiliate_invoice_ref: null }))).error?.message).toBe("This work order has no shop, so it gets no bill.");
+  });
+
+  it("CDS's own shop: refused until it is linked to a QuickBooks vendor, then billed like any shop", async () => {
+    const inHouse = (await must(admin.from("affiliates").select("id").eq("is_in_house", true).single())).id as string;
+    const before = await must(admin.from("qbo_affiliate_vendor").select("*").eq("affiliate_id", inHouse));
+    try {
+      if (before.length) await must(admin.from("qbo_affiliate_vendor").delete().eq("affiliate_id", inHouse));
+      const wo = await order({ affiliate_id: inHouse, affiliate_invoice_ref: "IN-HOUSE-1" });
+      expect((await claim(wo)).error?.message).toBe("CDS's own shop is not linked to a QuickBooks vendor, so it gets no bill.");
+      expect(await must(admin.from("qbo_shop_bills").select("work_order_id").eq("work_order_id", wo))).toEqual([]);
+
+      // CDS links it (Admin > Shop bills); the link records when it was made.
+      const t0 = Date.now();
+      await must(cds.client.from("qbo_affiliate_vendor").insert({ affiliate_id: inHouse, qbo_vendor_id: "777", qbo_vendor_name: "GESi", updated_by: cds.id }));
+      const link = await must(admin.from("qbo_affiliate_vendor").select("linked_at").eq("affiliate_id", inHouse).single());
+      expect(Math.abs(Date.parse(link.linked_at as string) - t0)).toBeLessThan(60_000);
+      // Changing the vendor (the admin upsert) keeps when the shop was first linked.
+      await must(
+        cds.client
+          .from("qbo_affiliate_vendor")
+          .upsert({ affiliate_id: inHouse, qbo_vendor_id: "778", qbo_vendor_name: "GESi Inc", updated_by: cds.id }, { onConflict: "affiliate_id" }),
+      );
+      expect((await must(admin.from("qbo_affiliate_vendor").select("linked_at").eq("affiliate_id", inHouse).single())).linked_at).toBe(link.linked_at);
+      // A shop cannot read or set it.
+      await shop.client.from("qbo_affiliate_vendor").update({ linked_at: new Date(0).toISOString() }).eq("affiliate_id", inHouse);
+      expect((await must(admin.from("qbo_affiliate_vendor").select("linked_at").eq("affiliate_id", inHouse).single())).linked_at).toBe(link.linked_at);
+
+      const c = (await must(claim(wo))) as { claim_id: string; request_id: string };
+      expect(c.request_id).toBe(`bill-${wo}`);
+      await must(finish(wo, c.claim_id, "error", { p_error: "timeout" }));
+      expect((await must(admin.from("qbo_shop_bills").select("status").eq("work_order_id", wo).single())).status).toBe("failed");
+    } finally {
+      await admin.from("qbo_affiliate_vendor").delete().eq("affiliate_id", inHouse);
+      if (before.length) await must(admin.from("qbo_affiliate_vendor").insert(before));
     }
   });
 });

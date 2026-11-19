@@ -9,12 +9,12 @@ import { deductionOptions } from "@/lib/qbo/deduction-options";
 import { qboBillLists, type QboBillLists } from "@/lib/qbo/lists";
 import { qboStatus } from "@/lib/qbo/status";
 import { BILL_SETTING_KEY, defaultBillTerm, parseBillSetting, suggestVendor, type BillLineSetting } from "@/lib/qbo/bill";
+import { vendorLinkShops, type VendorLinkRow, type VendorLinkShop } from "@/lib/qbo/bill-shops";
 import { dateTime, wrapCell } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { linkSuggestedVendor, removeVendorMap, saveBillSetting, saveVendorMap } from "./qbo-actions";
 
-type Shop = { id: string; short_code: string; display_name: string; city: string | null; region: string | null };
-type VendorMap = { affiliate_id: string; qbo_vendor_id: string; qbo_vendor_name: string };
+type Shop = VendorLinkShop;
 
 type Lists = Promise<QboBillLists>;
 
@@ -50,25 +50,20 @@ export async function ShopBillsSection({ connected }: { connected: boolean }) {
   // Not awaited: the QuickBooks lists can take seconds.
   const lists = qboBillLists(connected);
   const [shopsRes, mapRes, settingRes] = await Promise.all([
-    supabase.from("affiliates").select("id, short_code, display_name, city, region").eq("active", true).eq("is_in_house", false).order("display_name"),
+    // CDS's in-house shop too: linked to its vendor (GESi), its orders are billed at CDS cost.
+    supabase.from("affiliates").select("id, short_code, display_name, city, region, is_in_house").eq("active", true).order("display_name"),
     supabase.from("qbo_affiliate_vendor").select("affiliate_id, qbo_vendor_id, qbo_vendor_name"),
     supabase.from("app_settings").select("value, updated_at, profiles(full_name)").eq("key", BILL_SETTING_KEY).maybeSingle(),
   ]);
   const loadError = [shopsRes, mapRes, settingRes].some((r) => r.error);
-  const shops = (shopsRes.data ?? []) as Shop[];
-  const links = new Map(((mapRes.data ?? []) as VendorMap[]).map((m) => [m.affiliate_id, m]));
+  const links = new Map(((mapRes.data ?? []) as VendorLinkRow[]).map((m) => [m.affiliate_id, m]));
+  const { rows: shops, options: shopOptions, unlinked } = vendorLinkShops((shopsRes.data ?? []) as Shop[], links);
   const setting = parseBillSetting((settingRes.data as { value: unknown } | null)?.value);
   const settingBy = (() => {
     const p = (settingRes.data as { profiles?: { full_name: string } | { full_name: string }[] | null } | null)?.profiles;
     return (Array.isArray(p) ? p[0] : p)?.full_name ?? null;
   })();
 
-  const shopOptions: SearchOption[] = shops.map((s) => ({
-    value: s.id,
-    label: s.display_name,
-    hint: links.get(s.id) ? `QuickBooks: ${links.get(s.id)!.qbo_vendor_name}` : "Not linked",
-  }));
-  const unlinked = shops.filter((s) => !links.has(s.id)).length;
 
   return (
     <div className="section">
@@ -78,6 +73,10 @@ export async function ShopBillsSection({ connected }: { connected: boolean }) {
         invoice number, and the same amounts the shop sees (deductions included). A bill waits while a shop rate is TBD and is
         created when CDS enters the last rate. Orders completed before bills were turned on get no bill automatically; the work
         order page has a Create bill button.
+      </p>
+      <p className="small">
+        CDS Inc (in-house): link it to the vendor CDS buys those parts from, and its orders get a bill at CDS cost, with no
+        shipping deduction. Only orders completed after the link get one automatically. Not linked, in-house orders get no bill.
       </p>
       <Suspense fallback={null}>
         <ListsError lists={lists} />
@@ -147,11 +146,17 @@ export async function ShopBillsSection({ connected }: { connected: boolean }) {
               </tr>
             )}
             {shops.map((s) => {
-              const link = links.get(s.id);
+              const link = s.link;
               return (
                 <tr key={s.id}>
                   <td className={wrapCell(s.display_name)} data-label="Shop">
                     <b>{s.display_name}</b>
+                    {s.inHouse ? (
+                      <>
+                        {" "}
+                        <span className="tag">In-house: billed at CDS cost</span>
+                      </>
+                    ) : null}
                     {s.city ? <span className="small"> {[s.city, s.region].filter(Boolean).join(", ")}</span> : null}
                   </td>
                   <td data-label="QuickBooks vendor">
@@ -161,10 +166,12 @@ export async function ShopBillsSection({ connected }: { connected: boolean }) {
                       </>
                     ) : (
                       <>
-                        <span className="tag">Not linked</span>
-                        <Suspense fallback={null}>
-                          <Suggested lists={lists} shopName={s.display_name} />
-                        </Suspense>
+                        <span className="tag">{s.inHouse ? "Not linked: in-house orders get no bill" : "Not linked"}</span>
+                        {s.suggest && (
+                          <Suspense fallback={null}>
+                            <Suggested lists={lists} shopName={s.display_name} />
+                          </Suspense>
+                        )}
                       </>
                     )}
                   </td>
@@ -177,11 +184,11 @@ export async function ShopBillsSection({ connected }: { connected: boolean }) {
                         pendingLabel="..."
                         submitClassName="btn btn-secondary btn-small"
                       />
-                    ) : (
+                    ) : s.suggest ? (
                       <Suspense fallback={null}>
                         <SuggestedLink lists={lists} shop={s} />
                       </Suspense>
-                    )}
+                    ) : null}
                   </td>
                 </tr>
               );
