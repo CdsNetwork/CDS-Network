@@ -109,6 +109,12 @@
   "function public.qbo_get_connection()": {
     "service_role": "EXECUTE"
   },
+  "function public.qbo_location_sync_create(jsonb)": {
+    "service_role": "EXECUTE"
+  },
+  "function public.qbo_location_sync_link(uuid,text,text)": {
+    "service_role": "EXECUTE"
+  },
   "function public.qbo_save_connection(text,text,text,boolean,text,timestamp with time zone,text,timestamp with time zone,uuid)": {
     "service_role": "EXECUTE"
   },
@@ -180,6 +186,9 @@
     "service_role": "SELECT,UPDATE,USAGE"
   },
   "sequence public.qbo_catalog_sync_runs_id_seq": {
+    "service_role": "SELECT,UPDATE,USAGE"
+  },
+  "sequence public.qbo_location_sync_runs_id_seq": {
     "service_role": "SELECT,UPDATE,USAGE"
   },
   "sequence public.shipment_tracking_events_id_seq": {
@@ -292,6 +301,10 @@
   },
   "table public.qbo_location_customer_map": {
     "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+  },
+  "table public.qbo_location_sync_runs": {
+    "authenticated": "SELECT",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "table public.qbo_affiliate_vendor": {

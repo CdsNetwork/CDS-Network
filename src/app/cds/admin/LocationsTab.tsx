@@ -5,8 +5,10 @@ import styles from "@/components/cds-admin/cds-admin.module.css";
 import { clampPage, Pager } from "@/components/cds-admin/Pager";
 import { one } from "@/components/cds-admin/server-utils";
 import { FULFILLMENT_LABEL, wrapCell } from "@/lib/format";
+import { LOCATION_SYNC_SETTING_KEY, locationSyncEnabled, locationSyncStatus, type LocationSyncRunRow } from "@/lib/qbo/location-sync";
+import { qboStatus } from "@/lib/qbo/status";
 import { createClient } from "@/lib/supabase/server";
-import { saveLocation } from "./actions";
+import { saveLocation, syncLocationsNow } from "./actions";
 
 type Location = {
   id: string;
@@ -24,6 +26,10 @@ type Location = {
   dock_note: string | null;
   routing_notes: string | null;
   active: boolean;
+  /** The QuickBooks customer that is this site (set by the QuickBooks location sync). */
+  qbo_customer_name: string | null;
+  /** Created by the QuickBooks location sync and no default shop yet. */
+  needs_setup: boolean;
   customers: { name: string } | { name: string }[] | null;
   affiliates: { display_name: string; short_code: string } | { display_name: string; short_code: string }[] | null;
 };
@@ -34,7 +40,7 @@ export type LocationFilters = { q: string; customer: string; shop: string; fulfi
 
 const PAGE_SIZE = 50;
 const COLUMNS =
-  "id, customer_id, code, location_number, name, address_raw, address_line1, city, region, postal_code, default_affiliate_id, fulfillment, dock_note, routing_notes, active, customers(name), affiliates(display_name, short_code)";
+  "id, customer_id, code, location_number, name, address_raw, address_line1, city, region, postal_code, default_affiliate_id, fulfillment, dock_note, routing_notes, active, qbo_customer_name, needs_setup, customers(name), affiliates(display_name, short_code)";
 /** Location columns the search box looks in (customer and shop names are matched separately). */
 const SEARCH_COLUMNS = ["code", "location_number", "name", "address_raw", "address_line1", "city", "region", "postal_code"];
 
@@ -61,10 +67,21 @@ function href(f: LocationFilters, extra: Record<string, string> = {}): string {
 export async function LocationsTab({ edit, filters }: { edit?: string; filters: LocationFilters }) {
   const f = filters;
   const supabase = await createClient();
-  const [{ data: custData }, { data: shopData }] = await Promise.all([
+  const [{ data: custData }, { data: shopData }, { data: syncRunData }, qbo, { data: syncSetting }] = await Promise.all([
     supabase.from("customers").select("id, code, name").order("name"),
     supabase.from("affiliates").select("id, short_code, display_name, active, city, region").order("display_name"),
+    // The QuickBooks location sync (hourly): the latest runs, newest first, for the status line.
+    supabase
+      .from("qbo_location_sync_runs")
+      .select("finished_at, status, created, linked, error")
+      .order("finished_at", { ascending: false })
+      .limit(20),
+    qboStatus(supabase),
+    // Off until CDS turns it on (app_settings "qbo_location_sync" = {"enabled": true}).
+    supabase.from("app_settings").select("value").eq("key", LOCATION_SYNC_SETTING_KEY).maybeSingle(),
   ]);
+  const sync = locationSyncStatus((syncRunData ?? []) as LocationSyncRunRow[]);
+  const syncOn = locationSyncEnabled((syncSetting as { value: unknown } | null)?.value);
   const customerRows = (custData ?? []) as CustomerRow[];
   const shopRows = (shopData ?? []) as ShopRow[];
   const customers: SearchOption[] = customerRows.map((c) => ({ value: c.id, label: `${c.name} (${c.code})` }));
@@ -121,6 +138,12 @@ export async function LocationsTab({ edit, filters }: { edit?: string; filters: 
               Close
             </Link>
           </div>
+          {(editing.qbo_customer_name || editing.needs_setup) && (
+            <p className="small">
+              {editing.qbo_customer_name && <>QuickBooks customer: {editing.qbo_customer_name}. </>}
+              {editing.needs_setup && "From QuickBooks, needs a default shop: saving a default shop here (or dispatching its first order) sets it up."}
+            </p>
+          )}
           <ActionForm key={editing.id} action={saveLocation.bind(null, editing.id)} submitLabel="Save location">
             <LocationFields loc={editing} customers={customers} shops={shops} />
           </ActionForm>
@@ -139,6 +162,20 @@ export async function LocationsTab({ edit, filters }: { edit?: string; filters: 
           </div>
         </details>
       )}
+
+      <div className="row between" style={{ alignItems: "center" }}>
+        <p className="small" role="status" style={{ margin: 0 }}>
+          {sync.text}
+        </p>
+        {!syncOn ? (
+          <span className="small">QuickBooks location sync is off until CDS turns it on.</span>
+        ) : (
+          qbo.connected && (
+            <ActionForm action={syncLocationsNow} submitLabel="Sync now" pendingLabel="Syncing..." submitClassName="btn btn-secondary btn-small" />
+          )
+        )}
+      </div>
+      {sync.error && <div className="notice danger">{sync.error}</div>}
 
       <form className={styles.filters} method="get" action="/cds/admin">
         <input type="hidden" name="tab" value="locations" />
@@ -245,12 +282,18 @@ export async function LocationsTab({ edit, filters }: { edit?: string; filters: 
                   <b>{l.code}</b>
                   {l.location_number && <span className="small"> #{l.location_number}</span>}
                 </td>
-                <td className={wrapCell(l.name)}>{l.name}</td>
+                <td className={wrapCell(l.name, l.qbo_customer_name)}>
+                  {l.name}
+                  {l.qbo_customer_name && <div className="small">QuickBooks: {l.qbo_customer_name}</div>}
+                </td>
                 <td className={wrapCell(l.address_raw, l.routing_notes)}>
                   {l.address_raw}
                   {l.routing_notes && <div className="small">{l.routing_notes}</div>}
                 </td>
-                <td data-label="Default shop">{one(l.affiliates)?.display_name ?? <span className="small">Not set</span>}</td>
+                <td data-label="Default shop">
+                  {one(l.affiliates)?.display_name ??
+                    (l.needs_setup ? <span className="tag amber">From QuickBooks, needs a default shop</span> : <span className="small">Not set</span>)}
+                </td>
                 <td data-label="Fulfillment">{FULFILLMENT_LABEL[l.fulfillment] ?? l.fulfillment}</td>
                 <td>{l.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}</td>
                 <td>

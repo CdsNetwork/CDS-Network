@@ -32,6 +32,7 @@ import {
   ShippingNotAllowedError,
 } from "./invoice-shipping";
 import { classicCustomFieldDefs, fillCustomFields, invoiceCustomFieldDefs, type CustomFieldDef } from "./custom-fields";
+import { siteRelation } from "./location-sync";
 import { billAddrFrom, ownName, pickSubCustomer, siteNumberOf, type QboCustomerRecord } from "./sub-customer";
 
 export const FLEET_NUMBER_FIELD = "Fleet Number";
@@ -46,6 +47,12 @@ export type InvoiceTarget = {
   city: string | null;
   poNumber: string | null;
   unitNumber: string | null;
+  /**
+   * The QuickBooks customer that is this site (customer_locations.qbo_customer_id, set by the
+   * location sync, ./location-sync): the invoice goes to it directly.
+   */
+  qboCustomerId?: string | null;
+  qboCustomerName?: string | null;
 };
 
 export type QboLookups = {
@@ -79,6 +86,34 @@ function unauthorized(e: unknown): boolean {
 }
 
 const why = (e: unknown) => (e instanceof Error ? e.message : "unknown error");
+
+/**
+ * The location's own QuickBooks customer (set by the location sync), when it is still active
+ * and still a site of the linked customer: a sub-customer is billed with the parent's billing
+ * address (as the site-number match), a top-level site ("<parent> - Tampa") with its own.
+ * Otherwise a note, and the caller falls back to the site-number lookup.
+ */
+async function resolveLocationCustomer(
+  lookups: QboLookups,
+  parentId: string,
+  parentName: string,
+  target: InvoiceTarget,
+): Promise<{ customer: QboCustomerRecord; parent: QboCustomerRecord | null } | { note: string }> {
+  const id = target.qboCustomerId!.trim();
+  const label = target.qboCustomerName?.trim() || `id ${id}`;
+  const fallback = (why: string) => ({ note: `The location's QuickBooks customer ${label} ${why}, so the sub-customer was looked up by site number.` });
+  const site = await lookups.getCustomer(id).catch((e: unknown) => {
+    if (unauthorized(e)) throw e;
+    return null;
+  });
+  if (!site) return fallback("was not found in QuickBooks");
+  if (site.Active === false) return fallback("is inactive in QuickBooks");
+  const parent = await lookups.getCustomer(parentId);
+  if (!parent) return fallback(`could not be checked (QuickBooks customer ${parentName} was not found)`);
+  const relation = siteRelation(site, parent);
+  if (!relation) return fallback(`is not a site of ${parent.FullyQualifiedName?.trim() || parent.DisplayName} in QuickBooks`);
+  return { customer: site, parent: relation.kind === "sub" ? parent : null };
+}
 
 async function resolveSubCustomer(
   lookups: QboLookups,
@@ -205,7 +240,12 @@ export async function resolveInvoiceQbo(
   if (base.Line.some(isGesiShippingLine)) payload.Line = await withGesiShippingItem(lookups, base.Line);
 
   try {
-    const r = await resolveSubCustomer(lookups, base.CustomerRef.value, parentName, target, cachedSubCustomerId);
+    let r: { customer: QboCustomerRecord; parent: QboCustomerRecord | null } | { note: string | null } = { note: null };
+    if (target.qboCustomerId?.trim()) {
+      r = await resolveLocationCustomer(lookups, base.CustomerRef.value, parentName, target);
+      if ("note" in r && r.note) notes.push(r.note);
+    }
+    if (!("customer" in r)) r = await resolveSubCustomer(lookups, base.CustomerRef.value, parentName, target, cachedSubCustomerId);
     if ("customer" in r) {
       payload.CustomerRef = { value: r.customer.Id, name: r.customer.DisplayName };
       const bill = billAddrFrom(r.parent);

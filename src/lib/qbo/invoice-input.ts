@@ -187,7 +187,7 @@ async function loadPart(supabase: Supabase, woId: string): Promise<LoadedPart | 
   const { data: woData, error } = await supabase
     .from("work_orders")
     .select(
-      "id, wo_number, status, market, customer_id, affiliate_id, location_label, po_number, unit_number, customers(name), customer_locations(id, code, location_number, name, address_line1, city, region, postal_code, country)",
+      "id, wo_number, status, market, customer_id, affiliate_id, location_label, po_number, unit_number, customers(name), customer_locations(id, code, location_number, name, address_line1, city, region, postal_code, country, qbo_customer_id, qbo_customer_name)",
     )
     .eq("id", woId)
     .maybeSingle();
@@ -214,6 +214,8 @@ async function loadPart(supabase: Supabase, woId: string): Promise<LoadedPart | 
       region: string | null;
       postal_code: string | null;
       country: string | null;
+      qbo_customer_id: string | null;
+      qbo_customer_name: string | null;
     }>;
   };
 
@@ -438,6 +440,8 @@ async function loadPart(supabase: Supabase, woId: string): Promise<LoadedPart | 
       city: loc?.city ?? null,
       poNumber: wo.po_number,
       unitNumber: wo.unit_number,
+      qboCustomerId: loc?.qbo_customer_id ?? null,
+      qboCustomerName: loc?.qbo_customer_name ?? null,
     },
   };
 }

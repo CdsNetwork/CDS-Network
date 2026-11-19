@@ -6,6 +6,8 @@ import type { ActionState } from "@/components/cds-admin/ActionForm";
 import { checkbox, dbMessage, optionalText, text, triState } from "@/components/cds-admin/server-utils";
 import { requireCds } from "@/lib/auth";
 import { FULFILLMENT_LABEL } from "@/lib/format";
+import { LOCATION_SYNC_OFF } from "@/lib/qbo/location-sync";
+import { syncLocationsFromQuickBooks } from "@/lib/qbo/location-sync-server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -213,6 +215,20 @@ export async function saveLocation(id: string | null, _prev: ActionState, formDa
     return { error: error.code === "23505" ? "This customer already has a location with that code." : dbMessage(error) };
   }
   return done(id ? "Location saved." : `${location.code} added.`);
+}
+
+/**
+ * "Sync now" on Admin > Locations: the same QuickBooks location sync the hourly cron runs
+ * (src/lib/qbo/location-sync.ts), on the server with the service role after requireCds().
+ */
+export async function syncLocationsNow(): Promise<ActionState> {
+  await requireCds();
+  const r = await syncLocationsFromQuickBooks("manual");
+  revalidatePath("/cds/admin");
+  if (r.status === "skipped") return { error: r.reason === LOCATION_SYNC_OFF ? "QuickBooks location sync is off until CDS turns it on." : r.reason };
+  if (r.status === "failed") return { error: `The QuickBooks sync failed: ${r.error ?? "unknown error"}` };
+  if (r.status === "dry_run") return { error: "Unexpected dry run." };
+  return { ok: true, message: `Synced from QuickBooks: ${r.created} new ${r.created === 1 ? "location" : "locations"}, ${r.linked} linked.` };
 }
 
 // ---------------------------------------------------------------- customers
