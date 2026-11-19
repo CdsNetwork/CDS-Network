@@ -53,15 +53,13 @@ async function readQboCustomers(): Promise<QboSiteRecord[]> {
 
 /** The active portal customers linked to a QuickBooks customer, and all their locations. */
 export async function loadLocationPortal(db: SupabaseClient): Promise<{ customers: LinkedPortalCustomer[]; locations: PortalLocationRow[] }> {
-  type MapRow = { customer_id: string; qbo_customer_id: string; customers: { active: boolean } | { active: boolean }[] | null };
+  type MapRow = { customer_id: string; qbo_customer_id: string; customers: { active: boolean; name: string } | { active: boolean; name: string }[] | null };
   type LocRow = { id: string; customer_id: string; code: string; location_number: string | null; name: string; city: string | null; qbo_customer_id: string | null };
-  const maps = await fetchAll<MapRow>((from, to) => db.from("qbo_customer_map").select("customer_id, qbo_customer_id, customers(active)").order("id").range(from, to));
-  const customers = maps
-    .filter((m) => {
-      const c = Array.isArray(m.customers) ? m.customers[0] : m.customers;
-      return c?.active === true;
-    })
-    .map((m) => ({ customerId: m.customer_id, qboCustomerId: m.qbo_customer_id.trim() }));
+  const maps = await fetchAll<MapRow>((from, to) => db.from("qbo_customer_map").select("customer_id, qbo_customer_id, customers(active, name)").order("id").range(from, to));
+  const customers = maps.flatMap((m) => {
+    const c = Array.isArray(m.customers) ? m.customers[0] : m.customers;
+    return c?.active === true ? [{ customerId: m.customer_id, qboCustomerId: m.qbo_customer_id.trim(), name: c.name }] : [];
+  });
   const ids = customers.map((c) => c.customerId);
   const locations: LocRow[] = [];
   // In chunks, so the filter stays short.

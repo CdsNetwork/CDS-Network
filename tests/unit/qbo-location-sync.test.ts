@@ -276,6 +276,95 @@ describe("planLocationSync", () => {
   });
 });
 
+describe("planLocationSync after the first production dry run (2026-11-19)", () => {
+  it("a site without a site number links an unlinked location with the same name or code (any case, spacing, punctuation)", () => {
+    const plan = planLocationSync({
+      qboCustomers: [acmeParent, sub("61", "Acme - Maplewood"), sub("62", "Acme - CEDAR-FALLS"), sub("63", "Acme - Lakeside")],
+      customers: linked,
+      locations: [
+        loc({ id: "l-maple", code: "MAPLEWOOD", name: "MAPLEWOOD", city: "Maplewood" }),
+        loc({ id: "l-cedar", code: "CEDAR FALLS", name: "Cedar Falls" }),
+      ],
+    });
+    expect(plan.links.map((l) => [l.locationId, l.qboCustomerId])).toEqual([
+      ["l-maple", "61"],
+      ["l-cedar", "62"],
+    ]);
+    expect(plan.creates.map((c) => c.qbo_customer_id)).toEqual(["63"]);
+  });
+
+  it("failing a name, a site without a number links the one unlinked location without a number in its city", () => {
+    const plan = planLocationSync({
+      qboCustomers: [acmeParent, sub("64", "Acme - North yard", { ShipAddr: { Line1: "1 Rd", City: "Brookton" } })],
+      customers: linked,
+      locations: [loc({ id: "l-brook", code: "DEPOT", name: "Depot", city: "BROOKTON" }), loc({ id: "l-num", code: "77-BROOKTON", locationNumber: "77", city: "Brookton" })],
+    });
+    expect(plan.links.map((l) => l.locationId)).toEqual(["l-brook"]);
+    expect(plan.creates).toEqual([]);
+  });
+
+  it("a site without a number and two matching locations is created as before", () => {
+    const plan = planLocationSync({
+      qboCustomers: [acmeParent, sub("65", "Acme - Maplewood")],
+      customers: linked,
+      locations: [loc({ id: "a", code: "MAPLEWOOD", name: "Maplewood" }), loc({ id: "b", code: "MAPLEWOOD 2", name: "Maplewood" })],
+    });
+    expect(plan.links).toEqual([]);
+    expect(plan.creates.map((c) => c.qbo_customer_id)).toEqual(["65"]);
+  });
+
+  it("two sites with one number: the location's name beats its city (code 1083-YOUNGTON, name RIVERBEND BOTTLING)", () => {
+    const plan = planLocationSync({
+      qboCustomers: [acmeParent, sub("21", "ACME - 1083-RIVERBEND BOTTLING"), sub("22", "Acme - 1083-YOUNGTON")],
+      customers: linked,
+      locations: [loc({ id: "l-1083", code: "1083-YOUNGTON", locationNumber: "1083", name: "RIVERBEND BOTTLING", city: "YOUNGTON" })],
+    });
+    expect(plan.links.map((l) => [l.locationId, l.qboCustomerId])).toEqual([["l-1083", "21"]]);
+    expect(plan.creates.map((c) => c.qbo_customer_id)).toEqual(["22"]);
+  });
+
+  it("skips a QuickBooks customer under a site (a site number, or a site linked to a location)", () => {
+    const plan = planLocationSync({
+      qboCustomers: [
+        acmeParent,
+        sub("11", "ACME - 138-HARBOR HY"),
+        sub("70", "0138815450", { FullyQualifiedName: "Acme Fleet:ACME - 138-HARBOR HY:0138815450", ParentRef: { value: "11" } }),
+        sub("71", "Depot"),
+        sub("72", "5555", { FullyQualifiedName: "Acme Fleet:Depot:5555", ParentRef: { value: "71" } }),
+      ],
+      customers: linked,
+      locations: [loc({ id: "l-depot", code: "DEPOT", name: "Depot" })],
+    });
+    expect(plan.links.map((l) => [l.locationId, l.qboCustomerId])).toEqual([["l-depot", "71"]]);
+    expect(plan.creates.map((c) => c.qbo_customer_id)).toEqual(["11"]);
+    expect(plan.skipped).toEqual(
+      expect.arrayContaining([
+        { qboCustomerId: "70", name: "Acme Fleet:ACME - 138-HARBOR HY:0138815450", reason: "parent_is_site", customerId: ACME },
+        { qboCustomerId: "72", name: "Acme Fleet:Depot:5555", reason: "parent_is_site", customerId: ACME },
+      ]),
+    );
+  });
+
+  it("a top-level name match counts only for a linked customer without sub-customers", () => {
+    const plan = planLocationSync({
+      qboCustomers: [acmeParent, sub("11", "ACME - 297-PINE RIDGE CO"), top("80", "Acme Fleet - CANADA")],
+      customers: [{ customerId: ACME, qboCustomerId: "10" }],
+      locations: [],
+    });
+    expect(plan.creates.map((c) => c.qbo_customer_id)).toEqual(["11"]);
+    expect(plan.skipped).toEqual([{ qboCustomerId: "80", name: "Acme Fleet - CANADA", reason: "parent_has_sub_customers", customerId: ACME }]);
+  });
+
+  it("summarises the plan per portal customer", () => {
+    const plan = planLocationSync({
+      qboCustomers: [acmeParent, sub("11", "ACME - 297-PINE RIDGE CO"), sub("12", "ACME - 412-OAK FALLS"), sub("13", "ACME - 530-HARBOR")],
+      customers: [{ customerId: ACME, qboCustomerId: "10", name: "Acme" }],
+      locations: [loc({ id: "a", code: "297-X", locationNumber: "297", qboCustomerId: "11" }), loc({ id: "b", code: "412-OAK", locationNumber: "412" })],
+    });
+    expect(plan.summary).toEqual([{ customerId: ACME, name: "Acme", created: 1, linked: 1, unchanged: 1, skipped: 0 }]);
+  });
+});
+
 describe("runLocationSync", () => {
   function memoryDeps(qboCustomers: QboSiteRecord[] | (() => Promise<QboSiteRecord[]>), locations: PortalLocationRow[] = []) {
     const state = { locations: [...locations], runs: [] as LocationSyncRunRecord[], enabled: true };
@@ -350,6 +439,14 @@ describe("runLocationSync", () => {
     const { deps, state } = memoryDeps(qboSites);
     const r = await runLocationSync(deps, "manual", { dryRun: true });
     expect(r).toMatchObject({ status: "dry_run", created: 2, linked: 0 });
+    // The review list: per portal customer, and every skipped QuickBooks customer with its reason.
+    expect(r).toMatchObject({
+      summary: [
+        { customerId: ACME, created: 2, linked: 0, unchanged: 0, skipped: 0 },
+        { customerId: BOLT, created: 0, linked: 0, unchanged: 0, skipped: 0 },
+      ],
+      skips: [],
+    });
     expect(state.locations).toEqual([]);
     expect(state.runs).toEqual([]);
   });

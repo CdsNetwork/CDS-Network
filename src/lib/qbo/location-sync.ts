@@ -37,7 +37,7 @@ import { locationSiteNumber, siteNumberOf, type QboAddress, type QboCustomerReco
 export type QboSiteRecord = QboCustomerRecord & { ShipAddr?: QboAddress & { Id?: string } };
 
 /** An active portal customer and the QuickBooks customer it is linked to (qbo_customer_map). */
-export type LinkedPortalCustomer = { customerId: string; qboCustomerId: string };
+export type LinkedPortalCustomer = { customerId: string; qboCustomerId: string; name?: string };
 
 /** A portal location (active or not) of a linked customer. */
 export type PortalLocationRow = {
@@ -67,9 +67,20 @@ export type NewLocation = {
 };
 
 export type PlannedLocationLink = { locationId: string; customerId: string; code: string; qboCustomerId: string; qboCustomerName: string };
-export type LocationSkipReason = "parent_not_found" | "several_portal_customers";
+/**
+ * parent_not_found: the linked QuickBooks customer is missing or inactive.
+ * several_portal_customers: the site belongs to two linked customers at the same distance.
+ * parent_is_site: a QuickBooks customer under a site (its parent has a site number or is linked
+ *   to a location), for example "Parent:RYDER - 138-HOUSTON:0138815450".
+ * parent_has_sub_customers: a top-level "<Parent> - X" of a linked customer that has
+ *   sub-customers (only its sub-customers are its sites).
+ */
+export type LocationSkipReason = "parent_not_found" | "several_portal_customers" | "parent_is_site" | "parent_has_sub_customers";
 /** For parent_not_found, qboCustomerId is the linked QuickBooks id and name the portal customer id. */
-export type LocationSkipped = { qboCustomerId: string; name: string; reason: LocationSkipReason };
+export type LocationSkipped = { qboCustomerId: string; name: string; reason: LocationSkipReason; customerId?: string };
+
+/** One portal customer's share of the plan (for the dry-run review). */
+export type LocationSyncSummary = { customerId: string; name?: string; created: number; linked: number; unchanged: number; skipped: number };
 
 export type LocationSyncPlan = {
   creates: NewLocation[];
@@ -77,6 +88,7 @@ export type LocationSyncPlan = {
   skipped: LocationSkipped[];
   /** Sites already linked to a location. */
   unchanged: number;
+  summary: LocationSyncSummary[];
 };
 
 export type LocationSyncInput = {
@@ -194,71 +206,167 @@ function narrow<T>(list: T[], wordsOf: (t: T) => Set<string>, hint: Set<string>)
   return named.length === 1 ? named[0] : null;
 }
 
-type Site = { c: QboSiteRecord; customerId: string; ownName: string; site: string | null };
+/**
+ * The first unique match over several ways of comparing, in order (a location's name before
+ * its city before its code: Ryder's "1083-YOUNGSVILLE" location is named "ACADIANA BOTTLING",
+ * so the site "RYDER - 1083-ACADIANA BOTTLING" wins over "Ryder - 1083-YOUNGSVILLE").
+ */
+function narrowInTurn<T>(list: T[], tries: { wordsOf: (t: T) => Set<string>; hint: Set<string> }[]): T | null {
+  if (list.length === 1) return list[0];
+  for (const t of tries) {
+    const found = narrow(list, t.wordsOf, t.hint);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** A name or code without case, spacing or punctuation: "Cedar-Falls" = "CEDAR FALLS". */
+const nameKey = (s: string | null | undefined) => (s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+type Site = { c: QboSiteRecord; customerId: string; ownName: string; site: string | null; parentName: string; ancestors: string[] };
+
+/**
+ * The keys a site without a number is matched on: its own name, the part after the first
+ * " - " ("Enterprise - Maspeth" -> "Maspeth"), and the name without the parent's name.
+ */
+function siteKeys(s: Site): Set<string> {
+  const keys = [s.ownName];
+  const dash = s.ownName.match(/^.*?(?:\s-\s?|\s?-\s)(.+)$/);
+  if (dash) keys.push(dash[1]);
+  const parent = s.parentName.trim();
+  if (parent && s.ownName.toUpperCase().startsWith(parent.toUpperCase())) keys.push(s.ownName.slice(parent.length).replace(/^\s*-?\s*/, ""));
+  return new Set(keys.map(nameKey).filter(Boolean));
+}
 
 export function planLocationSync(input: LocationSyncInput): LocationSyncPlan {
-  const plan: LocationSyncPlan = { creates: [], links: [], skipped: [], unchanged: 0 };
+  const plan: LocationSyncPlan = { creates: [], links: [], skipped: [], unchanged: 0, summary: [] };
   const active = input.qboCustomers.filter((c) => c.Active !== false);
   const byId = new Map(active.map((c) => [c.Id, c]));
   const linkedQboIds = new Set(input.customers.map((c) => c.qboCustomerId));
 
-  const parents: { customerId: string; parent: QboSiteRecord }[] = [];
+  const parents: { customerId: string; parent: QboSiteRecord; hasSubs: boolean }[] = [];
   for (const pc of input.customers) {
     const parent = byId.get(pc.qboCustomerId);
-    if (parent) parents.push({ customerId: pc.customerId, parent });
-    else plan.skipped.push({ qboCustomerId: pc.qboCustomerId, name: pc.customerId, reason: "parent_not_found" });
+    if (!parent) {
+      plan.skipped.push({ qboCustomerId: pc.qboCustomerId, name: pc.customerId, reason: "parent_not_found" });
+      continue;
+    }
+    const prefix = `${fold(fqn(parent))}:`;
+    parents.push({ customerId: pc.customerId, parent, hasSubs: active.some((c) => fold(fqn(c)).startsWith(prefix)) });
   }
 
   // Each QuickBooks customer is a site of at most one portal customer: the closest parent.
+  // A top-level "<Parent> - X" counts only for a parent without sub-customers (Torque by Ryder).
   const sites: Site[] = [];
   for (const c of [...active].sort((a, b) => a.Id.localeCompare(b.Id, "en", { numeric: true }))) {
     if (linkedQboIds.has(c.Id)) continue;
-    let best: { score: number; entries: { customerId: string; ownName: string }[] } | null = null;
-    for (const { customerId, parent } of parents) {
+    type Entry = { customerId: string; ownName: string; parent: QboSiteRecord };
+    let best: { score: number; entries: Entry[] } | null = null;
+    let blockedBy: string | null = null;
+    for (const { customerId, parent, hasSubs } of parents) {
       const rel = siteRelation(c, parent);
       if (!rel) continue;
+      if (rel.kind === "prefix" && hasSubs) {
+        blockedBy ??= customerId;
+        continue;
+      }
       const score = rel.kind === "sub" ? depthBelow(c, parent) : 10_000 - fold(parent.DisplayName).length;
-      if (!best || score < best.score) best = { score, entries: [{ customerId, ownName: rel.ownName }] };
-      else if (score === best.score && !best.entries.some((e) => e.customerId === customerId)) best.entries.push({ customerId, ownName: rel.ownName });
+      const entry = { customerId, ownName: rel.ownName, parent };
+      if (!best || score < best.score) best = { score, entries: [entry] };
+      else if (score === best.score && !best.entries.some((e) => e.customerId === customerId)) best.entries.push(entry);
     }
-    if (!best) continue;
+    if (!best) {
+      if (blockedBy) plan.skipped.push({ qboCustomerId: c.Id, name: qboCustomerLabel(c), reason: "parent_has_sub_customers", customerId: blockedBy });
+      continue;
+    }
     if (best.entries.length > 1) {
       plan.skipped.push({ qboCustomerId: c.Id, name: qboCustomerLabel(c), reason: "several_portal_customers" });
       continue;
     }
-    const { customerId, ownName } = best.entries[0];
-    sites.push({ c, customerId, ownName, site: siteNumberOf(ownName) });
+    const { customerId, ownName, parent } = best.entries[0];
+    // The QuickBooks customers between the linked parent and this one ("Parent:Site:Child" -> "Parent:Site").
+    const parts = fqn(c).split(":");
+    const depth = fqn(parent).split(":").length;
+    const ancestors: string[] = [];
+    for (let n = depth + 1; n < parts.length; n++) ancestors.push(fold(parts.slice(0, n).join(":")));
+    const site: Site = { c, customerId, ownName, site: siteNumberOf(ownName), parentName: parent.DisplayName, ancestors };
+    // Under a site with a site number: not a site of its own.
+    if (parts.slice(depth, -1).some((p) => siteNumberOf(p))) {
+      plan.skipped.push({ qboCustomerId: c.Id, name: qboCustomerLabel(c), reason: "parent_is_site", customerId });
+      continue;
+    }
+    sites.push(site);
   }
 
-  // a. Already linked.
+  // a. Already linked. A QuickBooks customer under a site linked to a location is skipped.
   const linkedPairs = new Set(input.locations.filter((l) => l.qboCustomerId).map((l) => `${l.customerId}|${l.qboCustomerId}`));
-  const open = sites.filter((s) => {
-    if (!linkedPairs.has(`${s.customerId}|${s.c.Id}`)) return true;
-    plan.unchanged++;
+  const linkedFqns = new Set<string>();
+  const open: Site[] = [];
+  for (const s of sites) {
+    if (linkedPairs.has(`${s.customerId}|${s.c.Id}`)) {
+      plan.unchanged++;
+      linkedFqns.add(fold(fqn(s.c)));
+    } else open.push(s);
+  }
+  const underLinked = (s: Site) => s.ancestors.some((a) => linkedFqns.has(a));
+  const skipUnder = (s: Site) =>
+    plan.skipped.push({ qboCustomerId: s.c.Id, name: qboCustomerLabel(s.c), reason: "parent_is_site", customerId: s.customerId });
+  const candidates = open.filter((s) => {
+    if (!underLinked(s)) return true;
+    skipUnder(s);
     return false;
   });
 
-  // b. Link by site number: each site picks its location, each location its site.
+  // b. Link: each site picks its location, each location its site.
+  //    With a site number: the unlinked locations with that number.
+  //    Without one: the unlinked location with the same name or code, else the one unlinked
+  //    location without a number in the site's city.
   const unlinked = input.locations.filter((l) => !l.qboCustomerId);
   const siteWords = (s: Site) => words(s.ownName);
-  const locWords = (l: PortalLocationRow) => words(l.name, l.city);
+  const byName = (l: PortalLocationRow) => words(l.name);
+  const byCity = (l: PortalLocationRow) => words(l.city);
+  const byCode = (l: PortalLocationRow) => words(l.code);
   const choice = new Map<Site, PortalLocationRow>();
-  for (const s of open) {
-    if (!s.site) continue;
-    const candidates = unlinked.filter((l) => l.customerId === s.customerId && locationSiteNumber(l.locationNumber, l.code) === s.site);
-    if (!candidates.length) continue;
-    const picked = narrow(candidates, locWords, siteWords(s));
-    if (picked) choice.set(s, picked);
+  for (const s of candidates) {
+    const mine = unlinked.filter((l) => l.customerId === s.customerId);
+    if (s.site) {
+      const bySite = mine.filter((l) => locationSiteNumber(l.locationNumber, l.code) === s.site);
+      if (!bySite.length) continue;
+      const hint = siteWords(s);
+      const picked = narrowInTurn(bySite, [byName, byCity, byCode].map((wordsOf) => ({ wordsOf, hint })));
+      if (picked) choice.set(s, picked);
+      continue;
+    }
+    const keys = siteKeys(s);
+    const named = mine.filter((l) => keys.has(nameKey(l.name)) || keys.has(nameKey(l.code)));
+    if (named.length === 1) {
+      choice.set(s, named[0]);
+      continue;
+    }
+    if (named.length > 1) continue;
+    const cities = new Set([nameKey(siteAddress(s.c).city), ...keys].filter(Boolean));
+    const inCity = mine.filter((l) => !locationSiteNumber(l.locationNumber, l.code) && l.city && cities.has(nameKey(l.city)));
+    if (inCity.length === 1) choice.set(s, inCity[0]);
   }
   const claimants = new Map<string, Site[]>();
   for (const [s, l] of choice) claimants.set(l.id, [...(claimants.get(l.id) ?? []), s]);
   const linkedSites = new Set<Site>();
   for (const [locationId, list] of claimants) {
     const l = unlinked.find((x) => x.id === locationId)!;
-    const winner = narrow(list, siteWords, locWords(l));
+    const winner = narrowInTurn(list, [words(l.name), words(l.city), words(l.code)].map((hint) => ({ wordsOf: siteWords, hint })));
     if (!winner) continue;
     linkedSites.add(winner);
+    linkedFqns.add(fold(fqn(winner.c)));
     plan.links.push({ locationId: l.id, customerId: l.customerId, code: l.code, qboCustomerId: winner.c.Id, qboCustomerName: qboCustomerLabel(winner.c) });
+  }
+  // A site under one linked in this run is not a site of its own either.
+  for (const s of candidates) {
+    if (!underLinked(s)) continue;
+    if (linkedSites.has(s)) {
+      linkedSites.delete(s);
+      plan.links = plan.links.filter((x) => x.qboCustomerId !== s.c.Id);
+    }
+    skipUnder(s);
   }
 
   // c. Create the rest, with a code unique per customer.
@@ -271,8 +379,8 @@ export function planLocationSync(input: LocationSyncInput): LocationSyncPlan {
     }
     return set;
   };
-  for (const s of open) {
-    if (linkedSites.has(s)) continue;
+  for (const s of candidates) {
+    if (linkedSites.has(s) || underLinked(s)) continue;
     const address = siteAddress(s.c);
     const base = locationCode({ site: s.site, city: address.city, ownName: s.ownName, qboId: s.c.Id });
     const used = codes(s.customerId);
@@ -289,6 +397,17 @@ export function planLocationSync(input: LocationSyncInput): LocationSyncPlan {
       qbo_customer_name: qboCustomerLabel(s.c),
     });
   }
+
+  const unchangedBy = new Map<string, number>();
+  for (const s of sites) if (linkedPairs.has(`${s.customerId}|${s.c.Id}`)) unchangedBy.set(s.customerId, (unchangedBy.get(s.customerId) ?? 0) + 1);
+  plan.summary = input.customers.map((c) => ({
+    customerId: c.customerId,
+    ...(c.name ? { name: c.name } : {}),
+    created: plan.creates.filter((x) => x.customer_id === c.customerId).length,
+    linked: plan.links.filter((x) => x.customerId === c.customerId).length,
+    unchanged: unchangedBy.get(c.customerId) ?? 0,
+    skipped: plan.skipped.filter((x) => x.customerId === c.customerId || (x.reason === "parent_not_found" && x.name === c.customerId)).length,
+  }));
   return plan;
 }
 
@@ -341,7 +460,17 @@ export type LocationSyncDeps = {
 
 export type LocationSyncResult =
   | { status: "skipped"; reason: string }
-  | { status: "dry_run"; created: number; linked: number; skipped: number; plan: LocationSyncPlan }
+  | {
+      status: "dry_run";
+      created: number;
+      linked: number;
+      skipped: number;
+      /** Per portal customer, for the review. */
+      summary: LocationSyncSummary[];
+      /** Every skipped QuickBooks customer with its reason. */
+      skips: LocationSkipped[];
+      plan: LocationSyncPlan;
+    }
   | { status: "ok" | "failed"; created: number; linked: number; skipped: number; error?: string };
 
 const DETAIL_MAX = 200;
@@ -372,13 +501,21 @@ export async function runLocationSync(
 
   if (options.dryRun) {
     const plan = planLocationSync({ qboCustomers, ...(await deps.loadPortal()) });
-    return { status: "dry_run", created: plan.creates.length, linked: plan.links.length, skipped: plan.skipped.length, plan };
+    return {
+      status: "dry_run",
+      created: plan.creates.length,
+      linked: plan.links.length,
+      skipped: plan.skipped.length,
+      summary: plan.summary,
+      skips: plan.skipped,
+      plan,
+    };
   }
 
   const errors: string[] = [];
   const created: { code: string; qbo_customer_id: string }[] = [];
   const linked: { code: string; qbo_customer_id: string }[] = [];
-  let plan: LocationSyncPlan = { creates: [], links: [], skipped: [], unchanged: 0 };
+  let plan: LocationSyncPlan = { creates: [], links: [], skipped: [], unchanged: 0, summary: [] };
   try {
     plan = planLocationSync({ qboCustomers, ...(await deps.loadPortal()) });
     for (const l of plan.links) {
