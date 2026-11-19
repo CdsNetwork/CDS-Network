@@ -2,7 +2,17 @@ import Link from "next/link";
 import { ActionForm } from "@/components/cds-admin/ActionForm";
 import styles from "@/components/cds-admin/cds-admin.module.css";
 import { createClient } from "@/lib/supabase/server";
-import { inviteShopLogin, saveShop, setProfileActive, setShopActive } from "./actions";
+import {
+  createShopUsernameLogin,
+  inviteShopLogin,
+  saveShop,
+  sendShopPasswordLink,
+  setProfileActive,
+  setShopActive,
+  setShopRecoveryEmail,
+} from "./actions";
+import { suggestUsername, USERNAME_LOGINS_OFF } from "@/lib/shop-login";
+import { usernameLoginsOn } from "@/lib/shop-login-setting";
 import { wrapCell } from "@/lib/format";
 import { fetchAllSettled } from "@/lib/supabase/fetch-all";
 
@@ -23,7 +33,16 @@ export type Shop = {
 };
 type ShopRow = Shop & { customer_locations: { count: number }[] | null };
 export type ShopFilters = { q: string; kind: string; status: string };
-type Login = { id: string; full_name: string; email: string; active: boolean; affiliate_id: string };
+type Login = {
+  id: string;
+  full_name: string;
+  email: string;
+  active: boolean;
+  affiliate_id: string;
+  /** Username logins (shops whose locations share an email): email is an internal address. */
+  username: string | null;
+  recovery_email: string | null;
+};
 type Contact = { affiliate_id: string; email: string };
 
 export const SHOP_KIND_LABEL: Record<string, string> = {
@@ -34,7 +53,7 @@ export const SHOP_KIND_LABEL: Record<string, string> = {
 
 export async function ShopsTab({ edit, filters }: { edit?: string; filters: ShopFilters }) {
   const supabase = await createClient();
-  const [{ data: shopData, error }, { data: loginData }, { data: contactData }] = await Promise.all([
+  const [{ data: shopData, error }, { data: loginData }, { data: contactData }, usernameLogins] = await Promise.all([
     supabase
       .from("affiliates")
       .select(
@@ -45,7 +64,7 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
     fetchAllSettled((from, to) =>
       supabase
         .from("profiles")
-        .select("id, full_name, email, active, affiliate_id")
+        .select("id, full_name, email, active, affiliate_id, username, recovery_email")
         .eq("kind", "shop")
         .order("active", { ascending: false })
         .order("id")
@@ -54,6 +73,8 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
     fetchAllSettled((from, to) =>
       supabase.from("affiliate_contacts").select("affiliate_id, email").eq("receives_dispatch", true).order("email").order("id").range(from, to),
     ),
+    // Off until CDS turns it on (app_settings shop_username_logins).
+    usernameLoginsOn(supabase),
   ]);
   const shops = (shopData ?? []) as ShopRow[];
   const logins = (loginData ?? []) as Login[];
@@ -71,7 +92,10 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
     if (filters.status === "active" && !s.active) return false;
     if (filters.status === "inactive" && s.active) return false;
     if (!words.length) return true;
-    const emails = [...contacts.filter((c) => c.affiliate_id === s.id).map((c) => c.email), ...loginsFor(s.id).map((l) => l.email)];
+    const emails = [
+      ...contacts.filter((c) => c.affiliate_id === s.id).map((c) => c.email),
+      ...loginsFor(s.id).flatMap((l) => (l.username ? [l.username, l.recovery_email ?? ""] : [l.email])),
+    ];
     const text = [s.short_code, s.display_name, s.city ?? "", s.region ?? "", ...emails].join(" ").toLowerCase();
     return words.every((w) => text.includes(w));
   });
@@ -80,7 +104,12 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
   return (
     <>
       {editing ? (
-        <ShopEditor shop={editing} dispatchEmail={dispatchFor(editing.id)} logins={loginsFor(editing.id)} />
+        <ShopEditor
+          shop={editing}
+          dispatchEmail={dispatchFor(editing.id)}
+          logins={loginsFor(editing.id)}
+          usernameLogins={usernameLogins}
+        />
       ) : (
         <details className="section" open={edit === "new"}>
           <summary style={{ cursor: "pointer", fontWeight: 750 }}>+ Add shop</summary>
@@ -182,7 +211,18 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
                       <span className="small">0</span>
                     )}
                   </td>
-                  <td className={wrapCell(login?.email)}>{login ? login.email : <span className="small">No login</span>}</td>
+                  <td className={wrapCell(login ? (login.username ?? login.email) : undefined)}>
+                    {!login ? (
+                      <span className="small">No login</span>
+                    ) : login.username ? (
+                      <>
+                        {login.username}
+                        <div className="small">Recovery: {login.recovery_email}</div>
+                      </>
+                    ) : (
+                      login.email
+                    )}
+                  </td>
                   <td>{s.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}</td>
                   <td>
                     <Link className="link small" href={`/cds/admin?tab=shops&edit=${s.id}`}>
@@ -216,7 +256,18 @@ function Capabilities({ shop }: { shop: Shop }) {
   );
 }
 
-function ShopEditor({ shop, dispatchEmail, logins }: { shop: Shop; dispatchEmail: string; logins: Login[] }) {
+function ShopEditor({
+  shop,
+  dispatchEmail,
+  logins,
+  usernameLogins,
+}: {
+  shop: Shop;
+  dispatchEmail: string;
+  logins: Login[];
+  /** The shop_username_logins switch: off hides creating username logins and their password links. */
+  usernameLogins: boolean;
+}) {
   const activeLogin = logins.find((l) => l.active);
   return (
     <div className="section">
@@ -237,22 +288,107 @@ function ShopEditor({ shop, dispatchEmail, logins }: { shop: Shop; dispatchEmail
           <b>Shop login</b>
           <p className="small">One login per shop. The shop sees only its own released jobs and its pay, never customer prices.</p>
           {logins.map((l) => (
-            <div key={l.id} className="summaryrow" style={{ alignItems: "center" }}>
-              <span>
-                <b>{l.full_name}</b> <span className="small">{l.email}</span>{" "}
-                {l.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}
-              </span>
-              <ActionForm
-                key={`${l.id}-${l.active}`}
-                action={setProfileActive.bind(null, l.id, !l.active)}
-                submitLabel={l.active ? "Deactivate" : "Reactivate"}
-                pendingLabel="..."
-                submitClassName={`btn btn-small ${l.active ? "btn-danger" : "btn-secondary"}`}
-              />
+            <div key={l.id} style={{ marginBottom: 10 }}>
+              <div className="summaryrow" style={{ alignItems: "center" }}>
+                <span>
+                  {l.username ? (
+                    <>
+                      <span className="small">Username</span> <b>{l.username}</b>
+                    </>
+                  ) : (
+                    <>
+                      <b>{l.full_name}</b> <span className="small">{l.email}</span>
+                    </>
+                  )}{" "}
+                  {l.active ? <span className="tag green">Active</span> : <span className="tag">Inactive</span>}
+                </span>
+                <span className="row" style={{ gap: 6 }}>
+                  {l.username && l.active && usernameLogins && (
+                    <ActionForm
+                      action={sendShopPasswordLink.bind(null, l.id)}
+                      submitLabel="Email password link"
+                      pendingLabel="Sending..."
+                      submitClassName="btn btn-small btn-secondary"
+                      confirmText={`Email a link to set a new password for ${l.username} to ${l.recovery_email}?`}
+                    />
+                  )}
+                  <ActionForm
+                    key={`${l.id}-${l.active}`}
+                    action={setProfileActive.bind(null, l.id, !l.active)}
+                    submitLabel={l.active ? "Deactivate" : "Reactivate"}
+                    pendingLabel="..."
+                    submitClassName={`btn btn-small ${l.active ? "btn-danger" : "btn-secondary"}`}
+                  />
+                </span>
+              </div>
+              {l.username && !usernameLogins && <p className="small">{USERNAME_LOGINS_OFF}</p>}
+              {l.username && (
+                <ActionForm
+                  key={`${l.id}-${l.recovery_email}`}
+                  action={setShopRecoveryEmail.bind(null, l.id)}
+                  submitLabel="Save"
+                  submitClassName="btn btn-small btn-secondary"
+                  inline
+                >
+                  <label className="small" htmlFor={`recovery-${l.id}`} style={{ alignSelf: "center", whiteSpace: "nowrap" }}>
+                    Recovery email
+                  </label>
+                  <input
+                    className="input"
+                    id={`recovery-${l.id}`}
+                    name="recovery_email"
+                    type="email"
+                    required
+                    autoComplete="off"
+                    defaultValue={l.recovery_email ?? ""}
+                  />
+                </ActionForm>
+              )}
             </div>
           ))}
           {!activeLogin && (
             <div style={{ marginTop: 10 }}>
+              {usernameLogins && (
+                <>
+                  <b className="small">Create login with username</b>
+                  <p className="small" style={{ marginTop: 2 }}>
+                    For shops whose locations share one email. The shop signs in with the username. The portal emails a link to
+                    set the password to the recovery email, which several locations may share. CDS never sees the password.
+                  </p>
+                  <ActionForm
+                    action={createShopUsernameLogin.bind(null, shop.id)}
+                    submitLabel="Create login"
+                    pendingLabel="Creating..."
+                    resetOnSuccess
+                  >
+                    <div className="field">
+                      <label htmlFor="login-username">
+                        Username <span className="req">*</span>
+                      </label>
+                      <input
+                        className="input"
+                        id="login-username"
+                        name="username"
+                        required
+                        minLength={3}
+                        maxLength={60}
+                        autoComplete="off"
+                        defaultValue={suggestUsername(shop.display_name)}
+                      />
+                      <p className="small" style={{ margin: "4px 0 0" }}>Letters, digits, spaces, dots, dashes and underscores.</p>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="login-recovery">
+                        Recovery email <span className="req">*</span>
+                      </label>
+                      <input className="input" id="login-recovery" name="recovery_email" type="email" required autoComplete="off" defaultValue={dispatchEmail} />
+                    </div>
+                  </ActionForm>
+                  <b className="small" style={{ display: "block", marginTop: 14 }}>
+                    Or invite with the shop&apos;s own email
+                  </b>
+                </>
+              )}
               <ActionForm action={inviteShopLogin.bind(null, shop.id)} submitLabel="Invite shop login" pendingLabel="Sending..." resetOnSuccess>
                 <div className="field">
                   <label htmlFor="login-name">

@@ -1,5 +1,6 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import type { ActionState } from "@/components/cds-admin/ActionForm";
@@ -8,6 +9,9 @@ import { requireCds } from "@/lib/auth";
 import { FULFILLMENT_LABEL } from "@/lib/format";
 import { LOCATION_SYNC_OFF } from "@/lib/qbo/location-sync";
 import { syncLocationsFromQuickBooks } from "@/lib/qbo/location-sync-server";
+import { internalLoginEmail, isInternalLoginEmail, normalizeUsername, USERNAME_LOGINS_OFF, usernameError } from "@/lib/shop-login";
+import { sendShopPasswordEmail } from "@/lib/shop-login-server";
+import { usernameLoginsOn } from "@/lib/shop-login-setting";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -39,7 +43,7 @@ async function invite(
   affiliateId: string | null,
 ): Promise<ActionState> {
   if (!fullName) return { error: "Enter the person's full name." };
-  if (!EMAIL.test(email)) return { error: "Enter a valid email address." };
+  if (!EMAIL.test(email) || isInternalLoginEmail(email)) return { error: "Enter a valid email address." };
 
   const supabase = await createClient();
   const { data: existing } = await supabase.from("profiles").select("id").eq("email", email).maybeSingle();
@@ -171,16 +175,140 @@ export async function setShopActive(
 
 export async function inviteShopLogin(affiliateId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
   await requireCds();
+  const existing = await activeShopLogin(affiliateId);
+  if (existing) return { error: `This shop already has a login (${existing}).` };
+  return invite(text(formData, "full_name"), text(formData, "email").toLowerCase(), "shop", affiliateId);
+}
+
+/** The username or email of the shop's active login, or null when it has none. */
+async function activeShopLogin(affiliateId: string): Promise<string | null> {
   const supabase = await createClient();
-  const { data: existing } = await supabase
+  const { data } = await supabase
     .from("profiles")
-    .select("email")
+    .select("email, username")
     .eq("kind", "shop")
     .eq("affiliate_id", affiliateId)
     .eq("active", true)
     .maybeSingle();
-  if (existing) return { error: `This shop already has a login (${existing.email}).` };
-  return invite(text(formData, "full_name"), text(formData, "email").toLowerCase(), "shop", affiliateId);
+  return data ? String(data.username ?? data.email) : null;
+}
+
+const USERNAME_TAKEN = "That username is already used by another login (perhaps a deactivated one). Choose another.";
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
+
+function recoveryEmailError(email: string): string | null {
+  return EMAIL.test(email) && !isInternalLoginEmail(email) ? null : "Enter a valid recovery email.";
+}
+
+/**
+ * A username login for a shop (Ashley, 2026-11-19; src/lib/shop-login.ts): for shops whose
+ * locations share one email. The auth user gets an internal login.invalid address and a long
+ * random password nobody sees; the portal emails a one-time link to the recovery email, where
+ * the shop chooses its own password. CDS never knows it. Refused while username logins are off
+ * (app_settings shop_username_logins).
+ */
+export async function createShopUsernameLogin(affiliateId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  if (!(await usernameLoginsOn(await createClient()))) return { error: USERNAME_LOGINS_OFF };
+  const username = normalizeUsername(text(formData, "username"));
+  const recoveryEmail = text(formData, "recovery_email").toLowerCase();
+  const badName = usernameError(username);
+  if (badName) return { error: badName };
+  const badEmail = recoveryEmailError(recoveryEmail);
+  if (badEmail) return { error: badEmail };
+
+  const supabase = await createClient();
+  const { data: shop } = await supabase.from("affiliates").select("id, short_code, display_name").eq("id", affiliateId).maybeSingle();
+  if (!shop) return { error: "Shop not found." };
+  const existing = await activeShopLogin(affiliateId);
+  if (existing) return { error: `This shop already has a login (${existing}). Deactivate it first.` };
+  // citext: matched in any case. The unique index catches one taken at the same moment.
+  const { data: taken } = await supabase.from("profiles").select("id").eq("username", username).maybeSingle();
+  if (taken) return { error: USERNAME_TAKEN };
+
+  const admin = createAdminClient();
+  const email = internalLoginEmail(String(shop.short_code), randomBytes(8).toString("hex"));
+  const { data, error } = await admin.auth.admin.createUser({
+    email,
+    password: randomBytes(32).toString("base64url"),
+    email_confirm: true,
+    user_metadata: { full_name: username },
+  });
+  if (error || !data.user) return { error: "The login could not be created. Try again." };
+
+  const { error: profileError } = await supabase.from("profiles").insert({
+    id: data.user.id,
+    full_name: username,
+    email,
+    kind: "shop",
+    affiliate_id: affiliateId,
+    username,
+    recovery_email: recoveryEmail,
+  });
+  if (profileError) {
+    await admin.auth.admin.deleteUser(data.user.id);
+    if (profileError.code === "23505") {
+      return { error: /username/i.test(profileError.message ?? "") ? USERNAME_TAKEN : "This shop already has an active login. Deactivate it first." };
+    }
+    return { error: dbMessage(profileError, "The login could not be set up. Try again.") };
+  }
+
+  try {
+    await sendShopPasswordEmail(admin, { email, username, recoveryEmail, shopName: String(shop.display_name) }, "welcome");
+  } catch (e) {
+    console.error(`Shop login ${data.user.id}: set password email failed: ${errorText(e)}`);
+    revalidatePath("/cds/admin");
+    return {
+      error: `Login ${username} was created, but the email to ${recoveryEmail} could not be sent (${errorText(e)}). Use "Email password link" to try again.`,
+    };
+  }
+  return done(`Login ${username} created. A link to set its password was sent to ${recoveryEmail}.`);
+}
+
+/** Emails a new one-time password link of a username login to its recovery email. */
+export async function sendShopPasswordLink(profileId: string): Promise<ActionState> {
+  await requireCds();
+  const supabase = await createClient();
+  if (!(await usernameLoginsOn(supabase))) return { error: USERNAME_LOGINS_OFF };
+  const { data: p } = await supabase
+    .from("profiles")
+    .select("id, email, username, recovery_email, active, affiliates(display_name)")
+    .eq("id", profileId)
+    .maybeSingle();
+  if (!p?.username || !p.recovery_email) return { error: "This login signs in with its own email: the shop can use Forgot password." };
+  if (!p.active) return { error: "Reactivate the login first." };
+  const shop = p.affiliates as unknown as { display_name: string } | null;
+  const recoveryEmail = String(p.recovery_email);
+  try {
+    await sendShopPasswordEmail(
+      createAdminClient(),
+      { email: String(p.email), username: String(p.username), recoveryEmail, shopName: shop?.display_name ?? null },
+      "reset",
+    );
+  } catch (e) {
+    console.error(`Shop login ${profileId}: password email failed: ${errorText(e)}`);
+    return { error: `The email could not be sent (${errorText(e)}). Try again.` };
+  }
+  return done(`A password link for ${String(p.username)} was sent to ${recoveryEmail}.`);
+}
+
+/** Changes the recovery email of a username login. */
+export async function setShopRecoveryEmail(profileId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  const recoveryEmail = text(formData, "recovery_email").toLowerCase();
+  const bad = recoveryEmailError(recoveryEmail);
+  if (bad) return { error: bad };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ recovery_email: recoveryEmail })
+    .eq("id", profileId)
+    .not("username", "is", null)
+    .select("id");
+  if (error) return { error: dbMessage(error) };
+  if (!data?.length) return { error: "Only username logins have a recovery email." };
+  return done("Recovery email saved.");
 }
 
 // ---------------------------------------------------------------- locations
