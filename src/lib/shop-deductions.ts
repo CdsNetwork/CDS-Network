@@ -14,6 +14,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { money } from "@/lib/format";
+import type { BillState } from "@/lib/qbo/bill";
 
 export type ShopDeduction = {
   kind: "filter_shipping";
@@ -76,4 +77,22 @@ export function shopMoney(amount: number | null): string {
 export function deductionLabel(d: ShopDeduction): string {
   const parts = d.filters === 1 ? "1 part (filter or EGR cooler)" : `${d.filters} parts (filters or EGR coolers)`;
   return `Shared shipping deduction: ${parts} x ${money(Math.abs(d.unit_amount))} round trip`;
+}
+
+/**
+ * "Shipping credit from shop" (work_order_internal.shop_shipping_credit, CDS only,
+ * 20261119210000_shop_shipping_credit_toggle.sql): CDS turns the credit off on orders where
+ * the shop gives none; the view then has no deduction for the order.
+ */
+export const SHIPPING_CREDIT_HELP = "Turn off when the shop does not give a shipping credit on this order, for example NOx sensors.";
+
+/**
+ * Why the flag cannot change now, or null when it can: the shop's bill is in QuickBooks
+ * (work_order_internal.qb_bill_id, or the bill record) or is being created. The database
+ * refuses the same (private.shop_shipping_credit_locked).
+ */
+export function shippingCreditLock(qbBillId: string | null, bill: BillState | null): string | null {
+  if (qbBillId || bill?.kind === "created") return "Locked: the shop's bill is in QuickBooks.";
+  if (bill?.kind === "creating") return "Locked while the shop's bill is being created. Refresh in a moment.";
+  return null;
 }

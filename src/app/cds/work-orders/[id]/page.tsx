@@ -68,7 +68,7 @@ import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteConfirmText } from "@/lib/work-order-delete";
 import { createClient } from "@/lib/supabase/server";
-import { SHOP_DEDUCTION_COLUMNS, deductionLabel, shopPayable, toShopDeductions } from "@/lib/shop-deductions";
+import { SHIPPING_CREDIT_HELP, SHOP_DEDUCTION_COLUMNS, deductionLabel, shippingCreditLock, shopPayable, toShopDeductions } from "@/lib/shop-deductions";
 import { automaticShippingText, CUSTOMER_SHIPPING_COLUMNS, toCustomerShipping } from "@/lib/customer-shipping";
 import { LabelPanel, type LabelView } from "@/components/shipping/LabelPanel";
 import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/shipstation/views";
@@ -103,6 +103,7 @@ import {
   removeShipment,
   voidLabelAndRemoveShipment,
   setAttachmentShopVisible,
+  setShopShippingCredit,
   setStatus,
   linkWorkOrder,
   updateTax,
@@ -172,6 +173,8 @@ type Internal = {
   qb_invoice_number: string | null;
   qb_tax_total: number | string | null;
   qb_total: number | string | null;
+  qb_bill_id: string | null;
+  shop_shipping_credit: boolean;
   internal_status: string | null;
   profiles: MaybeOne<{ full_name: string }>;
 };
@@ -606,7 +609,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       supabase
         .from("work_order_internal")
         .select(
-          "source, review_reason, routing_notes, internal_notes, order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, qb_invoice_id, qb_invoice_number, qb_tax_total, qb_total, internal_status, profiles(full_name)",
+          "source, review_reason, routing_notes, internal_notes, order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, qb_invoice_id, qb_invoice_number, qb_tax_total, qb_total, qb_bill_id, shop_shipping_credit, internal_status, profiles(full_name)",
         )
         .eq("work_order_id", id)
         .maybeSingle(),
@@ -790,6 +793,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const shop = one(wo.affiliates);
   // CDS's in-house shop: the shop column is what CDS itself paid (CDS cost), not a shop rate.
   const inHouse = Boolean(shop?.is_in_house);
+  // "Shipping credit from shop" (CDS only): read-only once the shop's bill is in QuickBooks.
+  const creditLock = shippingCreditLock(internal?.qb_bill_id ?? null, shopBill);
   const rateLabel = inHouse ? "CDS Cost" : "Shop Rate";
   const location = one(wo.customer_locations);
   const inReview = REVIEW_STATUSES.includes(wo.status);
@@ -1634,6 +1639,35 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 </tbody>
               </table>
             </div>
+            {internal && shop && !inHouse && (
+              <div style={{ marginTop: 8 }}>
+                {creditLock ? (
+                  <p className="small">
+                    <b>Shipping credit from shop: {internal.shop_shipping_credit ? "on" : "off"}.</b> {creditLock}
+                  </p>
+                ) : (
+                  <ActionForm
+                    action={setShopShippingCredit.bind(null, wo.id)}
+                    submitLabel="Save"
+                    buttonClass="btn btn-secondary btn-small"
+                    inline
+                  >
+                    <div className="field">
+                      <label className="row" style={{ gap: 8, fontWeight: 600 }}>
+                        <input
+                          type="checkbox"
+                          name="shop_shipping_credit"
+                          defaultChecked={internal.shop_shipping_credit}
+                          style={{ width: "auto" }}
+                        />{" "}
+                        Shipping credit from shop
+                      </label>
+                      <div className="small">{SHIPPING_CREDIT_HELP}</div>
+                    </div>
+                  </ActionForm>
+                )}
+              </div>
+            )}
             {!linesLocked ? (
               <ActionForm action={addLine.bind(null, wo.id)} submitLabel="+ Add Item" inline resetOnSuccess buttonClass="btn btn-secondary" className="summarybox" >
                 <div style={{ flex: "1 1 260px" }}>

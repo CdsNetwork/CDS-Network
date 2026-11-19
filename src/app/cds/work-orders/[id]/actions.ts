@@ -617,6 +617,44 @@ export async function setInternalStatus(woId: string, _prev: ActionState, formDa
   return done(woId, label ? `Internal status set to ${label}.` : "Internal status cleared.");
 }
 
+/**
+ * "Shipping credit from shop" (CDS only, work_order_internal.shop_shipping_credit): off, the
+ * order gets no $15 per part shipping deduction on the shop's bill. The database refuses the
+ * change once the shop's bill is in QuickBooks or while it is being created
+ * (20261119210000_shop_shipping_credit_toggle.sql).
+ */
+export async function setShopShippingCredit(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const on = formData.get("shop_shipping_credit") === "on";
+  const supabase = await createClient();
+  const { data: current, error: readError } = await supabase
+    .from("work_order_internal")
+    .select("shop_shipping_credit")
+    .eq("work_order_id", woId)
+    .maybeSingle();
+  if (readError) return { error: "The work order could not be read. Try again." };
+  if (!current) return { error: "Work order not found." };
+  const state = on ? "on" : "off";
+  if (current.shop_shipping_credit === on) return { ok: `Shipping credit from shop is ${state}.`, at: Date.now() };
+
+  const { data, error } = await supabase
+    .from("work_order_internal")
+    .update({ shop_shipping_credit: on })
+    .eq("work_order_id", woId)
+    .select("work_order_id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Work order not found." };
+  await supabase.from("work_order_events").insert({
+    work_order_id: woId,
+    actor_id: profile.id,
+    event_type: "edit",
+    message: `Shipping credit from shop turned ${state}`,
+    shop_visible: false,
+  });
+  return done(woId, `Shipping credit from shop turned ${state}.`);
+}
+
 /** A note the assigned shop sees too (work_order_notes); not the CDS-only internal notes. */
 export async function addNote(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
   const profile = await requireCds();
