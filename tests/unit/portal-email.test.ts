@@ -50,8 +50,8 @@ describe("buildPortalEmail", () => {
     expect(text).toContain("Shop: Enviromotive");
     expect(text).toContain("When: 2026-11-04 10:15 PT");
     expect(text).toContain("Shop invoice / reference: INV-5531");
-    expect(text).toContain(`https://cds-network-portal.vercel.app/cds/work-orders/${WO}`);
-    expect(html).toContain(`href="https://cds-network-portal.vercel.app/cds/work-orders/${WO}"`);
+    expect(text).toContain(`https://platform.cds.direct/cds/work-orders/${WO}`);
+    expect(html).toContain(`href="https://platform.cds.direct/cds/work-orders/${WO}"`);
     expect(html).toContain("First Student, Inc");
   });
 

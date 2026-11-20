@@ -53,7 +53,7 @@ describe("Acceptance email", () => {
     expect(text).toContain("Unit: 559102");
     expect(text).toContain("Shop: Enviromotive");
     expect(text).toContain("Pickup ETA / Window: 10:00 AM - 12:00 PM");
-    expect(text).toContain(`https://cds-network-portal.vercel.app/cds/work-orders/${WO}`);
+    expect(text).toContain(`https://platform.cds.direct/cds/work-orders/${WO}`);
     expect(html).toContain("Pickup ETA / Window");
     expect(`${text}${html}`).not.toMatch(/[\u2013\u2014]/);
   });

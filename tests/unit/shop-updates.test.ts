@@ -128,7 +128,7 @@ describe("Failure email", () => {
     expect(text).toContain("Component: DPF, part 2871891, serial SN-4471");
     expect(text).toContain("Result: Condemned");
     expect(text).toContain("Reason: Cracked <badly>");
-    expect(text).toContain(`https://cds-network-portal.vercel.app/cds/work-orders/${WO}`);
+    expect(text).toContain(`https://platform.cds.direct/cds/work-orders/${WO}`);
     expect(html).toContain("Cracked &lt;badly&gt;");
     expect(`${text}${html}`).not.toMatch(/[\u2013\u2014]/);
   });

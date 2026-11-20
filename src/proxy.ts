@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { legacyRedirect } from "@/lib/portal-host";
 
 // The webhooks have no session: the ShipStation webhook checks the ShipStation signature,
 // the email intake webhook checks INTAKE_WEBHOOK_TOKEN, the Resend intake webhook checks the
@@ -20,6 +21,9 @@ export const PUBLIC_PATHS = [
 
 /** Refreshes the Supabase session cookie and sends signed-out visitors to /login. */
 export async function proxy(request: NextRequest) {
+  const moved = legacyRedirect(request.headers.get("host"), request.method, request.nextUrl.pathname, request.nextUrl.search);
+  if (moved) return NextResponse.redirect(moved, 308);
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(

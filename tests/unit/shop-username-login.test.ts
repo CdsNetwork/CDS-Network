@@ -87,7 +87,7 @@ describe("internal login email", () => {
 describe("password link", () => {
   it("never takes the host from the request: an env setting, Vercel's own URL, or production", () => {
     expect(authLinkBase({ PORTAL_PUBLIC_URL: "https://portal.example/" })).toBe("https://portal.example");
-    expect(authLinkBase({ VERCEL_ENV: "production" })).toBe("https://cds-network-portal.vercel.app");
+    expect(authLinkBase({ VERCEL_ENV: "production" })).toBe("https://platform.cds.direct");
     expect(authLinkBase({ VERCEL_ENV: "preview", VERCEL_URL: "cds-x.vercel.app" })).toBe("https://cds-x.vercel.app");
     expect(authLinkBase({})).toBe("http://localhost:3000");
   });

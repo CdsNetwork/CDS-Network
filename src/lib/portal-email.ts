@@ -33,7 +33,7 @@ export const PORTAL_FROM = "CDS Portal <portal@in.cds.direct>";
 /** The portal's own sending domain: mail from it is never a request. */
 export const PORTAL_DOMAIN = "in.cds.direct";
 export const PORTAL_SUBJECT_PREFIX = "[Portal] ";
-export const PORTAL_BASE_URL = "https://cds-network-portal.vercel.app";
+export const PORTAL_BASE_URL = "https://platform.cds.direct";
 export const DEFAULT_PORTAL_EMAILS_TO = ["dispatch@cds.direct"];
 const RESEND_EMAILS_URL = "https://api.resend.com/emails";
 
