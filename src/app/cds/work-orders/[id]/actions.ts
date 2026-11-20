@@ -36,14 +36,12 @@ import { createClient } from "@/lib/supabase/server";
 import { qbInvoiceAmounts, type QbInvoiceAmounts } from "@/lib/tax";
 import {
   ATTACHMENT_BUCKET,
-  cdsCanDelete,
   checkFile,
   checkMeta,
   isUploadPathFor,
   storedNote,
   type DeclaredFile,
   type PrepareResult,
-  type Uploader,
   type UploadMeta,
 } from "@/lib/attachments";
 import { discardUnrecorded, signedUploadTarget, storedObject } from "@/lib/attachment-storage";
@@ -851,26 +849,20 @@ export async function setAttachmentShopVisible(woId: string, attachmentId: strin
   return done(woId, visible ? "The shop can now see this file." : "This file is now CDS only.");
 }
 
-/** Deletes a file CDS uploaded, and its stored object. Files a shop added stay. */
-export async function deleteCdsAttachment(woId: string, attachmentId: string): Promise<ActionState> {
+/**
+ * Removes any file on the order, CDS's or a shop's (public.cds_remove_attachment writes the
+ * history line), then its stored object.
+ */
+export async function removeCdsAttachment(woId: string, attachmentId: string): Promise<ActionState> {
   await requireCds();
   if (!isUuid(woId) || !isUuid(attachmentId)) return { error: "File not found." };
   const supabase = await createClient();
-  const { data: row } = await supabase
-    .from("attachments")
-    .select("id, storage_path, profiles(full_name, kind)")
-    .eq("id", attachmentId)
-    .eq("work_order_id", woId)
-    .maybeSingle();
-  if (!row) return { error: "File not found." };
-  const uploader = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles) as Uploader;
-  if (!cdsCanDelete(uploader)) return { error: "Only files CDS added can be deleted here." };
-  const { data, error } = await supabase.from("attachments").delete().eq("id", attachmentId).select("id");
+  const { data: path, error } = await supabase.rpc("cds_remove_attachment", { p_work_order: woId, p_attachment: attachmentId });
   if (error) return { error: error.message };
-  if (!data?.length) return { error: "File not found." };
   // The record is gone first, so a failed removal leaves only an unreachable object.
-  await supabase.storage.from(ATTACHMENT_BUCKET).remove([row.storage_path]);
-  return done(woId, "File deleted.");
+  const paths = storagePathsToRemove(woId, [typeof path === "string" ? path : null], []);
+  if (paths.length) await supabase.storage.from(ATTACHMENT_BUCKET).remove(paths);
+  return done(woId, "File removed.");
 }
 
 /** Misc. hardware and other items priced per line: the amount from the shop's invoice, billed as is. */

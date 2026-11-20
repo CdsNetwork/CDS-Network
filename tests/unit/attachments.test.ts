@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  cdsCanDelete,
+  cdsRemoveConfirm,
   checkFile,
   checkMeta,
   isUploadPathFor,
   MAX_UPLOAD_BYTES,
   precheckFile,
+  photoLeftFor,
   safeName,
+  shopCanRemove,
   storedNote,
   uploaderLabel,
   uploadPath,
@@ -81,7 +83,7 @@ describe("storedNote", () => {
   });
 });
 
-describe("uploaderLabel and cdsCanDelete", () => {
+describe("uploaderLabel", () => {
   it("names CDS staff, else the shop", () => {
     expect(uploaderLabel({ full_name: "Ashley", kind: "cds" }, null)).toBe("CDS (Ashley)");
     expect(uploaderLabel({ full_name: null, kind: "cds" }, "Shop A")).toBe("CDS");
@@ -90,9 +92,57 @@ describe("uploaderLabel and cdsCanDelete", () => {
     expect(uploaderLabel(null, "Shop A")).toBe("Shop A");
     expect(uploaderLabel(null, null)).toBe("-");
   });
-  it("lets CDS delete only files CDS staff added", () => {
-    expect(cdsCanDelete({ full_name: "Ashley", kind: "cds" })).toBe(true);
-    expect(cdsCanDelete({ full_name: "Shop", kind: "shop" })).toBe(false);
-    expect(cdsCanDelete(null)).toBe(false);
+});
+
+describe("shopCanRemove", () => {
+  const own = { fromCds: false, uploadedBy: UUID };
+  it("lets a shop remove its own upload while accepted, picked up or in process", () => {
+    for (const status of ["accepted", "picked_up", "in_process"]) expect(shopCanRemove(status, own), status).toBe(true);
+  });
+  it("not before acceptance, and not once the job is completed or later", () => {
+    for (const status of ["awaiting_acceptance", "completed", "delivered", "ready_to_invoice", "invoiced", "cancelled"]) {
+      expect(shopCanRemove(status, own), status).toBe(false);
+    }
+  });
+  it("never a CDS file or a file recorded without a person", () => {
+    expect(shopCanRemove("in_process", { fromCds: true, uploadedBy: UUID })).toBe(false);
+    expect(shopCanRemove("in_process", { fromCds: false, uploadedBy: null })).toBe(false);
+  });
+});
+
+describe("photoLeftFor and cdsRemoveConfirm", () => {
+  const dpf = { id: "c1", component_type: "DPF", result: "condemned", seq: 1 };
+  const egr = { id: "c2", component_type: "EGR", result: "condemned", seq: 2 };
+  const doc = { id: "c3", component_type: "DOC", result: "cleaned", seq: 3 };
+  const files = [
+    { id: "f1", component_id: "c1" },
+    { id: "f2", component_id: "c2" },
+    { id: "f3", component_id: "c3" },
+    { id: "f4", component_id: null },
+  ];
+  const comps = [dpf, egr, doc];
+
+  it("names the condemned DPF, DOC or SCR left without a photo on a completed order", () => {
+    for (const status of ["completed", "delivered", "ready_to_invoice", "invoiced"]) {
+      expect(photoLeftFor("f1", files, comps, status), status).toBe("DPF #1");
+    }
+    expect(photoLeftFor("f1", files, [{ ...dpf, component_type: "SCR" }], "completed")).toBe("SCR #1");
+    expect(photoLeftFor("f1", files, [{ ...dpf, component_type: "DOC" }], "completed")).toBe("DOC #1");
+  });
+
+  it("is quiet before completion, when another photo stays, for an EGR cooler, a part not condemned, or no component", () => {
+    expect(photoLeftFor("f1", files, comps, "in_process")).toBeNull();
+    expect(photoLeftFor("f1", [...files, { id: "f5", component_id: "c1" }], comps, "completed")).toBeNull();
+    expect(photoLeftFor("f2", files, comps, "completed")).toBeNull();
+    expect(photoLeftFor("f3", files, comps, "completed")).toBeNull();
+    expect(photoLeftFor("f4", files, comps, "completed")).toBeNull();
+  });
+
+  it("names the file, and adds the warning when a required photo goes", () => {
+    expect(cdsRemoveConfirm("wrong.png", null)).toBe("Remove wrong.png from this work order? The file is deleted for good.");
+    const warned = cdsRemoveConfirm("wrong.png", "DPF #1");
+    expect(warned).toContain("Remove wrong.png from this work order?");
+    expect(warned).toMatch(/only photo of the condemned DPF #1/);
+    expect(warned).not.toMatch(/[\u2013\u2014]/);
   });
 });

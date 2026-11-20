@@ -10,6 +10,7 @@ import { isCustomerItem, lineItemFor } from "@/lib/customer-items";
 import { receivedAt, shopCanSeeLabel, shopTimeline, type TimelineStep } from "@/components/shop/shop-dates";
 import { monthRange, type CalendarJob } from "@/components/shop/calendar";
 import type { NoteView } from "@/lib/notes";
+import { shopCanRemove } from "@/lib/attachments";
 import {
   isPartsSale,
   TAB_STATUSES,
@@ -293,7 +294,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
       .order("seq"),
     supabase
       .from("attachments")
-      .select("id, component_id, category, storage_path, file_name, mime_type, note, uploaded_at, affiliate_id")
+      .select("id, component_id, category, storage_path, file_name, mime_type, note, uploaded_at, affiliate_id, uploaded_by")
       .eq("work_order_id", id)
       .order("uploaded_at"),
     supabase
@@ -370,6 +371,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     note: f.note,
     uploaded_at: f.uploaded_at,
     from_cds: f.affiliate_id === null,
+    can_remove: shopCanRemove(job.status, { fromCds: f.affiliate_id === null, uploadedBy: f.uploaded_by }),
     url: urls.get(f.storage_path) ?? null,
   }));
 

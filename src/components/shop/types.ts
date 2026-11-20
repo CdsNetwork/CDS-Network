@@ -137,6 +137,8 @@ export type AttachmentView = {
   uploaded_at: string;
   /** Added by CDS staff (CDS files carry no shop stamp; shop files always do). */
   from_cds: boolean;
+  /** The shop may remove it: its own upload, before the job is completed (shopCanRemove). */
+  can_remove: boolean;
   url: string | null;
 };
 

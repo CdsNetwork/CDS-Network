@@ -11,6 +11,7 @@ import { SHIP_STATUS_LABEL } from "@/lib/format";
 import { pacificToday } from "@/lib/dates";
 import { pickupChoiceError } from "@/lib/pickup";
 import {
+  ATTACHMENT_BUCKET,
   checkFile,
   checkMeta,
   isUploadPathFor,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/attachments";
 import { discardUnrecorded, signedUploadTarget, storedObject } from "@/lib/attachment-storage";
 import { manufacturerAllowed } from "@/lib/manufacturers";
+import { storagePathsToRemove } from "@/lib/work-order-delete";
 import { noteBody } from "@/lib/notes";
 import { canRequestCorrection, correctionNote } from "@/lib/invoice-correction";
 import type { ActionState } from "@/components/shop/types";
@@ -424,6 +426,27 @@ export async function registerUpload(
     if (error.code === "23505") return { ok: Date.now() };
     return discard(`${label} could not be saved. Try again.`);
   }
+  revalidatePath("/shop");
+  return { ok: Date.now() };
+}
+
+/**
+ * Removes a file the shop added, while it can still edit the job (public.shop_remove_attachment
+ * checks the shop, the file and the status, and writes the history line). The shop has no
+ * storage delete access, so the stored object goes with the service role once the row is gone.
+ */
+export async function removeAttachment(workOrderId: string, attachmentId: string): Promise<ActionState> {
+  const bad = await guard(workOrderId);
+  if (bad) return bad;
+  if (!isUuid(attachmentId)) return { error: "File not found" };
+  const supabase = await createClient();
+  const { data: path, error } = await supabase.rpc("shop_remove_attachment", {
+    p_work_order: workOrderId,
+    p_attachment: attachmentId,
+  });
+  if (error) return rpcError(error);
+  const paths = storagePathsToRemove(workOrderId, [typeof path === "string" ? path : null], []);
+  if (paths.length) await createAdminClient().storage.from(ATTACHMENT_BUCKET).remove(paths);
   revalidatePath("/shop");
   return { ok: Date.now() };
 }

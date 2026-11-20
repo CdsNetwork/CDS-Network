@@ -23,6 +23,7 @@ import {
   deleteComponent,
   prepareUpload,
   registerUpload,
+  removeAttachment,
   removePart,
   requestAuthorization,
   requestInvoiceCorrection,
@@ -497,6 +498,17 @@ export function JobDetail({
                           <div className="small">For {componentName.get(a.component_id)}</div>
                         )}
                         {a.note && <div className="small">{a.note}</div>}
+                        {a.can_remove && (
+                          <div style={{ marginTop: 6 }}>
+                            <ActionButton
+                              action={removeAttachment.bind(null, id, a.id)}
+                              label="Remove"
+                              pendingLabel="Removing..."
+                              className="remove"
+                              confirmText={`Remove ${a.file_name}? The file is deleted for good.`}
+                            />
+                          </div>
+                        )}
                       </div>
                     );
                   })}

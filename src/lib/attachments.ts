@@ -87,7 +87,40 @@ export function uploaderLabel(uploader: Uploader, shopName: string | null): stri
   return shopName ?? "-";
 }
 
-/** CDS may delete only files CDS staff uploaded; shop files stay as the shop's record. */
-export function cdsCanDelete(uploader: Uploader): boolean {
-  return uploader?.kind === "cds";
+/**
+ * Whether the shop sees a Remove button on a file (Sarah, CDS, 2026-11-20): its own upload,
+ * while it can still edit the job (accepted, picked up, in process). Never a CDS file (no shop
+ * stamp) or a file recorded without a person. public.shop_remove_attachment enforces the
+ * same rule.
+ */
+export function shopCanRemove(status: string, file: { fromCds: boolean; uploadedBy: string | null }): boolean {
+  return ["accepted", "picked_up", "in_process"].includes(status) && !file.fromCds && file.uploadedBy !== null;
+}
+
+const COMPLETED_STATUSES = ["completed", "delivered", "ready_to_invoice", "invoiced"];
+
+/**
+ * The condemned DPF, DOC or SCR (as "DPF #1") that removing this file would leave without the
+ * photo completion requires, on an order that is already completed; else null. Same photo
+ * rule as public.shop_complete_work_order: any file linked to the component counts.
+ */
+export function photoLeftFor(
+  fileId: string,
+  files: { id: string; component_id: string | null }[],
+  components: { id: string; component_type: string; result: string | null; seq: number }[],
+  status: string,
+): string | null {
+  if (!COMPLETED_STATUSES.includes(status)) return null;
+  const componentId = files.find((f) => f.id === fileId)?.component_id;
+  const c = componentId ? components.find((x) => x.id === componentId) : undefined;
+  if (!c || c.result !== "condemned" || c.component_type === "EGR") return null;
+  const others = files.filter((f) => f.id !== fileId && f.component_id === c.id).length;
+  return others === 0 ? `${c.component_type} #${c.seq}` : null;
+}
+
+/** The confirm text when CDS removes a file, with a warning when a required photo goes. */
+export function cdsRemoveConfirm(fileName: string, photoLeft: string | null): string {
+  const base = `Remove ${fileName} from this work order? The file is deleted for good.`;
+  if (!photoLeft) return base;
+  return `${base}\n\nThis is the only photo of the condemned ${photoLeft}, and the order is already completed: the order will have no photo for that part.`;
 }

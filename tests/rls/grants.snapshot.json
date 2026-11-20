@@ -68,6 +68,10 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
+  "function public.cds_remove_attachment(uuid,uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
   "function public.cds_remove_pass_through_line(uuid)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
@@ -156,6 +160,10 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
+  "function public.shop_remove_attachment(uuid,uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
   "function public.shop_remove_part(uuid,uuid)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
@@ -227,7 +235,7 @@
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "table public.attachments": {
-    "authenticated": "DELETE,INSERT,MAINTAIN,SELECT,UPDATE",
+    "authenticated": "INSERT,MAINTAIN,SELECT,UPDATE",
     "service_role": "DELETE,INSERT,MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
   },
   "table public.audit_log": {

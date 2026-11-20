@@ -59,7 +59,7 @@ import { htmlToText } from "@/lib/intake/email";
 import { internalNotesHistory, NOTE_MAX_LENGTH, ORDER_CREATED_NOTE_ID, type NoteView } from "@/lib/notes";
 import { NotesList } from "@/components/WorkOrderNotes";
 import { AttachmentForm } from "@/components/shop/AttachmentForm";
-import { cdsCanDelete, uploaderLabel } from "@/lib/attachments";
+import { cdsRemoveConfirm, photoLeftFor, uploaderLabel } from "@/lib/attachments";
 import { loadInvoice, type CombinedInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
 import { combinedTaxView } from "@/lib/qbo/invoice-combined";
 import { billState, type BillState } from "@/lib/qbo/bill";
@@ -89,7 +89,6 @@ import {
   addInternalNote,
   addNote,
   decideAuthorization,
-  deleteCdsAttachment,
   deleteWorkOrder,
   deleteInternalNote,
   setQuestionPending,
@@ -99,6 +98,7 @@ import {
   dispatchWorkOrder,
   prepareCdsUpload,
   registerCdsUpload,
+  removeCdsAttachment,
   removeLine,
   removePassThroughLine,
   removeShipment,
@@ -1944,15 +1944,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                             ) : (
                               <span className="small">Unavailable</span>
                             )}
-                            {cdsCanDelete(uploader) && (
-                              <ActionForm
-                                action={deleteCdsAttachment.bind(null, wo.id, a.id)}
-                                submitLabel="Delete"
-                                pendingLabel="..."
-                                buttonClass="remove"
-                                confirmText={`Delete ${a.file_name}? The file is removed for good.`}
-                              />
-                            )}
+                            <ActionForm
+                              action={removeCdsAttachment.bind(null, wo.id, a.id)}
+                              submitLabel="Remove"
+                              pendingLabel="..."
+                              buttonClass="remove"
+                              confirmText={cdsRemoveConfirm(a.file_name, photoLeftFor(a.id, attachments, components, wo.status))}
+                            />
                           </td>
                         </tr>
                       );

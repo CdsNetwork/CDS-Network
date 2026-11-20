@@ -5,7 +5,8 @@
  * A CDS file keeps no shop stamp, so the shop that has the order, now or later, sees it and
  * can download it while shop_visible is on; with shop_visible off no shop sees the row or
  * the file. Another shop never sees it. A shop cannot change shop_visible, delete a CDS
- * file or remove the stored object. Files a shop adds keep the shop stamp, as before.
+ * file or remove the stored object. Removals go through public.cds_remove_attachment
+ * (tests/rls/remove-attachment.test.ts). Files a shop adds keep the shop stamp, as before.
  *
  * Fixtures are created with the service role under a per-run id and removed afterwards.
  */
@@ -223,11 +224,11 @@ describe("CDS photos and files on a work order", () => {
     expect(insert.error?.code).toBe("42501");
   });
 
-  it("CDS deletes its file and the stored object", async () => {
+  it("CDS removes its file (public.cds_remove_attachment) and the stored object", async () => {
     const wo = await workOrder(shopA, "accepted", "CF-6");
     const file = await cdsUpload(wo, true);
-    const deleted = await must(cds.client.from("attachments").delete().eq("id", file.id).select("id"));
-    expect(deleted).toHaveLength(1);
+    const removed = await must(cds.client.rpc("cds_remove_attachment", { p_work_order: wo, p_attachment: file.id }));
+    expect(removed).toBe(file.path);
     const { error } = await cds.client.storage.from(BUCKET).remove([file.path]);
     expect(error).toBeNull();
     expect((await admin.storage.from(BUCKET).download(file.path)).error).not.toBeNull();
