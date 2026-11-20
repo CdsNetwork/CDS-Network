@@ -55,7 +55,7 @@ describe("result choices on the shop's component card", () => {
 describe("the shop's saveComponent action", () => {
   const fields = (type: string, result: string) => ({
     component_type: type,
-    manufacturer: "Test",
+    manufacturer: "CUMMINS",
     part_number: "PN",
     serial_number: "SN",
     result,

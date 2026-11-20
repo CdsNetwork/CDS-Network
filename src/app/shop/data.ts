@@ -57,7 +57,7 @@ export function cleanQueueSearch(raw: string | undefined): string {
 }
 
 /**
- * The shop's work queue. With `search`, only jobs whose WO number, unit, PO, customer or
+ * The shop's work queue. With `search`, only jobs whose WO number, unit, PO, part number, customer or
  * location match are returned, and the counts are the counts of matches.
  */
 export async function loadQueue(
@@ -66,14 +66,14 @@ export async function loadQueue(
   const supabase = await createClient();
   // The inbound legs' delivery times give the Received date (shop-dates receivedAt).
   const cols =
-    "id, wo_number, status, location_label, requested_work, unit_number, po_number, dispatched_at, picked_up_at, completed_at, customers(name), shipments(direction, delivered_at)";
+    "id, wo_number, status, location_label, requested_work, unit_number, po_number, customer_part_number, dispatched_at, picked_up_at, completed_at, customers(name), shipments(direction, delivered_at)";
 
   // One OR filter shared by the three queries. Customer names are looked up first (RLS
   // only returns customers on this shop's own work orders).
   let filter: string | null = null;
   if (search) {
     const like = `*${search}*`;
-    const parts = [`unit_number.ilike.${like}`, `po_number.ilike.${like}`, `location_label.ilike.${like}`];
+    const parts = [`unit_number.ilike.${like}`, `po_number.ilike.${like}`, `customer_part_number.ilike.${like}`, `location_label.ilike.${like}`];
     const woNumber = search.replace(/^wo[\s-]*/i, "");
     if (/^\d{1,9}$/.test(woNumber)) parts.push(`wo_number.eq.${Number(woNumber)}`);
     const customers = required(
@@ -117,6 +117,7 @@ export async function loadQueue(
     requested_work: r.requested_work as string,
     unit_number: (r.unit_number as string | null) ?? "",
     po_number: (r.po_number as string | null) ?? null,
+    customer_part_number: (r.customer_part_number as string | null) ?? null,
     customer_name: (r.customers as Named)?.name ?? "",
     dispatched_at: (r.dispatched_at as string | null) ?? null,
     received_at: receivedAt(
@@ -249,7 +250,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     await supabase
       .from("work_orders")
       .select(
-        "id, wo_number, status, market, fulfillment, location_label, site_address, unit_number, po_number, " +
+        "id, wo_number, status, market, fulfillment, location_label, site_address, unit_number, po_number, customer_part_number, " +
           "requested_work, pickup_window, pickup_date, shop_ship_status, affiliate_invoice_ref, dispatched_at, accepted_at, picked_up_at, completed_at, delivered_at, " +
           "customer_id, affiliate_id, request_type, customers(name)",
       )

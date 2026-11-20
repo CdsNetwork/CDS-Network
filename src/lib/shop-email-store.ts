@@ -110,7 +110,7 @@ export function supabaseShopEmailStore(db: SupabaseClient): ShopEmailStore {
     async context(row) {
       const { data: wo, error } = await db
         .from("work_orders")
-        .select("id, wo_number, status, affiliate_id, location_label, unit_number, po_number, fulfillment")
+        .select("id, wo_number, status, affiliate_id, location_label, unit_number, po_number, customer_part_number, fulfillment")
         .eq("id", row.workOrderId)
         .maybeSingle();
       if (error) throw new Error(`work order not read: ${error.message}`);
@@ -152,6 +152,7 @@ export function supabaseShopEmailStore(db: SupabaseClient): ShopEmailStore {
           location: (wo.location_label as string | null) ?? null,
           unitNumber: (wo.unit_number as string | null) ?? null,
           poNumber: (wo.po_number as string | null) ?? null,
+          partNumber: (wo.customer_part_number as string | null) ?? null,
           fulfillment: wo.fulfillment as string,
         },
         shop: {

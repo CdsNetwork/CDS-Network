@@ -155,6 +155,7 @@ export function JobDetail({
         </h2>
         <div>
           Unit {job.unit_number ?? "-"} • PO {job.po_number || "-"}
+          {job.customer_part_number && <> • Part # {job.customer_part_number}</>}
         </div>
         {data.timeline.length > 0 && (
           <div className="small" style={{ marginTop: 4 }}>

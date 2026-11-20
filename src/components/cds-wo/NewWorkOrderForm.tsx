@@ -189,6 +189,13 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
             </div>
           </div>
           <div className="field">
+            <label htmlFor="customer_part_number">Part #</label>
+            <input id="customer_part_number" name="customer_part_number" className="input" maxLength={200} />
+            <div className="small" style={{ marginTop: 5 }}>
+              The customer&apos;s part number, if given. The shop sees it with the unit and PO.
+            </div>
+          </div>
+          <div className="field">
             <label htmlFor="site_address">
               Customer / Ship-to address <span className="small">(tax destination)</span>
             </label>

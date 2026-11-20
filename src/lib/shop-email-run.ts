@@ -45,6 +45,7 @@ export type ShopEmailContext = {
     location: string | null;
     unitNumber: string | null;
     poNumber: string | null;
+    partNumber?: string | null;
     fulfillment: string;
   };
   shop: { name: string; emailsEnabled: boolean; inHouse: boolean; active: boolean };
@@ -197,6 +198,7 @@ export async function runShopEmails(
           location: ctx.order.location,
           unitNumber: ctx.order.unitNumber,
           poNumber: ctx.order.poNumber,
+          partNumber: ctx.order.partNumber ?? null,
           fulfillment: ctx.order.fulfillment,
           lines: ctx.lines,
           note: ctx.note,

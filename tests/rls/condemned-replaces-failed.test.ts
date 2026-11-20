@@ -47,7 +47,7 @@ const save = (wo: string, comp: string | null, type: string, result: string | nu
     p_work_order: wo,
     p_component: comp,
     p_type: type,
-    p_manufacturer: "Test",
+    p_manufacturer: "CUMMINS",
     p_part_number: `PN-${runId}`,
     p_serial_number: `SN-${runId}`,
     p_dp_before: null,

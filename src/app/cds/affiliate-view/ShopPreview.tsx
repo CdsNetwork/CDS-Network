@@ -67,6 +67,7 @@ type Job = {
   site_address: string | null;
   unit_number: string | null;
   po_number: string | null;
+  customer_part_number: string | null;
   requested_work: string;
   pickup_window: string | null;
   pickup_date: string | null;
@@ -129,7 +130,7 @@ export async function loadPreview(supabase: Supabase, shopId: string, woId: stri
   const { data: wo } = await supabase
     .from("work_orders")
     .select(
-      "id, wo_number, status, fulfillment, location_label, site_address, unit_number, po_number, " +
+      "id, wo_number, status, fulfillment, location_label, site_address, unit_number, po_number, customer_part_number, " +
         "requested_work, pickup_window, pickup_date, shop_ship_status, affiliate_invoice_ref, completed_at, customers(name)",
     )
     .eq("id", woId)
@@ -238,6 +239,7 @@ export function ShopPreview({ data }: { data: PreviewData }) {
         </h2>
         <div>
           Unit {job.unit_number ?? "-"} · PO {job.po_number || "-"}
+          {job.customer_part_number && <> · Part # {job.customer_part_number}</>}
         </div>
         {job.site_address && (
           <div className="small" style={{ marginTop: 4 }}>

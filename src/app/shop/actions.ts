@@ -20,6 +20,7 @@ import {
   type UploadMeta,
 } from "@/lib/attachments";
 import { discardUnrecorded, signedUploadTarget, storedObject } from "@/lib/attachment-storage";
+import { manufacturerAllowed } from "@/lib/manufacturers";
 import { noteBody } from "@/lib/notes";
 import { canRequestCorrection, correctionNote } from "@/lib/invoice-correction";
 import type { ActionState } from "@/components/shop/types";
@@ -273,6 +274,12 @@ export async function saveComponent(
   if (result === "condemned" && !note) {
     return { error: "Enter the condemn reason." };
   }
+  // A list since 2026-11-20 (Sarah, CDS). A value typed before stays when saved again; the
+  // database checks it against the stored value (shop_save_component).
+  const manufacturer = text(fd, "manufacturer");
+  if (!manufacturerAllowed(manufacturer, text(fd, "manufacturer_saved"))) {
+    return { error: "Choose the manufacturer from the list." };
+  }
 
   const dpBefore = isEgr ? null : decimal(fd, "dp_before");
   const dpAfter = isEgr ? null : decimal(fd, "dp_after");
@@ -291,7 +298,7 @@ export async function saveComponent(
     p_work_order: workOrderId,
     p_component: componentId,
     p_type: type,
-    p_manufacturer: text(fd, "manufacturer"),
+    p_manufacturer: manufacturer,
     p_part_number: text(fd, "part_number"),
     p_serial_number: text(fd, "serial_number"),
     p_dp_before: dpBefore,

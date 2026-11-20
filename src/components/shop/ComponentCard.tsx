@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ActionButton, ActionForm } from "./ActionForm";
+import { manufacturerOptions } from "@/lib/manufacturers";
 import { componentLabel, condemnedPhotoRequired, measurementsRequired, type ActionState, type ComponentRow } from "./types";
 
 const fmt = (v: number | null) => (v === null ? "" : String(v));
@@ -99,9 +100,23 @@ export function ComponentCard({
       >
         <input type="hidden" name="component_type" value={c.component_type} />
         <div className="grid3">
+          {/* A list since 2026-11-20 (Sarah, CDS); an older typed value stays as an extra choice. */}
+          <input type="hidden" name="manufacturer_saved" value={c.manufacturer ?? ""} />
+          <div className="field">
+            <label htmlFor={key("manufacturer")}>
+              Manufacturer <span className="req">*</span>
+            </label>
+            <select id={key("manufacturer")} name="manufacturer" defaultValue={c.manufacturer?.trim() ?? ""}>
+              <option value="">Select manufacturer...</option>
+              {manufacturerOptions(c.manufacturer).map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
           {(
             [
-              ["manufacturer", "Manufacturer", c.manufacturer],
               ["part_number", "Part Number", c.part_number],
               ["serial_number", "Serial Number", c.serial_number],
             ] as const

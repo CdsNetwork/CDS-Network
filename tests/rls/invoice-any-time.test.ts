@@ -259,7 +259,7 @@ describe("the lock on a pre-invoiced order the shop is still working on", () => 
         p_work_order: wo.id,
         p_component: comp.id,
         p_type: "EGR",
-        p_manufacturer: "Test",
+        p_manufacturer: "CUMMINS",
         p_part_number: `PN-${runId}`,
         p_serial_number: `SN-${runId}-L`,
         p_dp_before: null,

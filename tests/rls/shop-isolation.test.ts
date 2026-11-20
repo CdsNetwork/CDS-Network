@@ -824,7 +824,7 @@ describe("QA round 1 regressions (2026-10-15)", () => {
     await must(shopA.client.rpc("shop_accept_work_order", { p_work_order: wo.id, p_pickup_window: null }));
     await must(
       shopA.client.rpc("shop_save_component", {
-        p_work_order: wo.id, p_component: null, p_type: "DPF", p_manufacturer: "M", p_part_number: "P",
+        p_work_order: wo.id, p_component: null, p_type: "DPF", p_manufacturer: "CUMMINS", p_part_number: "P",
         p_serial_number: `SN-Q1-${runId}`, p_dp_before: 4, p_dp_after: 1, p_weight_before_g: 100,
         p_weight_after_g: 90, p_result: "cleaned", p_result_note: null,
       }),
@@ -918,7 +918,7 @@ describe("QA round 2 regressions (2026-10-15)", () => {
     await must(login.client.rpc("shop_accept_work_order", { p_work_order: wo.id, p_pickup_window: null }));
     await must(
       login.client.rpc("shop_save_component", {
-        p_work_order: wo.id, p_component: null, p_type: "EGR", p_manufacturer: "M", p_part_number: "P",
+        p_work_order: wo.id, p_component: null, p_type: "EGR", p_manufacturer: "CUMMINS", p_part_number: "P",
         p_serial_number: "S", p_dp_before: null, p_dp_after: null, p_weight_before_g: null,
         p_weight_after_g: null, p_result: "passed", p_result_note: null,
       }),

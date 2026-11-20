@@ -10,7 +10,7 @@
  * notice, and Resend allows 50 recipients per email (a shop has at most a handful).
  *
  * Content: what the shop already sees on its job page and nothing more: the shop, the WO
- * number, location, unit and PO, what happened, the services and parts by name and quantity,
+ * number, location, unit, PO and the customer's part number, what happened, the services and parts by name and quantity,
  * and a link to the job. Never prices, rates, margins, CDS-only fields or CDS internal notes:
  * the details given here have no such fields at all.
  */
@@ -48,6 +48,8 @@ export type ShopEmailDetails = {
   location: string | null;
   unitNumber: string | null;
   poNumber: string | null;
+  /** The customer's part number on the order (Part # on the shop's job page). */
+  partNumber?: string | null;
   fulfillment: string;
   /** The order's services and parts as the shop sees them (no prices). */
   lines: ShopEmailItem[];
@@ -145,6 +147,7 @@ export function buildShopEmail(
     ["Location", d.location],
     ["Unit", d.unitNumber],
     ["PO", d.poNumber],
+    ["Part #", d.partNumber ?? null],
   ];
   const shown = rows.filter((r): r is [string, string] => !!r[1]?.trim());
   const url = shopJobUrl(d.workOrderId, base);

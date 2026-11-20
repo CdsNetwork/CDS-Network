@@ -110,6 +110,7 @@ import {
   updateTax,
   updateCustomerShipping,
   updateWorkOrderFields,
+  updateWorkOrderPartNumber,
   updateWorkOrderPo,
   updateWorkOrderRequestType,
 } from "./actions";
@@ -129,6 +130,8 @@ type WorkOrder = {
   affiliate_id: string | null;
   unit_number: string | null;
   po_number: string | null;
+  /** The customer's part number, shown to the shop (Sarah, CDS, 2026-11-20). */
+  customer_part_number: string | null;
   requested_work: string;
   vin: string | null;
   mileage: number | null;
@@ -1093,6 +1096,26 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                       <div className="field" style={{ flex: 1, minWidth: 160 }}>
                         <label htmlFor="edit-po-only">PO #</label>
                         <input id="edit-po-only" name="po_number" className="input" defaultValue={wo.po_number ?? ""} maxLength={100} />
+                      </div>
+                    </ActionForm>
+                  </details>
+                )}
+              </Fact>
+              <Fact label="Part #">
+                {wo.customer_part_number ?? <span className="small">None</span>}
+                {canEditPoOnly(wo.status) && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary className="small link">Edit Part #</summary>
+                    <ActionForm action={updateWorkOrderPartNumber.bind(null, wo.id)} submitLabel="Save Part #" buttonClass="btn btn-secondary" inline>
+                      <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                        <label htmlFor="edit-part-number-only">Part #</label>
+                        <input
+                          id="edit-part-number-only"
+                          name="customer_part_number"
+                          className="input"
+                          defaultValue={wo.customer_part_number ?? ""}
+                          maxLength={200}
+                        />
                       </div>
                     </ActionForm>
                   </details>
@@ -2091,6 +2114,10 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   <div className="field">
                     <label htmlFor="edit-po">PO #</label>
                     <input id="edit-po" name="po_number" className="input" defaultValue={wo.po_number ?? ""} maxLength={100} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="edit-part-number">Part #</label>
+                    <input id="edit-part-number" name="customer_part_number" className="input" defaultValue={wo.customer_part_number ?? ""} maxLength={200} />
                   </div>
                 </div>
                 {editLoadError && <div className="notice danger">Could not load customers and locations: {editLoadError}</div>}

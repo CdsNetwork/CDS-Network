@@ -29,11 +29,35 @@ export type DraftParams = {
   p_contact_name: string | null;
   p_contact_email: string | null;
   p_contact_phone: string | null;
+  // Shop-facing on the order: the customer's part number(s) (Sarah, CDS, 2026-11-20).
+  p_customer_part_number: string | null;
 };
 
 export type DraftDecision = { ok: true; params: DraftParams } | { ok: false; reason: string };
 
 const cut = (v: string, max: number) => (v.length > max ? `${v.slice(0, max - 3)}...` : v);
+
+/**
+ * The customer's part number(s) for the order, for the shop: the Part # field of a request
+ * template or website form, then the part numbers read from a free-text email (pattern or AI),
+ * once each (ignoring case and spaces), joined with ", ". A template's line item numbers are
+ * not taken: an iProcure supplier item number is CDS's own number, and the Ryder and website
+ * form lines only repeat the Part # field.
+ */
+export function customerPartNumber(parsed: ParsedEmail): string | null {
+  const values = [parsed.fields.part_number?.value, ...parsed.items.filter((i) => i.source !== "template").map((i) => i.part_number)];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const v = raw?.trim();
+    if (!v) continue;
+    const key = v.toLowerCase().replace(/\s+/g, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+  }
+  return out.length ? cut(out.join(", "), 200) : null;
+}
 
 export function buildDraftParams(emailId: string, email: NormalizedEmail, parsed: ParsedEmail): DraftDecision {
   if (!parsed.is_work_request) return { ok: false, reason: parsed.ignore_reason ?? "Not a work request" };
@@ -124,6 +148,7 @@ export function buildDraftParams(emailId: string, email: NormalizedEmail, parsed
       p_contact_name: f.contact_name?.value ? cut(f.contact_name.value, 200) : null,
       p_contact_email: f.contact_email?.value ? cut(f.contact_email.value, 320) : null,
       p_contact_phone: f.contact_phone?.value ? cut(f.contact_phone.value, 50) : null,
+      p_customer_part_number: customerPartNumber(parsed),
     },
   };
 }

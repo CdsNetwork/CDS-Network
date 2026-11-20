@@ -87,7 +87,7 @@ const setResult = (wo: string, comp: string, result: string | null, note: string
     p_work_order: wo,
     p_component: comp,
     p_type: "DPF",
-    p_manufacturer: "Donaldson",
+    p_manufacturer: "DETROIT",
     p_part_number: "2871891",
     p_serial_number: "SN-4471",
     p_dp_before: null,

@@ -120,10 +120,12 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
   if (!REQUEST_TYPES.includes(requestType)) return { error: "Choose a request type." };
   if (!FULFILLMENT.includes(fulfillment)) return { error: "Choose a fulfillment method." };
   const poNumber = text(formData.get("po_number"));
+  const partNumber = text(formData.get("customer_part_number"));
   const siteAddress = text(formData.get("site_address"));
   const limits: [string, number][] = [
     [unit, 100],
     [poNumber, 100],
+    [partNumber, 200],
     [label, 200],
     [siteAddress, 500],
     [requested, 2000],
@@ -184,6 +186,7 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
       location_id: locationId || null,
       unit_number: unit,
       po_number: poNumber || null,
+      customer_part_number: partNumber || null,
       location_label: label,
       site_address: siteAddress || null,
       requested_work: requested,
@@ -280,6 +283,40 @@ export async function updateWorkOrderPo(woId: string, _prev: ActionState, formDa
   });
   const inQuickBooks = qbInvoiceIdOf(current.work_order_internal) !== null;
   return done(woId, inQuickBooks ? `PO saved. ${PO_IN_QUICKBOOKS_NOTE}` : "PO saved.");
+}
+
+/**
+ * The customer's part number alone, at any status but cancelled, like the PO (Sarah, CDS,
+ * 2026-11-20: the Part # Ryder gives should reach the shop). In review the Edit order box
+ * saves it with the other fields. The shop sees it on its job page and in its emails.
+ */
+export async function updateWorkOrderPartNumber(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const part = text(formData.get("customer_part_number"));
+  if (part.length > 200) return { error: "The part number is too long (max 200 characters)." };
+
+  const supabase = await createClient();
+  const { data: current, error: readError } = await supabase
+    .from("work_orders")
+    .select("status, customer_part_number")
+    .eq("id", woId)
+    .maybeSingle();
+  if (readError) return { error: "The work order could not be read. Try again." };
+  if (!current) return { error: "Work order not found." };
+  if (current.status === "cancelled") return { error: "The part number of a cancelled order cannot change." };
+
+  const { error } = await supabase.from("work_orders").update({ customer_part_number: part || null }).eq("id", woId);
+  if (error) return { error: error.message };
+  const before = (current.customer_part_number as string | null) ?? null;
+  await supabase.from("work_order_events").insert({
+    work_order_id: woId,
+    actor_id: profile.id,
+    event_type: "edit",
+    message: `Part # changed by CDS: ${before ?? "none"} to ${part || "none"}`,
+    shop_visible: false,
+  });
+  return done(woId, "Part # saved.");
 }
 
 /**

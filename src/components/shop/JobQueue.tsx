@@ -99,11 +99,13 @@ export function JobQueue({
           <div style={{ margin: "4px 0" }}>
             <strong>{j.customer_name}</strong> - {j.location_label}
           </div>
-          {(j.unit_number || j.po_number) && (
+          {(j.unit_number || j.po_number || j.customer_part_number) && (
             <div className="small" style={{ marginBottom: 4 }}>
               {j.unit_number && <>Unit {j.unit_number}</>}
               {j.unit_number && j.po_number && " • "}
               {j.po_number && <>PO {j.po_number}</>}
+              {(j.unit_number || j.po_number) && j.customer_part_number && " • "}
+              {j.customer_part_number && <>Part # {j.customer_part_number}</>}
             </div>
           )}
           <div className="small" style={{ marginBottom: 8 }}>
