@@ -1,15 +1,13 @@
 import "server-only";
-import { after } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { recordSync } from "@/lib/integration-sync";
 import type { BillRunDeps, BillRunResult } from "./bill-run";
 
 /**
  * The shop's bill with the real database and QuickBooks (./bill-run). Runs with the service
- * role: the claim and finish functions are the server's only (20261118010000), and the
- * automatic run after a shop completes the job has no CDS login. Callers check who may ask
- * first: requireCds() for the button, the shop's own successful completion for the
- * automatic run.
+ * role: the claim and finish functions are the server's only (20261118010000). The only
+ * callers are CDS's Approve and send / Retry buttons, after requireCds(); the bill is never
+ * sent on its own (CDS approves every bill, 2026-11-23).
  */
 
 function deps(db: SupabaseClient, woId: string): BillRunDeps {
@@ -70,27 +68,14 @@ function deps(db: SupabaseClient, woId: string): BillRunDeps {
   };
 }
 
-/** Creates (or retries) the shop's bill now. Never throws. */
-export async function createShopBill(woId: string, mode: "auto" | "manual"): Promise<BillRunResult> {
+/** Creates (or retries) the shop's bill now, once CDS approved it. Never throws. */
+export async function createShopBill(woId: string): Promise<BillRunResult> {
   try {
     const [{ createAdminClient }, { runShopBill }] = await Promise.all([import("@/lib/supabase/admin"), import("./bill-run")]);
-    return await runShopBill(deps(createAdminClient(), woId), woId, mode);
+    return await runShopBill(deps(createAdminClient(), woId), woId);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    console.error(`QuickBooks shop bill (work order ${woId}, ${mode}): ${message}`);
+    console.error(`QuickBooks shop bill (work order ${woId}): ${message}`);
     return { status: "failed", message: `The shop bill could not be created (${message}). Try again.` };
   }
-}
-
-/**
- * Creates the shop's bill once the action has answered (shop completion, the last TBD shop
- * rate entered), so the user never waits for QuickBooks and a QuickBooks failure can never
- * undo or block their change. Runs only when the order is ready and never had an attempt;
- * otherwise it does nothing. Call it only after the change succeeded.
- */
-export function createShopBillAfter(woId: string): void {
-  after(async () => {
-    const r = await createShopBill(woId, "auto");
-    if (r.status === "failed") console.error(`QuickBooks shop bill (work order ${woId}): ${r.message}`);
-  });
 }

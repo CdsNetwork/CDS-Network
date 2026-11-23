@@ -6,7 +6,6 @@ import {
   hasBillFieldValues,
   itemsWithoutExpenseAccount,
   withBillCustomFields,
-  shouldAutoCreate,
   type BillInputs,
   type BillRecord,
   type QboBillItem,
@@ -18,9 +17,9 @@ import { billCustomFieldDefs } from "./custom-fields";
 import { QboError } from "./client";
 
 /**
- * Creates the shop's bill for one work order (M3). The database and QuickBooks come in as
- * deps, so this runs the same for the automatic run after the shop completes (service role,
- * Next after()) and for CDS's Create bill / Retry button, and is tested with stubs.
+ * Creates the shop's bill for one work order (M3), once CDS approved it (Approve and send to
+ * QuickBooks, or Retry after a failure; nothing runs on its own since 2026-11-23). The
+ * database and QuickBooks come in as deps, so it is tested with stubs.
  *
  * Never two bills for one order:
  *   1. public.qbo_claim_shop_bill takes the order's one claim in the database (refused while
@@ -74,7 +73,7 @@ export type BillRunDeps = {
   log(status: "ok" | "rejected" | "error", externalId: string | null, note: string | null): Promise<void>;
 };
 
-export type BillRunResult = { status: "created"; message: string } | { status: "skipped"; reason: string } | { status: "failed"; message: string };
+export type BillRunResult = { status: "created"; message: string } | { status: "failed"; message: string };
 
 const why = (e: unknown) => (e instanceof Error ? e.message : "unknown error");
 
@@ -83,15 +82,13 @@ export function madeForOrder(bill: FoundBill, woNumber: number): boolean {
   return new RegExp(`(^|\\W)Portal WO-${woNumber}(\\W|$)`).test(bill.PrivateNote ?? "");
 }
 
-export async function runShopBill(deps: BillRunDeps, woId: string, mode: "auto" | "manual"): Promise<BillRunResult> {
+export async function runShopBill(deps: BillRunDeps, woId: string): Promise<BillRunResult> {
   const loaded = await deps.load(woId);
-  if (!loaded) return mode === "auto" ? { status: "skipped", reason: "not_found" } : { status: "failed", message: "Work order not found." };
+  if (!loaded) return { status: "failed", message: "Work order not found." };
   const { inputs, record } = loaded;
   const state = billState(inputs, record);
 
-  if (mode === "auto") {
-    if (!shouldAutoCreate(state, record)) return { status: "skipped", reason: state.kind };
-  } else if (state.kind !== "ready") {
+  if (state.kind !== "ready") {
     switch (state.kind) {
       case "created":
         return { status: "failed", message: `This work order already has QuickBooks bill ${state.number ?? `id ${state.billId}`}.` };
@@ -101,11 +98,12 @@ export async function runShopBill(deps: BillRunDeps, woId: string, mode: "auto" 
         return { status: "failed", message: "A QuickBooks bill is already being created for this work order. Refresh in a moment." };
       case "blocked":
         return { status: "failed", message: `Fix these first: ${state.problems.join(" ")}` };
+      case "pending_approval":
+        return { status: "failed", message: "Approve the shop bill first (AFF Bill Pnd Approval)." };
       default:
         return { status: "failed", message: "This work order does not get a shop bill." };
     }
   }
-  if (state.kind !== "ready") return { status: "skipped", reason: state.kind };
   const { payload, total } = state;
 
   let claim: BillClaim;
@@ -113,7 +111,7 @@ export async function runShopBill(deps: BillRunDeps, woId: string, mode: "auto" 
     claim = await deps.claim(woId);
   } catch (e) {
     // Another run holds the order or recorded the bill meanwhile.
-    return mode === "auto" ? { status: "skipped", reason: why(e) } : { status: "failed", message: why(e) };
+    return { status: "failed", message: why(e) };
   }
 
   const vendorId = payload.VendorRef.value;

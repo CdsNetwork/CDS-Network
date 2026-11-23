@@ -4,8 +4,9 @@
  * CDS adds a Misc. hardware line with the amount from the shop's invoice through
  * cds_add_pass_through_line: the shop is paid that amount and the customer is billed the
  * same (margin 0, taxed as parts). Shops see the line and its description (lines are
- * shop-visible) and their own pay, never the customer price; they cannot add, remove or
- * request such a line. Customer part numbers and their descriptions stay CDS only.
+ * shop-visible) and their own pay, never the customer price; they cannot use CDS's functions
+ * for it (since 2026-11-23 a shop adds its own with shop_add_pass_through_line:
+ * shop-bill-approval.test.ts). Customer part numbers and their descriptions stay CDS only.
  *
  * Fixtures are created with the service role under a per-run id and removed afterwards.
  */

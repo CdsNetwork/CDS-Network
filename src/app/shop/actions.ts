@@ -6,7 +6,7 @@ import { requireShop } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { emailCdsAfter } from "@/lib/portal-email-send";
-import { createShopBillAfter } from "@/lib/qbo/bill-server";
+import { passThroughInput } from "@/lib/pass-through";
 import { quickBooksBillNumberError } from "@/lib/bill-number-check-server";
 import { SHIP_STATUS_LABEL } from "@/lib/format";
 import { pacificToday } from "@/lib/dates";
@@ -183,12 +183,29 @@ export async function requestInvoiceCorrection(workOrderId: string, _prev: Actio
 
 // ---------------------------------------------------------------- parts and extra work
 
+/**
+ * Any catalog part the job used, without asking CDS (Sarah, CDS, 2026-11-23); services still
+ * need Request Additional Authorization. An item priced per line (Misc. hardware: per_line)
+ * goes in with its description and the amount on the shop's invoice.
+ */
 export async function addPart(workOrderId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
   const bad = await guard(workOrderId);
   if (bad) return bad;
   const item = text(fd, "catalog_item");
-  const qty = decimal(fd, "qty");
   if (!isUuid(item)) return { error: "Pick a part from the catalog." };
+  if (text(fd, "per_line") === "1") {
+    const input = passThroughInput(text(fd, "description"), text(fd, "amount"));
+    if (!input.ok) return { error: input.error.replace("the shop's invoice", "your invoice") };
+    const supabase = await createClient();
+    const { error } = await supabase.rpc("shop_add_pass_through_line", {
+      p_work_order: workOrderId,
+      p_catalog_item: item,
+      p_description: input.description,
+      p_amount: input.amount,
+    });
+    return done(error);
+  }
+  const qty = decimal(fd, "qty");
   if (qty === undefined || qty === null || qty <= 0) return { error: "Quantity must be more than zero" };
   const supabase = await createClient();
   const { error } = await supabase.rpc("shop_add_part", { p_work_order: workOrderId, p_catalog_item: item, p_qty: qty });
@@ -341,11 +358,8 @@ export async function completeJob(workOrderId: string, _prev: ActionState, fd: F
   }
   const supabase = await createClient();
   const { error } = await supabase.rpc("shop_complete_work_order", { p_work_order: workOrderId, p_invoice_ref: ref });
-  if (!error) {
-    emailCdsAfter("finished", workOrderId);
-    // The shop's bill in CDS's QuickBooks, after the answer: never blocks or undoes completion.
-    createShopBillAfter(workOrderId);
-  }
+  // The shop's bill waits for CDS's approval on the work order (nothing is sent on its own).
+  if (!error) emailCdsAfter("finished", workOrderId);
   return done(error);
 }
 

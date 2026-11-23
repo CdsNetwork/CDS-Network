@@ -52,7 +52,12 @@ export type WoFilters = {
   condemned: boolean;
   /** Only work orders whose outbound leg has shipped (status parameter SHIPPED). */
   shipped: boolean;
+  /** Only completed orders whose shop bill waits for CDS's approval ("AFF Bill Pnd Approval"). */
+  billPending: boolean;
 };
+
+/** Query string parameter of the "AFF Bill Pnd Approval" filter ("1" turns it on). */
+export const BILL_PENDING_PARAM = "bill_pending";
 
 /** Shop filter value for CDS's own in-house sales (the shop with is_in_house). */
 export const IN_HOUSE = "in_house";
@@ -80,8 +85,9 @@ export function parseFilters(sp: Params): WoFilters {
   const shop = parseShop(param(sp, "shop"));
   const fromShop = param(sp, FROM_SHOP_PARAM) === "1";
   const question = param(sp, QUESTION_PARAM) === "1";
+  const billPending = param(sp, BILL_PENDING_PARAM) === "1";
   const raw = param(sp, "status");
-  const base = { q, shop, fromShop, question, condemned: false, shipped: false };
+  const base = { q, shop, fromShop, question, billPending, condemned: false, shipped: false };
   const group = GROUPS[raw];
   if (group) return { ...base, status: raw, statuses: group.statuses };
   if (ALL_STATUSES.includes(raw as WoStatus)) return { ...base, status: raw, statuses: [raw as WoStatus] };
@@ -98,6 +104,7 @@ export function filterQuery(f: WoFilters, extra: Record<string, string> = {}): s
   if (f.shop) p.set("shop", f.shop);
   if (f.fromShop) p.set(FROM_SHOP_PARAM, "1");
   if (f.question) p.set(QUESTION_PARAM, "1");
+  if (f.billPending) p.set(BILL_PENDING_PARAM, "1");
   for (const [k, v] of Object.entries(extra)) if (v) p.set(k, v);
   const s = p.toString();
   return s ? `?${s}` : "";
@@ -139,6 +146,8 @@ export async function filteredWorkOrders(supabase: Supabase, f: WoFilters, colum
     .order("id");
   if (f.condemned) list = list.eq("condemned_components.result", "condemned");
   if (f.shipped) list = list.eq("shipped_legs.direction", "affiliate_to_customer").in("shipped_legs.status", SHIPPED_STATUSES);
+  // Computed in the view (work_order_list.shop_bill_pending_approval), so it combines with every other filter.
+  if (f.billPending) list = list.eq("shop_bill_pending_approval", true);
   if (f.statuses) list = f.statuses.length === 1 ? list.eq("status", f.statuses[0]) : list.in("status", f.statuses);
   if (f.shop === IN_HOUSE) {
     const { data: inHouse } = await supabase.from("affiliates").select("id").eq("is_in_house", true).maybeSingle();

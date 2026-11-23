@@ -46,8 +46,22 @@ export const CUSTOMER_APPROVAL_LABEL: Record<string, string> = {
   declined: "Customer declined",
 };
 
-/** Statuses after which the order lines are fixed. */
+/** Statuses after which the shop has finished: its lines are fixed for the shop. */
 export const LINES_LOCKED_STATUSES = ["completed", "delivered", "ready_to_invoice", "invoiced", "cancelled"];
+
+/**
+ * Whether CDS can no longer add or remove the order's lines. After the shop completed the job
+ * CDS still corrects its lines (kits for the loose parts a shop billed, Sarah, CDS,
+ * 2026-11-23) until the shop's bill is in QuickBooks; never once the order is invoiced (or has
+ * its QuickBooks invoice) or is cancelled.
+ */
+export function linesLocked(status: string, invoiceLocked: boolean, shopBilled: boolean): boolean {
+  if (status === "cancelled" || status === "invoiced" || invoiceLocked) return true;
+  return LINES_LOCKED_STATUSES.includes(status) && shopBilled;
+}
+
+/** The completed orders whose shop bill waits for CDS (dashboard tag and filter, CSV column, work order page). */
+export const SHOP_BILL_PENDING_LABEL = "AFF Bill Pnd Approval";
 
 /** Statuses in which CDS may still edit the order fields and dispatch. */
 export const REVIEW_STATUSES = ["pending_review", "rejected_by_affiliate"];

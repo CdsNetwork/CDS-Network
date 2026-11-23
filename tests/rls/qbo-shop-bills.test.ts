@@ -38,7 +38,8 @@ async function order(over: Record<string, unknown> = {}): Promise<string> {
       .select()
       .single(),
   );
-  await must(admin.from("work_order_internal").insert({ work_order_id: wo.id }));
+  // Approved by CDS (cds_approve_shop_bill; refused without it: shop-bill-approval.test.ts).
+  await must(admin.from("work_order_internal").insert({ work_order_id: wo.id, shop_bill_approved_at: new Date().toISOString() }));
   return wo.id as string;
 }
 

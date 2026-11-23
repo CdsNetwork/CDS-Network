@@ -163,7 +163,8 @@ export type Option = { id: string; label: string };
  * shop's own pay rate (parts) and the OE cross reference as search words. Never customer
  * prices, margins or CDS notes.
  */
-export type CatalogOption = Option & { category: string; hint: string; keywords?: string };
+/** perLine: Misc. hardware, added with a description and the amount on the shop's invoice. */
+export type CatalogOption = Option & { category: string; hint: string; keywords?: string; perLine?: boolean };
 
 /**
  * Whether a component's pressure and weight are required: a DPF is measured, unless the shop

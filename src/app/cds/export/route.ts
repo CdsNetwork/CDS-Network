@@ -1,4 +1,4 @@
-import { one } from "@/components/cds-wo/util";
+import { one, SHOP_BILL_PENDING_LABEL } from "@/components/cds-wo/util";
 import { filteredWorkOrders, financialsFor, parseFilters } from "@/components/cds-wo/woFilters";
 import { requireCds } from "@/lib/auth";
 import { internalStatusLabel } from "@/lib/internal-status";
@@ -20,6 +20,7 @@ type Row = {
   customers: { name: string } | { name: string }[] | null;
   affiliates: { display_name: string } | { display_name: string }[] | null;
   work_order_internal: { internal_status: string | null } | { internal_status: string | null }[] | null;
+  shop_bill_pending_approval: boolean | null;
 };
 
 /** One CSV field: quoted when needed; text that a spreadsheet would run as a formula is prefixed. */
@@ -34,14 +35,18 @@ function amount(v: number | null | undefined): string {
   return v === null || v === undefined ? "" : Number(v).toFixed(2);
 }
 
-/** CSV of the dashboard work order table with the same filters (q, status, shop). CDS staff only. */
+/**
+ * CSV of the dashboard work order table with the same filters (q, status, shop, the flags).
+ * The "AFF Bill Pnd Approval" column says Yes for completed orders whose shop bill waits for
+ * CDS's approval. CDS staff only.
+ */
 export async function GET(request: Request) {
   await requireCds();
   const filters = parseFilters(new URL(request.url).searchParams);
   const supabase = await createClient();
 
   const columns =
-    "id, wo_number, status, created_at, location_label, unit_number, po_number, customers(name), affiliates(display_name), work_order_internal(internal_status)";
+    "id, wo_number, status, created_at, location_label, unit_number, po_number, customers(name), affiliates(display_name), work_order_internal(internal_status), shop_bill_pending_approval";
   const rows: Row[] = [];
   for (let from = 0; from < MAX_ROWS; from += PAGE) {
     const { query } = await filteredWorkOrders(supabase, filters, columns);
@@ -73,6 +78,7 @@ export async function GET(request: Request) {
     "Shop",
     "Status",
     "Internal status",
+    SHOP_BILL_PENDING_LABEL,
     "Shop Payable",
     "Customer Subtotal",
     "Margin",
@@ -93,6 +99,7 @@ export async function GET(request: Request) {
         field(one(r.affiliates)?.display_name),
         field(STATUS_LABEL[r.status] ?? r.status),
         field(internalStatusLabel(one(r.work_order_internal)?.internal_status)),
+        r.shop_bill_pending_approval ? "Yes" : "",
         tbd ? "TBD" : field(amount(f?.shop_subtotal), false),
         noPrice ? "TBD" : field(amount(f?.customer_subtotal), false),
         tbd || noPrice ? "TBD" : field(amount(f?.margin), false),

@@ -219,7 +219,7 @@ export async function removeVendorMap(affiliateId: string): Promise<ActionState>
 
 /**
  * Shop bills (app_settings qbo_bill_line, see @/lib/qbo/bill): turned on with the first save
- * (orders completed before then get no automatic bill), the account for shipping deductions
+ * (orders completed before then are not flagged for approval), the account for shipping deductions
  * and optional terms. Bill lines themselves use each item's QuickBooks item. The deduction
  * account comes from the list as "account::<id>::<name>" (or "item::<id>::<name>"), or by
  * hand as kind, id and name; left empty, the account already chosen is kept.

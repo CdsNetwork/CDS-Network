@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
-import { canEditRequestTypeOnly, isUuid, LINES_LOCKED_STATUSES, PO_IN_QUICKBOOKS_NOTE, REQUEST_TYPE_LABEL, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
+import { canEditRequestTypeOnly, isUuid, linesLocked, PO_IN_QUICKBOOKS_NOTE, REQUEST_TYPE_LABEL, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
 import { parseWoNumber } from "@/components/cds-wo/linked-orders";
 import { money, woLabel } from "@/lib/format";
 import { requireCds } from "@/lib/auth";
@@ -15,10 +15,12 @@ import { emailShopAfter } from "@/lib/shop-email-send";
 import { INTERNAL_STATUS_LABEL, parseInternalStatus } from "@/lib/internal-status";
 import { invoiceBlockReason, invoicedOutcome, invoiceLocked, movesToInvoiced, qbInvoiceIdOf } from "@/lib/invoice-lock";
 import { createInvoice, getInvoice, listClasses, qboLookups, type CreatedInvoice } from "@/lib/qbo/api";
-import { createShopBill, createShopBillAfter } from "@/lib/qbo/bill-server";
+import { billState } from "@/lib/qbo/bill";
+import { loadBillInputs } from "@/lib/qbo/bill-input";
+import { createShopBill } from "@/lib/qbo/bill-server";
 import { QboError } from "@/lib/qbo/client";
 import { changedSinceNote, claimInvoice, finishInvoice, invoiceSnapshot } from "@/lib/qbo/invoice-claim";
-import type { ItemTextLine, QboInvoicePayload } from "@/lib/qbo/invoice";
+import { cents, type ItemTextLine, type QboInvoicePayload } from "@/lib/qbo/invoice";
 import { GesiShippingItemError, shippingRefusalMessage, ShippingNotAllowedError } from "@/lib/qbo/invoice-shipping";
 import { parseShippingOverride } from "@/lib/customer-shipping";
 import { loadInvoice, type CombinedInvoice, type InvoiceState } from "@/lib/qbo/invoice-input";
@@ -85,10 +87,21 @@ function optionalNumber(value: FormDataEntryValue | null): number | null {
  * QuickBooks invoice while the shop is still working (@/lib/invoice-lock). Null when not found.
  */
 async function orderState(supabase: Awaited<ReturnType<typeof createClient>>, woId: string) {
-  const { data } = await supabase.from("work_orders").select("status, work_order_internal(qb_invoice_id)").eq("id", woId).maybeSingle();
+  const { data } = await supabase
+    .from("work_orders")
+    .select("status, work_order_internal(qb_invoice_id, qb_bill_id), qbo_shop_bills(qb_bill_id)")
+    .eq("id", woId)
+    .maybeSingle();
   if (!data) return null;
   const status = data.status as string;
-  return { status, invoiced: invoiceLocked(status, qbInvoiceIdOf(data.work_order_internal)) };
+  const internal = Array.isArray(data.work_order_internal) ? data.work_order_internal[0] : data.work_order_internal;
+  const bill = Array.isArray(data.qbo_shop_bills) ? data.qbo_shop_bills[0] : data.qbo_shop_bills;
+  return {
+    status,
+    invoiced: invoiceLocked(status, qbInvoiceIdOf(data.work_order_internal)),
+    // The shop's bill is in QuickBooks: the lines it was made from no longer change.
+    billed: !!((internal as { qb_bill_id?: string | null } | null)?.qb_bill_id || (bill as { qb_bill_id?: string | null } | null)?.qb_bill_id),
+  };
 }
 
 export async function dispatchWorkOrder(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -572,7 +585,10 @@ export async function addLine(woId: string, _prev: ActionState, formData: FormDa
   if (!order) return { error: "Work order not found." };
   const { status } = order;
   if (order.invoiced) return { error: "Lines cannot change once the order is invoiced." };
-  if (LINES_LOCKED_STATUSES.includes(status)) return { error: "Lines cannot change once the work is completed." };
+  // After completion CDS corrects the shop's lines (kits for loose parts) until the shop's bill exists.
+  if (linesLocked(status, order.invoiced, order.billed)) {
+    return { error: status === "cancelled" ? "Lines cannot change once the order is cancelled." : "Lines cannot change once the shop's bill is in QuickBooks." };
+  }
 
   const { error } = await supabase.from("work_order_lines").insert({
     work_order_id: woId,
@@ -602,7 +618,10 @@ export async function removeLine(woId: string, lineId: string): Promise<ActionSt
   if (!order) return { error: "Work order not found." };
   const { status } = order;
   if (order.invoiced) return { error: "Lines cannot change once the order is invoiced." };
-  if (LINES_LOCKED_STATUSES.includes(status)) return { error: "Lines cannot change once the work is completed." };
+  // After completion CDS corrects the shop's lines (kits for loose parts) until the shop's bill exists.
+  if (linesLocked(status, order.invoiced, order.billed)) {
+    return { error: status === "cancelled" ? "Lines cannot change once the order is cancelled." : "Lines cannot change once the shop's bill is in QuickBooks." };
+  }
 
   const { data, error } = await supabase
     .from("work_order_lines")
@@ -945,7 +964,6 @@ export async function addPricedLine(woId: string, _prev: ActionState, formData: 
       return { error: `Line added, but the shop rate was not saved: ${rate.error.message}` };
     }
   }
-  if (input.shopRate !== null) createShopBillAfter(woId);
   const later = [input.amount === null ? "customer price" : "", input.shopRate === null ? "shop rate" : ""].filter(Boolean);
   return done(woId, later.length ? `Line added. Enter the ${later.join(" and ")} on the line when it is known.` : "Line added.");
 }
@@ -971,8 +989,6 @@ export async function setLineShopRate(woId: string, lineId: string, _prev: Actio
   const supabase = await createClient();
   const { error } = await supabase.rpc("cds_set_line_shop_rate", { p_line: lineId, p_amount: input.amount });
   if (error) return { error: error.message };
-  // The last TBD rate of a completed order: its shop bill can now be created.
-  createShopBillAfter(woId);
   return done(woId, "Shop rate saved.");
 }
 
@@ -1503,16 +1519,51 @@ async function recordLinkedInvoice(
 // ---------------------------------------------------------------- QuickBooks shop bill
 
 /**
- * Creates the shop's bill in QuickBooks now, or retries after a failure (@/lib/qbo/bill-run).
- * Never creates a second bill for a work order.
+ * Retries the shop's bill in QuickBooks after a failure, once CDS approved it
+ * (@/lib/qbo/bill-run). Never creates a second bill for a work order.
  */
 export async function createQuickBooksBill(woId: string): Promise<ActionState> {
   await requireCds();
   if (!isUuid(woId)) return { error: "Work order not found." };
-  const r = await createShopBill(woId, "manual");
+  const r = await createShopBill(woId);
   revalidatePath(`/cds/work-orders/${woId}`);
   if (r.status === "created") return { ok: r.message, at: Date.now() };
-  return { error: r.status === "failed" ? r.message : "No bill was created." };
+  return { error: r.message };
+}
+
+/**
+ * "Approve and send to QuickBooks" (Sarah, CDS, 2026-11-23): CDS approves the shop's bill it
+ * checked (total = the amount it was shown, so a line changed meanwhile is approved only after
+ * CDS looks again), then the bill is created as before. A QuickBooks failure keeps the
+ * approval: Retry sends it again.
+ */
+export async function approveShopBill(woId: string, total: number): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const supabase = await createClient();
+  let loaded: Awaited<ReturnType<typeof loadBillInputs>>;
+  try {
+    loaded = await loadBillInputs(supabase, woId);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "The shop bill could not be read. Try again." };
+  }
+  if (!loaded) return { error: "Work order not found." };
+  const state = billState(loaded.inputs, loaded.record);
+  if (state.kind === "pending_approval") {
+    if (cents(state.total) !== cents(total)) {
+      revalidatePath(`/cds/work-orders/${woId}`);
+      return { error: `The shop bill changed since this page was opened (now ${money(state.total)}). Check it and approve again.` };
+    }
+    const { error } = await supabase.rpc("cds_approve_shop_bill", { p_work_order: woId });
+    if (error) return { error: error.message };
+  } else if (state.kind !== "ready") {
+    revalidatePath(`/cds/work-orders/${woId}`);
+    return { error: state.kind === "blocked" ? `Fix these first: ${state.problems.join(" ")}` : "This shop bill cannot be approved now. Reload the page." };
+  }
+  const r = await createShopBill(woId);
+  revalidatePath(`/cds/work-orders/${woId}`);
+  if (r.status === "created") return { ok: r.message, at: Date.now() };
+  return { error: `Approved. ${r.message}` };
 }
 
 type DeletedWorkOrder = {

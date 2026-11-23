@@ -16,7 +16,6 @@ import {
   buildBillPayload,
   itemsWithoutExpenseAccount,
   parseBillSetting,
-  shouldAutoCreate,
   suggestVendor,
   type BillInputs,
   type BillLineSetting,
@@ -232,27 +231,24 @@ describe("itemsWithoutExpenseAccount: QuickBooks items that cannot go on a bill"
   });
 });
 
-describe("billState: when a bill is created", () => {
+describe("billState: when a bill can be sent", () => {
   const none: BillRecord | null = null;
+  const approved = { approvedAt: "2026-11-17T07:00:00Z" };
 
-  it("completed with every shop amount known: ready, and created automatically", () => {
-    const s = billState(inputs(), none);
-    expect(s.kind).toBe("ready");
-    expect(shouldAutoCreate(s, none)).toBe(true);
+  it("completed with every shop amount known: waits for CDS's approval; approved: ready", () => {
+    expect(billState(inputs(), none).kind).toBe("pending_approval");
+    expect(billState(inputs(approved), none).kind).toBe("ready");
   });
 
-  it("completed with a TBD rate: waits; created once CDS sets the last rate", () => {
+  it("completed with a TBD rate: blocked until CDS sets the last rate, then waits for approval", () => {
     const tbd = inputs({ lines: [{ catalogItemId: CLEAN, sku: "REC-DPF", name: "Recon DPF", description: null, qty: 1, shopUnitRate: null }] });
-    const s = billState(tbd, none);
-    expect(s.kind).toBe("blocked");
-    expect(shouldAutoCreate(s, none)).toBe(false);
+    expect(billState(tbd, none).kind).toBe("blocked");
     const set = inputs({ lines: [{ catalogItemId: CLEAN, sku: "REC-DPF", name: "Recon DPF", description: null, qty: 1, shopUnitRate: 300 }] });
-    expect(shouldAutoCreate(billState(set, none), none)).toBe(true);
+    expect(billState(set, none).kind).toBe("pending_approval");
   });
 
-  it("invoiced early (completion went straight to Invoiced): ready", () => {
-    const s = billState(inputs({}, { status: "invoiced" }), none);
-    expect(s.kind).toBe("ready");
+  it("invoiced early (completion went straight to Invoiced): waits for approval like any completed order", () => {
+    expect(billState(inputs({}, { status: "invoiced" }), none).kind).toBe("pending_approval");
   });
 
   it("invoiced before the shop completed: nothing yet", () => {
@@ -261,59 +257,48 @@ describe("billState: when a bill is created", () => {
   });
 
   it("cancelled: never", () => {
-    const s = billState(inputs({}, { status: "cancelled" }), none);
-    expect(s.kind).toBe("none");
-    expect(shouldAutoCreate(s, none)).toBe(false);
+    expect(billState(inputs(approved, { status: "cancelled" }), none).kind).toBe("none");
   });
 
   it("CDS's own shop with no QuickBooks vendor linked: never (linked: tests/unit/qbo-in-house-shop-bill.test.ts)", () => {
     expect(billState(inputs({ vendor: null }, { shopInHouse: true }), none).kind).toBe("none");
   });
 
-  it("completed before bills were turned on: no automatic bill (CDS typed those by hand), the button still works", () => {
+  it("completed before bills were turned on: waits for approval with the warning flag (CDS may have typed it by hand)", () => {
     const on = { ...setting, since: "2026-11-20T00:00:00Z" };
-    const old = billState(inputs({ setting: on }), none);
-    expect(old).toMatchObject({ kind: "ready", beforeSince: true });
-    expect(shouldAutoCreate(old, none)).toBe(false);
-    const fresh = billState(inputs({ setting: on }, { completedAt: "2026-11-20T08:00:00Z" }), none);
-    expect(shouldAutoCreate(fresh, none)).toBe(true);
+    expect(billState(inputs({ setting: on }), none)).toMatchObject({ kind: "pending_approval", beforeSince: true });
+    expect(billState(inputs({ setting: on }, { completedAt: "2026-11-20T08:00:00Z" }), none)).toMatchObject({ kind: "pending_approval", beforeSince: false });
   });
 
-  it("shop bills not turned on yet: not set up, nothing runs", () => {
-    const s = billState(inputs({ setting: null }), none);
-    expect(s.kind).toBe("not_set_up");
-    expect(shouldAutoCreate(s, none)).toBe(false);
+  it("shop bills not turned on yet: not set up", () => {
+    expect(billState(inputs({ setting: null, ...approved }), none).kind).toBe("not_set_up");
   });
 
   it("a bill exists: shown, never created again", () => {
     const rec: BillRecord = { status: "created", qbBillId: "900", qbBillNumber: "INV-7781", qbTotal: 233.75, error: null, claimedAt: null, billCreatedAt: "2026-11-17T07:00:00Z" };
     const s = billState(inputs(), rec);
     expect(s).toMatchObject({ kind: "created", billId: "900", number: "INV-7781", total: 233.75, changedTotal: null });
-    expect(shouldAutoCreate(s, rec)).toBe(false);
     // The shop total changed after the bill was made: CDS is told.
     expect(billState(inputs({ deductions: [] }), rec)).toMatchObject({ kind: "created", changedTotal: 263.75 });
     // A cancelled order keeps showing its bill.
     expect(billState(inputs({}, { status: "cancelled" }), rec).kind).toBe("created");
   });
 
-  it("an unlinked item or a missing deduction account: blocked, nothing runs", () => {
-    const s = billState(inputs({ setting: { ...setting, deduction: null } }), none);
+  it("an unlinked item or a missing deduction account: blocked", () => {
+    const s = billState(inputs({ setting: { ...setting, deduction: null }, ...approved }), none);
     expect(s).toMatchObject({ kind: "blocked", problems: ["Choose the account for shipping deductions on Admin > Shop bills."] });
-    expect(shouldAutoCreate(s, none)).toBe(false);
   });
 
-  it("QuickBooks refused it before: CDS retries by hand, no automatic retry", () => {
+  it("QuickBooks refused it after approval: ready again with the reason, CDS retries by hand", () => {
     const rec: BillRecord = { status: "failed", qbBillId: null, qbBillNumber: null, qbTotal: null, error: "Invalid account", claimedAt: null, billCreatedAt: null };
-    const s = billState(inputs(), rec);
-    expect(s).toMatchObject({ kind: "ready", lastError: "Invalid account" });
-    expect(shouldAutoCreate(s, rec)).toBe(false);
+    expect(billState(inputs(approved), rec)).toMatchObject({ kind: "ready", lastError: "Invalid account" });
   });
 
   it("being created right now: creating (a stale claim older than 5 minutes is ready again)", () => {
     const now = new Date("2026-11-17T07:00:00Z");
     const rec: BillRecord = { status: "creating", qbBillId: null, qbBillNumber: null, qbTotal: null, error: null, claimedAt: "2026-11-17T06:59:00Z", billCreatedAt: null };
-    expect(billState(inputs(), rec, now).kind).toBe("creating");
-    expect(billState(inputs(), { ...rec, claimedAt: "2026-11-17T06:50:00Z" }, now).kind).toBe("ready");
+    expect(billState(inputs(approved), rec, now).kind).toBe("creating");
+    expect(billState(inputs(approved), { ...rec, claimedAt: "2026-11-17T06:50:00Z" }, now).kind).toBe("ready");
   });
 });
 

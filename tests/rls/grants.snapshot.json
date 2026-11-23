@@ -510,5 +510,13 @@
   },
   "function public.shop_email_reminder_candidates()": {
     "service_role": "EXECUTE"
+  },
+  "function public.cds_approve_shop_bill(uuid)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
+  },
+  "function public.shop_add_pass_through_line(uuid,uuid,text,numeric)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
   }
 }

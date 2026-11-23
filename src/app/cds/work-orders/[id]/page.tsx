@@ -24,7 +24,7 @@ import {
   dispatchShopDefault,
   isUuid,
   LABEL_STATUS_LABEL,
-  LINES_LOCKED_STATUSES,
+  linesLocked as linesLockedFor,
   one,
   PO_IN_QUICKBOOKS_NOTE,
   PRICE_SOURCE_LABEL,
@@ -747,7 +747,8 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     }
   }
 
-  // The shop's bill in QuickBooks (M3): created after the shop completes the job.
+  // The shop's bill in QuickBooks (M3): after the shop completes the job it waits for CDS's
+  // approval (AFF Bill Pnd Approval), then it is created.
   let shopBill: BillState | null = null;
   let shopBillLoadError = false;
   try {
@@ -841,8 +842,10 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       ),
     ];
   }
-  // Lines are also locked once the order has a QuickBooks invoice, so they match the invoice.
-  const linesLocked = LINES_LOCKED_STATUSES.includes(wo.status) || invoiceLockedNow;
+  // Lines are locked once the order has a QuickBooks invoice, so they match the invoice. After
+  // the shop completed the job CDS still corrects them (kits for loose parts) until the shop's
+  // bill is in QuickBooks (unknown when the bill could not be read: locked).
+  const linesLocked = linesLockedFor(wo.status, invoiceLockedNow, shopBillLoadError || shopBill?.kind === "created");
   // Items priced per line (Misc. hardware) come from the shop's invoice, so CDS can add and
   // remove them after the work is completed, until the order is invoiced.
   const perLineOpen = !invoiceLockedNow && wo.status !== "cancelled";
@@ -1766,7 +1769,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                 )}
               </ActionForm>
             ) : (
-              <p className="small">Lines are fixed once the work is completed.</p>
+              <p className="small">
+                {wo.status === "cancelled"
+                  ? "Lines are fixed: the order is cancelled."
+                  : invoiceLockedNow || wo.status === "invoiced"
+                    ? "Lines are fixed once the order is invoiced."
+                    : "Lines are fixed: the shop's bill is in QuickBooks."}
+              </p>
             )}
             {perLineOpen &&
               perLineItems.map((item) => (

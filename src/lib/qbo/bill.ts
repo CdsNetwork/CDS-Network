@@ -33,8 +33,14 @@ import { cents, linkedItem, unlinkedItemMessage, type ItemMappings } from "./inv
  *     (defaultBillTerm, ./bill-run); without such a term, the vendor's own.
  * CDS's in-house shop (CDS selling GESi filters itself) gets a bill only once CDS links it to a
  * vendor on Admin > Shop bills (CDS, 2026-11-19), built the same way: its line amounts are the
- * in-house line rates (CDS's own cost), it has no shipping deduction, and only orders completed
- * after the link are billed automatically (20261120000000_in_house_shop_bills.sql).
+ * in-house line rates (CDS's own cost) and it has no shipping deduction
+ * (20261120000000_in_house_shop_bills.sql).
+ * Every bill waits for CDS's approval (Sarah, CDS, 2026-11-23: shops bill loose parts where
+ * CDS requires kits, so CDS checks and corrects the lines first): nothing is sent on its own.
+ * CDS's "Approve and send to QuickBooks" records the approval
+ * (work_order_internal.shop_bill_approved_at, public.cds_approve_shop_bill) and sends the bill;
+ * a line change before the bill exists clears the approval
+ * (20261123100000_shop_bill_approval.sql).
  * A line whose item is not linked to a QuickBooks item stops the bill (the same message as the
  * invoice); an item without an expense account in QuickBooks is checked right before sending
  * (itemsWithoutExpenseAccount, ./bill-run).
@@ -52,8 +58,9 @@ export type BillLineSetting = {
   termsId?: string | null;
   termsName?: string | null;
   /**
-   * When bills were turned on. Orders the shop completed before then get no automatic bill
-   * (CDS typed those by hand); CDS can still create one with the button.
+   * When bills were turned on. Orders the shop completed before then may have been typed in
+   * QuickBooks by hand: the work order page warns before CDS approves one, and the dashboard's
+   * "AFF Bill Pnd Approval" flag leaves them out (public.work_order_list).
    */
   since?: string | null;
 };
@@ -137,7 +144,8 @@ export type VendorLink = {
   qboVendorName: string;
   /**
    * qbo_affiliate_vendor.linked_at: when CDS linked the shop. For the in-house shop, orders
-   * completed before it get no automatic bill (null: treated as now).
+   * completed before it are treated like orders completed before bills were turned on (null:
+   * treated as now).
    */
   linkedAt?: string | null;
 };
@@ -156,6 +164,8 @@ export type BillInputs = {
   incomeDivisionName: string | null;
   /** The QuickBooks items of the order's catalog items, as the customer's invoice uses them. */
   itemMap: ItemMappings;
+  /** work_order_internal.shop_bill_approved_at: when CDS approved the bill. Null or absent: not approved. */
+  approvedAt?: string | null;
 };
 
 type Ref = { value: string; name?: string };
@@ -426,16 +436,23 @@ export type BillState =
     }
   /** Completed, but something must be fixed first (vendor link, a TBD shop rate, an item link, the deduction account). */
   | { kind: "blocked"; problems: string[]; lastError: string | null }
-  | {
-      kind: "ready";
-      payload: QboBillPayload;
-      total: number;
-      lastError: string | null;
-      /** Completed before bills were turned on (or, in-house, before its vendor was linked): no automatic bill, CDS decides. */
-      beforeSince: boolean;
-      /** In-house order completed before the in-house shop was linked to its QuickBooks vendor. */
-      beforeVendorLink: boolean;
-    };
+  /**
+   * Completed and complete, waiting for CDS ("AFF Bill Pnd Approval"): the bill as it would be
+   * sent, for CDS to check (and correct the lines) before approving it.
+   */
+  | ({ kind: "pending_approval" } & BillPreview)
+  /** Approved by CDS: sent now, or again after a failure (Retry). */
+  | ({ kind: "ready"; approvedAt: string } & BillPreview);
+
+type BillPreview = {
+  payload: QboBillPayload;
+  total: number;
+  lastError: string | null;
+  /** Completed before bills were turned on (or, in-house, before its vendor was linked): CDS may have typed it by hand. */
+  beforeSince: boolean;
+  /** In-house order completed before the in-house shop was linked to its QuickBooks vendor. */
+  beforeVendorLink: boolean;
+};
 
 export function billState(i: BillInputs, record: BillRecord | null, now: Date = new Date()): BillState {
   if (record?.status === "created" && record.qbBillId) {
@@ -467,17 +484,8 @@ export function billState(i: BillInputs, record: BillRecord | null, now: Date = 
   const linked = i.vendor?.linkedAt ? Date.parse(i.vendor.linkedAt) : NaN;
   const beforeVendorLink = wo.shopInHouse && !(completed >= (Number.isFinite(linked) ? linked : now.getTime()));
   const beforeSince = (since !== null && completed < since) || beforeVendorLink;
-  return { kind: "ready", payload: built.payload, total: built.total, lastError, beforeSince, beforeVendorLink };
-}
-
-/**
- * Automatic creation (after the shop completes, or after CDS enters the last TBD shop rate):
- * only for an order that never had an attempt and was completed after bills were turned on
- * (in-house: and after the in-house shop was linked to its vendor). After a failure CDS
- * retries by hand.
- */
-export function shouldAutoCreate(state: BillState, record: BillRecord | null): boolean {
-  return state.kind === "ready" && !state.beforeSince && record === null;
+  const preview: BillPreview = { payload: built.payload, total: built.total, lastError, beforeSince, beforeVendorLink };
+  return i.approvedAt ? { kind: "ready", approvedAt: i.approvedAt, ...preview } : { kind: "pending_approval", ...preview };
 }
 
 // ---------------------------------------------------------------- vendor match

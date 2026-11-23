@@ -73,8 +73,9 @@ describe("database: work_order_list.new_from_shop", () => {
     .at(-1)!;
   const sql = readFileSync(join(dir, file), "utf8");
 
-  it("the latest view definition adds new_from_shop from work_order_shop_activity.is_new", () => {
-    expect(file).toBe("20261119200000_new_from_shop_first.sql");
+  it("the latest view definition keeps new_from_shop from work_order_shop_activity.is_new", () => {
+    // 20261119200000_new_from_shop_first.sql added it; 20261123100000 added shop_bill_pending_approval.
+    expect(file).toBe("20261123100000_shop_bill_approval.sql");
     expect(sql).toMatch(/drop view public\.work_order_list;/);
     expect(sql).toMatch(/exists \(\s*select 1 from public\.work_order_shop_activity a\s*where a\.work_order_id = w\.id and a\.is_new\s*\) as new_from_shop/);
   });

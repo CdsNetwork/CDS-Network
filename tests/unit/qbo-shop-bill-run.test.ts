@@ -38,6 +38,8 @@ function inputs(over: Partial<BillInputs> = {}): BillInputs {
     division: null,
     incomeDivisionName: "RYDER INCOME",
     itemMap: { customer: {}, default: { [CLEAN]: { qboItemId: "500", qboItemName: "DPF Cleaning" } } },
+    // Approved by CDS (Approve and send to QuickBooks); without it nothing runs (shop-bill-approval.test.ts).
+    approvedAt: "2026-11-17T07:00:00Z",
     ...over,
   };
 }
@@ -111,7 +113,7 @@ describe("runShopBill", () => {
   it("creates the bill once and records its id, number and total", async () => {
     const db = fakeDb();
     const qbo = fakeQbo();
-    const r = await runShopBill(deps(db, qbo), WO, "auto");
+    const r = await runShopBill(deps(db, qbo), WO);
     expect(r).toEqual({ status: "created", message: "QuickBooks bill INV-7781 created ($250.00)." });
     expect(qbo.createBill).toHaveBeenCalledTimes(1);
     expect(qbo.createBill.mock.calls[0][1]).toBe(`bill-${WO}`);
@@ -121,7 +123,7 @@ describe("runShopBill", () => {
   it("on the customer's first bill, finds its COGS division in QuickBooks, sends it and remembers it once", async () => {
     const db = fakeDb();
     const qbo = fakeQbo();
-    expect((await runShopBill(deps(db, qbo), WO, "auto")).status).toBe("created");
+    expect((await runShopBill(deps(db, qbo), WO)).status).toBe("created");
     expect(qbo.createBill.mock.calls[0][0].DepartmentRef).toEqual({ value: "4", name: "RYDER COGS" });
     expect(db.divisions).toEqual([{ customerId: "cccccccc-0000-4000-8000-000000000001", id: "4", name: "RYDER COGS" }]);
   });
@@ -129,7 +131,7 @@ describe("runShopBill", () => {
   it("uses the remembered COGS division without asking QuickBooks again", async () => {
     const db = fakeDb(null, () => inputs({ division: { id: "4", name: "RYDER COGS" } }));
     const qbo = fakeQbo();
-    await runShopBill(deps(db, qbo), WO, "auto");
+    await runShopBill(deps(db, qbo), WO);
     expect(qbo.listDepartments).not.toHaveBeenCalled();
     expect(db.deps.saveDivision).not.toHaveBeenCalled();
     expect(qbo.createBill.mock.calls[0][0].DepartmentRef).toEqual({ value: "4", name: "RYDER COGS" });
@@ -145,7 +147,7 @@ describe("runShopBill", () => {
     ]) {
       const db = fakeDb();
       const qbo = fakeQbo({ departments });
-      expect((await runShopBill(deps(db, qbo), WO, "auto")).status).toBe("created");
+      expect((await runShopBill(deps(db, qbo), WO)).status).toBe("created");
       expect(qbo.createBill.mock.calls[0][0].DepartmentRef).toBeUndefined();
       expect(db.divisions).toEqual([]);
     }
@@ -154,38 +156,37 @@ describe("runShopBill", () => {
   it("uses the QuickBooks term Net 30 when CDS chose no terms; the vendor's terms when there is none", async () => {
     const db = fakeDb();
     const qbo = fakeQbo();
-    await runShopBill(deps(db, qbo), WO, "auto");
+    await runShopBill(deps(db, qbo), WO);
     expect(qbo.createBill.mock.calls[0][0].SalesTermRef).toEqual({ value: "3", name: "Net 30" });
 
     const db2 = fakeDb();
     const qbo2 = fakeQbo({ terms: [{ Id: "1", Name: "Due on receipt" }] });
-    await runShopBill(deps(db2, qbo2), WO, "auto");
+    await runShopBill(deps(db2, qbo2), WO);
     expect(qbo2.createBill.mock.calls[0][0].SalesTermRef).toBeUndefined();
 
     // Terms chosen in the setting win, and QuickBooks is not asked.
     const db3 = fakeDb(null, () => inputs({ setting: { deduction: null, since: null, termsId: "7", termsName: "Net 15" } }));
     const qbo3 = fakeQbo();
-    await runShopBill(deps(db3, qbo3), WO, "auto");
+    await runShopBill(deps(db3, qbo3), WO);
     expect(qbo3.createBill.mock.calls[0][0].SalesTermRef).toEqual({ value: "7", name: "Net 15" });
     expect(qbo3.listTerms).not.toHaveBeenCalled();
   });
 
-  it("two calls at the same moment (shop completes, CDS clicks) create one bill", async () => {
+  it("two calls at the same moment (two CDS clicks) create one bill", async () => {
     const db = fakeDb();
     const qbo = fakeQbo();
-    const [a, b] = await Promise.all([runShopBill(deps(db, qbo), WO, "auto"), runShopBill(deps(db, qbo), WO, "manual")]);
+    const [a, b] = await Promise.all([runShopBill(deps(db, qbo), WO), runShopBill(deps(db, qbo), WO)]);
     expect(qbo.createBill).toHaveBeenCalledTimes(1);
     expect(db.deps.claim).toHaveBeenCalledTimes(2);
     expect([a, b].filter((r) => r.status === "created")).toHaveLength(1);
     const other = [a, b].find((r) => r.status !== "created")!;
-    expect(other.status === "skipped" || other.status === "failed").toBe(true);
+    expect(other.status).toBe("failed");
   });
 
   it("never sends a second bill once one is recorded", async () => {
     const db = fakeDb({ status: "created", qbBillId: "900", qbBillNumber: "INV-7781", qbTotal: 250, error: null, claimedAt: null, billCreatedAt: null });
     const qbo = fakeQbo();
-    expect((await runShopBill(deps(db, qbo), WO, "auto")).status).toBe("skipped");
-    expect(await runShopBill(deps(db, qbo), WO, "manual")).toEqual({ status: "failed", message: "This work order already has QuickBooks bill INV-7781." });
+    expect(await runShopBill(deps(db, qbo), WO)).toEqual({ status: "failed", message: "This work order already has QuickBooks bill INV-7781." });
     expect(qbo.createBill).not.toHaveBeenCalled();
     expect(db.deps.claim).not.toHaveBeenCalled();
   });
@@ -199,14 +200,12 @@ describe("runShopBill", () => {
         return { Id: "901", DocNumber: "INV-7781", TotalAmt: 250 };
       },
     });
-    const r = await runShopBill(deps(db, qbo), WO, "auto");
+    const r = await runShopBill(deps(db, qbo), WO);
     expect(r).toEqual({ status: "failed", message: "QuickBooks refused the bill: Invalid Reference Id: Account assigned to this line is inactive" });
     expect(db.record).toMatchObject({ status: "failed", error: "QuickBooks refused the bill: Invalid Reference Id: Account assigned to this line is inactive" });
     expect(db.logs[0]).toContain("tid-1");
-    // No automatic retry after a refusal.
-    expect((await runShopBill(deps(db, qbo), WO, "auto")).status).toBe("skipped");
     refuse = false;
-    const retry = await runShopBill(deps(db, qbo), WO, "manual");
+    const retry = await runShopBill(deps(db, qbo), WO);
     expect(retry.status).toBe("created");
     expect(qbo.createBill.mock.calls[1][1]).toBe(`bill-${WO}-r1`);
   });
@@ -220,18 +219,18 @@ describe("runShopBill", () => {
         return { Id: "900", DocNumber: "INV-7781", TotalAmt: 250 };
       },
     });
-    const r = await runShopBill(deps(db, qbo), WO, "auto");
+    const r = await runShopBill(deps(db, qbo), WO);
     expect(r.status).toBe("failed");
     expect(r.status === "failed" && r.message).toContain("Try again: a retry never creates a second bill");
     fail = false;
-    await runShopBill(deps(db, qbo), WO, "manual");
+    await runShopBill(deps(db, qbo), WO);
     expect(qbo.createBill.mock.calls.map((c) => c[1])).toEqual([`bill-${WO}`, `bill-${WO}`]);
   });
 
   it("records a bill the portal already made for this order (found by number and vendor) instead of sending another", async () => {
     const db = fakeDb();
     const qbo = fakeQbo({ find: [{ Id: "777", DocNumber: "INV-7781", VendorRef: { value: "301" }, TotalAmt: 250, PrivateNote: "Portal WO-104321 | Shop invoice INV-7781" }] });
-    const r = await runShopBill(deps(db, qbo), WO, "manual");
+    const r = await runShopBill(deps(db, qbo), WO);
     expect(r).toEqual({ status: "created", message: "QuickBooks bill INV-7781 was already in QuickBooks and is now recorded ($250.00)." });
     expect(qbo.createBill).not.toHaveBeenCalled();
     expect(db.record).toMatchObject({ status: "created", qbBillId: "777" });
@@ -240,7 +239,7 @@ describe("runShopBill", () => {
   it("does not send a bill when the shop's invoice number is already on another bill of that vendor", async () => {
     const db = fakeDb();
     const qbo = fakeQbo({ find: [{ Id: "555", DocNumber: "INV-7781", VendorRef: { value: "301" }, TotalAmt: 99, PrivateNote: "" }] });
-    const r = await runShopBill(deps(db, qbo), WO, "auto");
+    const r = await runShopBill(deps(db, qbo), WO);
     expect(r.status).toBe("failed");
     expect(r.status === "failed" && r.message).toBe(
       "QuickBooks already has bill INV-7781 from Diesel Pros LLC ($99.00), not made for this order. Check it in QuickBooks; no bill was created.",
@@ -249,14 +248,14 @@ describe("runShopBill", () => {
     // A bill with the same number from another vendor is not in the way.
     const db2 = fakeDb();
     const qbo2 = fakeQbo({ find: [{ Id: "556", DocNumber: "INV-7781", VendorRef: { value: "999" }, TotalAmt: 250, PrivateNote: "" }] });
-    expect((await runShopBill(deps(db2, qbo2), WO, "auto")).status).toBe("created");
+    expect((await runShopBill(deps(db2, qbo2), WO)).status).toBe("created");
   });
 
   it("reads the bill's QuickBooks items first and stops when one has no expense account; CDS fixes it and retries", async () => {
     const db = fakeDb();
     const items: QboBillItem[] = [{ Id: "500", Name: "DPF Cleaning" }];
     const qbo = fakeQbo({ items });
-    const r = await runShopBill(deps(db, qbo), WO, "auto");
+    const r = await runShopBill(deps(db, qbo), WO);
     const message =
       "QuickBooks item DPF Cleaning (SVC-DPF DPF cleaning) has no expense account, so it cannot go on a shop bill. Add its expense account in QuickBooks (Purchasing information), then Retry.";
     expect(r).toEqual({ status: "failed", message });
@@ -266,15 +265,14 @@ describe("runShopBill", () => {
     expect(db.logs[0]).toBe(`rejected: ${message}`);
     // CDS adds the expense account in QuickBooks and retries: nothing was sent, so a new request id.
     items[0] = { Id: "500", Name: "DPF Cleaning", ExpenseAccountRef: { value: "70" } };
-    expect((await runShopBill(deps(db, qbo), WO, "manual")).status).toBe("created");
+    expect((await runShopBill(deps(db, qbo), WO)).status).toBe("created");
     expect(qbo.createBill.mock.calls[0][1]).toBe(`bill-${WO}-r1`);
   });
 
   it("refuses an unlinked item before anything is claimed or sent", async () => {
     const db = fakeDb(null, () => inputs({ itemMap: { customer: {}, default: {} } }));
     const qbo = fakeQbo();
-    expect((await runShopBill(deps(db, qbo), WO, "auto")).status).toBe("skipped");
-    expect(await runShopBill(deps(db, qbo), WO, "manual")).toEqual({
+    expect(await runShopBill(deps(db, qbo), WO)).toEqual({
       status: "failed",
       message: "Fix these first: SVC-DPF DPF cleaning is not linked to a QuickBooks item. Link it on Admin > QuickBooks mappings.",
     });
@@ -285,17 +283,15 @@ describe("runShopBill", () => {
   it("does nothing until CDS turned shop bills on", async () => {
     const db = fakeDb(null, () => inputs({ setting: null }));
     const qbo = fakeQbo();
-    expect(await runShopBill(deps(db, qbo), WO, "auto")).toEqual({ status: "skipped", reason: "not_set_up" });
-    expect(await runShopBill(deps(db, qbo), WO, "manual")).toEqual({ status: "failed", message: "QuickBooks bills are not set up yet." });
+    expect(await runShopBill(deps(db, qbo), WO)).toEqual({ status: "failed", message: "QuickBooks bills are not set up yet." });
     expect(db.deps.claim).not.toHaveBeenCalled();
     expect(qbo.api).not.toHaveBeenCalled();
   });
 
-  it("does nothing automatically while a shop rate is TBD; CDS sees what to fix", async () => {
+  it("does nothing while a shop rate is TBD; CDS sees what to fix", async () => {
     const db = fakeDb(null, () => inputs({ lines: [{ catalogItemId: CLEAN, sku: "REC-DPF", name: "Recon DPF", description: null, qty: 1, shopUnitRate: null }] }));
     const qbo = fakeQbo();
-    expect((await runShopBill(deps(db, qbo), WO, "auto")).status).toBe("skipped");
-    const manual = await runShopBill(deps(db, qbo), WO, "manual");
+    const manual = await runShopBill(deps(db, qbo), WO);
     expect(manual).toEqual({ status: "failed", message: "Fix these first: The shop rate for REC-DPF Recon DPF is not set yet (TBD). Enter it on the line." });
     expect(db.deps.claim).not.toHaveBeenCalled();
   });
@@ -309,7 +305,7 @@ describe("runShopBill", () => {
         return { Id: "900", DocNumber: "INV-7781", TotalAmt: 250 };
       },
     });
-    expect((await runShopBill(deps(db, qbo), WO, "auto")).status).toBe("created");
+    expect((await runShopBill(deps(db, qbo), WO)).status).toBe("created");
     expect(qbo.api).toHaveBeenLastCalledWith({ forceRefresh: true });
   });
 
@@ -317,7 +313,7 @@ describe("runShopBill", () => {
     const db = fakeDb();
     const qbo = fakeQbo();
     qbo.api.mockRejectedValueOnce(new QboError("QuickBooks is not connected. Connect it in Admin > Settings.", 0, "Config"));
-    const r = await runShopBill(deps(db, qbo), WO, "auto");
+    const r = await runShopBill(deps(db, qbo), WO);
     expect(r).toEqual({ status: "failed", message: "QuickBooks is not connected. Connect it in Admin > Settings." });
     expect(db.record).toMatchObject({ status: "failed", error: "QuickBooks is not connected. Connect it in Admin > Settings." });
   });

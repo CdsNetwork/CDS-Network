@@ -8,12 +8,13 @@
  *   * Linked: the same bill as any shop (items, class, Net 30, custom fields), its lines at the
  *     amounts the order already shows for in-house lines (CDS cost, the line's shop rate), and
  *     no shipping deduction (the deduction view never has one for the in-house shop).
- *   * Orders completed before the vendor was linked get no automatic bill (CDS may have
- *     entered those GESi bills by hand); CDS can still create one with the button.
+ *   * Orders completed before the vendor was linked are flagged (CDS may have entered those
+ *     GESi bills by hand). Since 2026-11-23 no bill is sent without CDS's approval
+ *     (shop-bill-approval.test.ts), so the flag only adds a warning.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { billState, shouldAutoCreate, type BillInputs, type BillRecord } from "@/lib/qbo/bill";
+import { billState, type BillInputs, type BillRecord } from "@/lib/qbo/bill";
 import { runShopBill, type BillRunDeps } from "@/lib/qbo/bill-run";
 import { vendorLinkShops } from "@/lib/qbo/bill-shops";
 import { shopPayable } from "@/lib/shop-deductions";
@@ -63,7 +64,6 @@ describe("in-house orders without a linked vendor: as before", () => {
   it("no bill, no error, nothing runs", () => {
     const s = billState(inHouse({ vendor: null }), none);
     expect(s.kind).toBe("none");
-    expect(shouldAutoCreate(s, none)).toBe(false);
   });
 
   it("an order with no shop at all still gets no bill", () => {
@@ -76,7 +76,7 @@ describe("in-house orders with a linked vendor", () => {
   it("are billed like any shop's, at the CDS cost amounts the order shows, with no shipping deduction", () => {
     const i = inHouse();
     const s = billState(i, none);
-    if (s.kind !== "ready") throw new Error(`expected ready, got ${s.kind}`);
+    if (s.kind !== "pending_approval") throw new Error(`expected pending_approval, got ${s.kind}`);
     const cdsCost = shopPayable(
       i.lines.map((l) => ({ qty: l.qty, shop_unit_rate: l.shopUnitRate })),
       i.deductions,
@@ -104,27 +104,25 @@ describe("in-house orders with a linked vendor", () => {
     expect(s.payload.Line.some((l) => l.DetailType === "AccountBasedExpenseLineDetail")).toBe(false);
   });
 
-  it("completed after the vendor was linked: created automatically, like any shop", () => {
+  it("completed after the vendor was linked: waits for CDS's approval, like any shop", () => {
     const s = billState(inHouse(), none);
-    expect(s).toMatchObject({ kind: "ready", beforeSince: false, beforeVendorLink: false });
-    expect(shouldAutoCreate(s, none)).toBe(true);
+    expect(s).toMatchObject({ kind: "pending_approval", beforeSince: false, beforeVendorLink: false });
   });
 
-  it("completed before the vendor was linked: no automatic bill, the button still works and says why", () => {
+  it("completed before the vendor was linked: waits for approval too, and the panel says why to check", () => {
     const s = billState(inHouse({}, { completedAt: "2026-11-19T18:00:00Z" }), none);
-    expect(s).toMatchObject({ kind: "ready", beforeSince: true, beforeVendorLink: true });
-    expect(shouldAutoCreate(s, none)).toBe(false);
+    expect(s).toMatchObject({ kind: "pending_approval", beforeSince: true, beforeVendorLink: true });
   });
 
   it("a link with no known time is treated as made now: nothing already completed is billed automatically", () => {
     const now = new Date("2026-11-22T00:00:00Z");
     const s = billState(inHouse({ vendor: { qboVendorId: "777", qboVendorName: "GESi", linkedAt: null } }), none, now);
-    expect(s).toMatchObject({ kind: "ready", beforeSince: true, beforeVendorLink: true });
+    expect(s).toMatchObject({ kind: "pending_approval", beforeSince: true, beforeVendorLink: true });
   });
 
   it("a regular shop's link time never matters (bills turned on decides, as before)", () => {
     const s = billState(inHouse({}, { shopInHouse: false, shopName: "Diesel Pros", completedAt: "2026-11-19T18:00:00Z" }), none);
-    expect(s).toMatchObject({ kind: "ready", beforeSince: false, beforeVendorLink: false });
+    expect(s).toMatchObject({ kind: "pending_approval", beforeSince: false, beforeVendorLink: false });
   });
 
   it("a TBD CDS cost waits, as for any shop", () => {
@@ -133,7 +131,7 @@ describe("in-house orders with a linked vendor", () => {
     expect(billState(i, none)).toMatchObject({ kind: "blocked" });
   });
 
-  it("the automatic run skips an order completed before the link without claiming it", async () => {
+  it("the bill run refuses an order CDS has not approved without claiming it", async () => {
     const claim = vi.fn();
     const deps = {
       load: async () => ({ inputs: inHouse({}, { completedAt: "2026-11-19T18:00:00Z" }), record: null }),
@@ -143,7 +141,10 @@ describe("in-house orders with a linked vendor", () => {
       saveDivision: vi.fn(),
       log: vi.fn(),
     } as unknown as BillRunDeps;
-    expect(await runShopBill(deps, "22222222-2222-4222-8222-222222222222", "auto")).toEqual({ status: "skipped", reason: "ready" });
+    expect(await runShopBill(deps, "22222222-2222-4222-8222-222222222222")).toEqual({
+      status: "failed",
+      message: "Approve the shop bill first (AFF Bill Pnd Approval).",
+    });
     expect(claim).not.toHaveBeenCalled();
   });
 });

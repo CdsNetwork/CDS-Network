@@ -440,7 +440,7 @@ async function loadCatalogOptions(market: string, shop: string | null, customer:
   const [items, rates] = await Promise.all([
     supabase
       .from("catalog_items")
-      .select("id, sku, name, category, oe_cross, shop_selectable, variant_of, variant_customer_id")
+      .select("id, sku, name, category, oe_cross, shop_selectable, variant_of, variant_customer_id, price_per_line, pass_through")
       .eq("active", true)
       .order("sku"),
     // RLS returns the default rows plus this shop's own rows only (each with or without a
@@ -478,11 +478,16 @@ async function loadCatalogOptions(market: string, shop: string | null, customer:
     variant_customer_id: (i.variant_customer_id as string | null) ?? null,
   }));
   const pickable = all.filter((i) => !isCustomerItem({ variant_of: (i.variant_of as string | null) ?? null }));
+  // Any part the shop may select, added without asking CDS (Sarah, CDS, 2026-11-23); services
+  // need Request Additional Authorization. Misc. hardware (priced per line, pass through) is
+  // added at the amount on the shop's invoice. Items CDS prices on each order (reconditioned
+  // and new filters) stay CDS's to add (public.shop_add_part).
   const partOptions: CatalogOption[] = pickable
-    .filter((i) => i.shop_selectable && i.category !== "service")
+    .filter((i) => i.shop_selectable && i.category !== "service" && !(i.price_per_line && !i.pass_through))
     .map((i) => {
-      const amount = num(best.get(lineItemFor(i.id as string, customer, refs))?.amount ?? null);
       const o = base(i);
+      if (i.price_per_line) return { ...o, hint: `${o.category} • Amount from your invoice`, perLine: true };
+      const amount = num(best.get(lineItemFor(i.id as string, customer, refs))?.amount ?? null);
       const rate = amount === null ? "Rate set by CDS" : `Your rate ${money(amount)}`;
       return { ...o, hint: `${o.category} • ${rate}` };
     });

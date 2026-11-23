@@ -43,6 +43,7 @@ function inputs(over: Partial<BillInputs["workOrder"]> = {}): BillInputs {
     division: { id: "4", name: "RYDER COGS" },
     incomeDivisionName: "RYDER INCOME",
     itemMap: { customer: {}, default: { [CLEAN]: { qboItemId: "500", qboItemName: "DPF Cleaning" } } },
+    approvedAt: "2026-11-17T07:00:00Z",
   };
 }
 
@@ -114,7 +115,7 @@ describe("billCustomFieldDefs: the bill's Fleet Number and PO fields, by name", 
 describe("runShopBill fills the bill's custom fields", () => {
   it("sends Fleet Number and P.O. Number as custom fields and no longer repeats them in the memo", async () => {
     const h = harness(async () => cdsRecentBills);
-    const r = await runShopBill(h.deps, WO, "manual");
+    const r = await runShopBill(h.deps, WO);
     expect(r.status).toBe("created");
     const sent = h.sent();
     expect(sent.CustomField).toEqual([
@@ -126,7 +127,7 @@ describe("runShopBill fills the bill's custom fields", () => {
 
   it("leaves a field without a definition off and keeps that value in the memo, with a note", async () => {
     const h = harness(async () => [{ CustomField: [{ DefinitionId: "513141", Name: "P.O. Number" }] }]);
-    await runShopBill(h.deps, WO, "manual");
+    await runShopBill(h.deps, WO);
     const sent = h.sent();
     expect(sent.CustomField).toEqual([{ DefinitionId: "513141", Name: "P.O. Number", Type: "StringType", StringValue: "0520772220" }]);
     expect(sent.PrivateNote).toBe("Portal WO-101928 | Shop invoice INV-7781 | Ryder | Unit T-4471");
@@ -137,7 +138,7 @@ describe("runShopBill fills the bill's custom fields", () => {
     const h = harness(async () => {
       throw new Error("timeout");
     });
-    const r = await runShopBill(h.deps, WO, "manual");
+    const r = await runShopBill(h.deps, WO);
     expect(r.status).toBe("created");
     const sent = h.sent();
     expect(sent.CustomField).toBeUndefined();
@@ -146,7 +147,7 @@ describe("runShopBill fills the bill's custom fields", () => {
 
   it("does not read the fields when the order has no PO and no unit", async () => {
     const h = harness(async () => cdsRecentBills, { poNumber: null, unitNumber: "  " });
-    await runShopBill(h.deps, WO, "manual");
+    await runShopBill(h.deps, WO);
     expect(h.qbo.recentBillCustomFields).not.toHaveBeenCalled();
     expect(h.sent().CustomField).toBeUndefined();
     expect(h.sent().PrivateNote).toBe("Portal WO-101928 | Shop invoice INV-7781 | Ryder");
@@ -161,7 +162,7 @@ describe("runShopBill fills the bill's custom fields", () => {
       }
       return cdsRecentBills;
     });
-    const r = await runShopBill(h.deps, WO, "manual");
+    const r = await runShopBill(h.deps, WO);
     expect(r.status).toBe("created");
     expect(h.qbo.createBill).toHaveBeenCalledTimes(1);
     expect(h.sent().CustomField).toHaveLength(2);

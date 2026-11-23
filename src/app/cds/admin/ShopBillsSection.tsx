@@ -69,14 +69,15 @@ export async function ShopBillsSection({ connected }: { connected: boolean }) {
     <div className="section">
       <h3>Shop bills</h3>
       <p className="small">
-        When a shop completes a work order, the portal creates the shop&apos;s bill in QuickBooks: the shop&apos;s vendor, its
-        invoice number, and the same amounts the shop sees (deductions included). A bill waits while a shop rate is TBD and is
-        created when CDS enters the last rate. Orders completed before bills were turned on get no bill automatically; the work
-        order page has a Create bill button.
+        When a shop completes a work order, the shop&apos;s bill waits for CDS (AFF Bill Pnd Approval on the dashboard): the
+        work order page shows the bill with the shop&apos;s vendor, its invoice number and the same amounts the shop sees
+        (deductions included), and Approve and send to QuickBooks creates it. A shop rate still TBD is entered first. Orders
+        completed before bills were turned on are not flagged on the dashboard (they may already be in QuickBooks).
       </p>
       <p className="small">
         CDS Inc (in-house): link it to the vendor CDS buys those parts from, and its orders get a bill at CDS cost, with no
-        shipping deduction. Only orders completed after the link get one automatically. Not linked, in-house orders get no bill.
+        shipping deduction, after CDS approves it. Orders completed before the link are not flagged. Not linked, in-house orders
+        get no bill.
       </p>
       <Suspense fallback={null}>
         <ListsError lists={lists} />

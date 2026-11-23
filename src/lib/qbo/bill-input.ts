@@ -5,8 +5,8 @@ import { toItemMappings } from "./invoice";
 
 /**
  * Reads what the shop's bill needs (./bill) for one work order. Works with the signed-in CDS
- * user's client (the work order page) and with the service role (the automatic run after a
- * shop completes the job). Null when the work order does not exist or is not visible.
+ * user's client (the work order page, the Approve button) and with the service role (the
+ * bill run itself). Null when the work order does not exist or is not visible.
  */
 
 type MaybeOne<T> = T | T[] | null;
@@ -42,7 +42,7 @@ export async function loadBillInputs(
   const shop = one(wo.affiliates);
   const affiliateId = wo.affiliate_id ?? "00000000-0000-0000-0000-000000000000";
 
-  const [linesRes, vendorRes, classRes, settingRes, billRes, incomeRes, cogsRes, deductions] = await Promise.all([
+  const [linesRes, vendorRes, classRes, settingRes, billRes, incomeRes, cogsRes, approvalRes, deductions] = await Promise.all([
     db.from("work_order_lines").select("catalog_item_id, qty, shop_unit_rate, description, catalog_items(sku, name)").eq("work_order_id", woId).order("created_at"),
     db.from("qbo_affiliate_vendor").select("qbo_vendor_id, qbo_vendor_name, linked_at").eq("affiliate_id", affiliateId).maybeSingle(),
     db.from("qbo_affiliate_class").select("qbo_class_id").eq("affiliate_id", affiliateId).maybeSingle(),
@@ -54,9 +54,11 @@ export async function loadBillInputs(
       .maybeSingle(),
     db.from("qbo_customer_division").select("qbo_department_name").eq("customer_id", wo.customer_id).maybeSingle(),
     db.from("qbo_customer_cogs_division").select("qbo_department_id, qbo_department_name").eq("customer_id", wo.customer_id).maybeSingle(),
+    // CDS's approval of the bill (20261123100000_shop_bill_approval.sql), CDS only.
+    db.from("work_order_internal").select("shop_bill_approved_at").eq("work_order_id", woId).maybeSingle(),
     loadShopDeductions(db, woId),
   ]);
-  for (const r of [linesRes, vendorRes, classRes, settingRes, billRes, incomeRes, cogsRes]) {
+  for (const r of [linesRes, vendorRes, classRes, settingRes, billRes, incomeRes, cogsRes, approvalRes]) {
     if (r.error) throw new Error(`Could not read the shop bill details: ${r.error.message}`);
   }
 
@@ -125,6 +127,7 @@ export async function loadBillInputs(
         (itemMapRes.data ?? []) as { customer_id: string | null; catalog_item_id: string; qbo_item_id: string; qbo_item_name: string }[],
         wo.customer_id,
       ),
+      approvedAt: (approvalRes.data as { shop_bill_approved_at: string | null } | null)?.shop_bill_approved_at ?? null,
     },
     record: bill
       ? {

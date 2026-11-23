@@ -8,9 +8,10 @@ import { SubmitOnChange } from "@/components/cds-wo/SubmitOnChange";
 import { isQuestionPending, QUESTION_PARAM, questionTitle } from "@/components/cds-wo/question-pending";
 import { failedMark, isNewFromShop } from "@/components/cds-wo/shop-updates";
 import styles from "@/components/cds-wo/cds-wo.module.css";
-import { one } from "@/components/cds-wo/util";
+import { one, SHOP_BILL_PENDING_LABEL } from "@/components/cds-wo/util";
 import {
   ALL_STATUSES,
+  BILL_PENDING_PARAM,
   CONDEMNED,
   filteredWorkOrders,
   filterQuery,
@@ -70,6 +71,8 @@ type ShopActivity = { is_new: boolean | null; cds_viewed_at: string | null };
 
 type ListRow = WoRow & {
   created_at: string;
+  /** work_order_list.shop_bill_pending_approval: completed, shop bill waiting for CDS. */
+  shop_bill_pending_approval: boolean | null;
   fulfillment: string;
   work_order_internal: ListInternal | ListInternal[] | null;
   work_order_shop_activity: ShopActivity | ShopActivity[] | null;
@@ -91,7 +94,7 @@ const WO_COLUMNS =
  * changes the status, internal status and shipment statuses from the table and reads, adds
  * and edits notes in a popover (loaded when it opens; the table only counts them).
  */
-const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, work_order_internal(inbound_emails(received_at), internal_status, qb_invoice_number, qb_invoice_id), work_order_shop_activity(is_new, cds_viewed_at), correction_notes:work_order_notes(body, created_at, profiles(kind)), work_order_components(result), work_order_questions(question_pending, note), work_order_notes(count), work_order_internal_notes(count), ${LEG_COLUMNS}`;
+const LIST_COLUMNS = `${WO_COLUMNS}, created_at, fulfillment, shop_bill_pending_approval, work_order_internal(inbound_emails(received_at), internal_status, qb_invoice_number, qb_invoice_id), work_order_shop_activity(is_new, cds_viewed_at), correction_notes:work_order_notes(body, created_at, profiles(kind)), work_order_components(result), work_order_questions(question_pending, note), work_order_notes(count), work_order_internal_notes(count), ${LEG_COLUMNS}`;
 
 const embeddedCount = (c: Count) => c?.[0]?.count ?? 0;
 
@@ -114,7 +117,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
   const sp = await searchParams;
   const deleted = deletedMessage(sp);
   const filters = parseFilters(sp);
-  const { q, status: statusParam, shop: shopParam, fromShop, question } = filters;
+  const { q, status: statusParam, shop: shopParam, fromShop, question, billPending } = filters;
   const period = parsePeriod(sp.period);
   const range = periodRange(period);
 
@@ -281,6 +284,10 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
               <input type="checkbox" name={QUESTION_PARAM} value="1" defaultChecked={question} />
               Question Pending
             </label>
+            <label className="small nowrap" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" name={BILL_PENDING_PARAM} value="1" defaultChecked={billPending} />
+              {SHOP_BILL_PENDING_LABEL}
+            </label>
           </SubmitOnChange>
           {period !== "month" && <input type="hidden" name="period" value={period} />}
           <button className="btn btn-secondary" type="submit">
@@ -291,7 +298,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
               In-house sales
             </Link>
           )}
-          {(q || statusParam || shopParam || fromShop || question) && (
+          {(q || statusParam || shopParam || fromShop || question || billPending) && (
             <Link className="link small" href={`/cds${period !== "month" ? `?period=${period}` : ""}#orders`}>
               Clear
             </Link>
@@ -395,6 +402,11 @@ export default async function DashboardPage({ searchParams }: PageProps<"/cds">)
                             {STATUS_LABEL[r.status] ?? r.status}
                           </span>
                           {failed && <span className="badge rejected">{failed}</span>}
+                          {r.shop_bill_pending_approval && (
+                            <span className="badge pending" title="The shop's bill waits for CDS's approval on the work order">
+                              {SHOP_BILL_PENDING_LABEL}
+                            </span>
+                          )}
                           {invoicedEarly && (
                             <span className="badge internal" title="Invoiced in QuickBooks; moves to Invoiced when the shop completes the job">
                               Invoiced {invoicedEarly}
