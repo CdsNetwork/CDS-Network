@@ -59,7 +59,7 @@ async function workOrder(fulfillment = "shipping"): Promise<{ id: string; line: 
 async function invoicedBeforeCompletion(fulfillment = "shipping") {
   const wo = await workOrder(fulfillment);
   await must(cds.client.rpc("cds_mark_invoiced", { p_work_order: wo.id, p_qb_invoice_id: `IBS${runId}${seq}`, p_qb_invoice_number: null }));
-  await must(shop.client.rpc("shop_complete_work_order", { p_work_order: wo.id, p_invoice_ref: "SHOP-1" }));
+  await must(shop.client.rpc("shop_complete_work_order", { p_work_order: wo.id, p_invoice_ref: `SHOP-1-${wo.id.slice(0, 8)}` }));
   return wo;
 }
 

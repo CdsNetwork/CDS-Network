@@ -60,7 +60,7 @@ async function jobWithDpf(unit: string, result: "cleaned" | "condemned", photo: 
 }
 
 const complete = (wo: string) =>
-  shopLogin.client.rpc("shop_complete_work_order", { p_work_order: wo, p_invoice_ref: `INV-${runId}` });
+  shopLogin.client.rpc("shop_complete_work_order", { p_work_order: wo, p_invoice_ref: `INV-${runId}-${wo.slice(0, 8)}` });
 
 beforeAll(async () => {
   shop = (await insertOne("affiliates", { short_code: `CN-${runId}`, display_name: `Condemned Shop ${runId}` })).id;

@@ -31,6 +31,9 @@ export type DraftParams = {
   p_contact_phone: string | null;
   // Shop-facing on the order: the customer's part number(s) (Sarah, CDS, 2026-11-20).
   p_customer_part_number: string | null;
+  // Shop-facing on the order: the manufacturer the customer's request names (Ryder form's
+  // Manufacturer field; Sarah, CDS, 2026-11-23).
+  p_customer_manufacturer: string | null;
 };
 
 export type DraftDecision = { ok: true; params: DraftParams } | { ok: false; reason: string };
@@ -149,6 +152,7 @@ export function buildDraftParams(emailId: string, email: NormalizedEmail, parsed
       p_contact_email: f.contact_email?.value ? cut(f.contact_email.value, 320) : null,
       p_contact_phone: f.contact_phone?.value ? cut(f.contact_phone.value, 50) : null,
       p_customer_part_number: customerPartNumber(parsed),
+      p_customer_manufacturer: f.manufacturer?.value?.trim() ? cut(f.manufacturer.value.trim(), 100) : null,
     },
   };
 }

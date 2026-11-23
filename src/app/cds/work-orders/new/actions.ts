@@ -46,6 +46,7 @@ export async function createWorkOrder(_prev: ActionState, formData: FormData): P
     p_unit_number: text(formData.get("unit_number")),
     p_po_number: text(formData.get("po_number")) || null,
     p_customer_part_number: text(formData.get("customer_part_number")) || null,
+    p_customer_manufacturer: text(formData.get("customer_manufacturer")) || null,
     p_requested_work: text(formData.get("requested_work")),
     p_internal_notes: text(formData.get("internal_notes")) || null,
     p_lines: lines,

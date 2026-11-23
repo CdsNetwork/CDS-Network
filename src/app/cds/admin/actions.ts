@@ -136,30 +136,61 @@ export async function saveShop(id: string | null, _prev: ActionState, formData: 
     shopId = data.id as string;
   }
 
-  // One dispatch contact per shop is managed here.
-  const { data: contacts } = await supabase
-    .from("affiliate_contacts")
-    .select("id, email")
-    .eq("affiliate_id", shopId)
-    .eq("receives_dispatch", true)
-    .order("email")
-    .limit(1);
-  const contact = contacts?.[0] as { id: string; email: string } | undefined;
-  let contactError = null;
-  if (dispatchEmail && contact && contact.email !== dispatchEmail) {
-    ({ error: contactError } = await supabase.from("affiliate_contacts").update({ email: dispatchEmail }).eq("id", contact.id));
-  } else if (dispatchEmail && !contact) {
-    ({ error: contactError } = await supabase
+  // Contacts are managed in the shop's Contacts list (addShopContact and the like). Only the
+  // Add shop form takes a first dispatch email; saving an existing shop never changes them.
+  if (!id && dispatchEmail) {
+    const { error: contactError } = await supabase
       .from("affiliate_contacts")
-      .insert({ affiliate_id: shopId, email: dispatchEmail, label: "Dispatch", receives_dispatch: true }));
-  } else if (!dispatchEmail && contact) {
-    ({ error: contactError } = await supabase.from("affiliate_contacts").delete().eq("id", contact.id));
-  }
-  if (contactError) {
-    revalidatePath("/cds/admin");
-    return { error: "The shop was saved, but the dispatch email was not." };
+      .insert({ affiliate_id: shopId, email: dispatchEmail, label: "Dispatch", receives_dispatch: true });
+    if (contactError) {
+      revalidatePath("/cds/admin");
+      return { error: "The shop was added, but the dispatch email was not. Add it under Contacts." };
+    }
   }
   return done(id ? "Shop saved." : `${shop.display_name} added.`);
+}
+
+// ---------------------------------------------------------------- shop contacts
+//
+// Every contact of a shop (public.affiliate_contacts, CDS-only; changes are in the Change log
+// as "Shop contact"). The shop emails go to every contact that gets job emails
+// (receives_dispatch). CDS, 2026-11-23: extra addresses could not be removed before.
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CONTACT_LABEL_MAX = 100;
+
+export async function addShopContact(affiliateId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  if (!UUID.test(affiliateId)) return { error: "Shop not found." };
+  const email = text(formData, "email").toLowerCase();
+  const label = optionalText(formData, "label");
+  if (!EMAIL.test(email) || email.length > 320 || isInternalLoginEmail(email)) return { error: "Enter a valid email address." };
+  if (label && label.length > CONTACT_LABEL_MAX) return { error: `The label is too long (max ${CONTACT_LABEL_MAX} characters).` };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("affiliate_contacts")
+    .insert({ affiliate_id: affiliateId, email, label, receives_dispatch: checkbox(formData, "receives_dispatch") });
+  if (error) return { error: error.code === "23505" ? "This shop already has that email." : dbMessage(error) };
+  return done(`${email} added.`);
+}
+
+export async function removeShopContact(contactId: string): Promise<ActionState> {
+  await requireCds();
+  if (!UUID.test(contactId)) return { error: "Contact not found." };
+  const supabase = await createClient();
+  const { error } = await supabase.from("affiliate_contacts").delete().eq("id", contactId);
+  if (error) return { error: dbMessage(error, "The contact could not be removed. Try again.") };
+  return done("Contact removed.");
+}
+
+export async function setShopContactDispatch(contactId: string, receives: boolean): Promise<ActionState> {
+  await requireCds();
+  if (!UUID.test(contactId)) return { error: "Contact not found." };
+  const supabase = await createClient();
+  const { error } = await supabase.from("affiliate_contacts").update({ receives_dispatch: receives }).eq("id", contactId);
+  if (error) return { error: dbMessage(error) };
+  return done(receives ? "This contact now gets job emails." : "This contact no longer gets job emails.");
 }
 
 export async function setShopActive(

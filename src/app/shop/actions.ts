@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { emailCdsAfter } from "@/lib/portal-email-send";
 import { createShopBillAfter } from "@/lib/qbo/bill-server";
+import { quickBooksBillNumberError } from "@/lib/bill-number-check-server";
 import { SHIP_STATUS_LABEL } from "@/lib/format";
 import { pacificToday } from "@/lib/dates";
 import { pickupChoiceError } from "@/lib/pickup";
@@ -329,8 +330,15 @@ export async function deleteComponent(workOrderId: string, componentId: string):
 export async function completeJob(workOrderId: string, _prev: ActionState, fd: FormData): Promise<ActionState> {
   const bad = await guard(workOrderId);
   if (bad) return bad;
-  // The database asks for the number; on CDS's in-house shop it fills one in when empty.
+  // The database asks for the number; on CDS's in-house shop it fills one in when empty. It
+  // also refuses a number another order of this shop already has.
   const ref = text(fd, "invoice_ref");
+  // A number QuickBooks already has from this shop's vendor (Sarah, CDS, 2026-11-23). Asked
+  // before the database call, never inside it; QuickBooks being unreachable does not block.
+  if (ref) {
+    const duplicate = await quickBooksBillNumberError(workOrderId, ref);
+    if (duplicate) return { error: duplicate };
+  }
   const supabase = await createClient();
   const { error } = await supabase.rpc("shop_complete_work_order", { p_work_order: workOrderId, p_invoice_ref: ref });
   if (!error) {

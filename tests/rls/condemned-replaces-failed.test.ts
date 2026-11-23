@@ -141,7 +141,7 @@ describe("a condemned EGR", () => {
     const wo = await job("E-2");
     const comp = await newComponent(wo, "EGR");
     await must(save(wo, comp, "EGR", "condemned", "Leaking core"));
-    await must(shopLogin.client.rpc("shop_complete_work_order", { p_work_order: wo, p_invoice_ref: `INV-${runId}` }));
+    await must(shopLogin.client.rpc("shop_complete_work_order", { p_work_order: wo, p_invoice_ref: `INV-${runId}-${wo.slice(0, 8)}` }));
     const after = await must(admin.from("work_orders").select("status").eq("id", wo).single());
     expect(after.status).toBe("completed");
   });

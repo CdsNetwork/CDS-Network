@@ -55,7 +55,8 @@ describe("database: shop_complete_work_order", () => {
   const latest = files.filter((f) => /create or replace function public\.shop_complete_work_order/.test(migration(f))).at(-1)!;
 
   it("the latest definition skips the component checks for every parts-only order", () => {
-    expect(latest).toBe("20261119090000_parts_only_no_measurements.sql");
+    // 20261123010000_duplicate_bill_number.sql only adds the duplicate bill number check.
+    expect(latest >= "20261119090000_parts_only_no_measurements.sql").toBe(true);
     const body = completeFunction(migration(latest));
     expect(body).toMatch(/parts_sale := wo\.request_type = 'parts_only';/);
     expect(body).not.toMatch(/parts_sale := .*is_in_house_shop/);
@@ -63,7 +64,7 @@ describe("database: shop_complete_work_order", () => {
 
   it("is otherwise the same as 20261119040000_egr_no_photo_doc_optional.sql", () => {
     const before = completeFunction(migration("20261119040000_egr_no_photo_doc_optional.sql")).split("\n");
-    const after = completeFunction(migration(latest)).split("\n");
+    const after = completeFunction(migration("20261119090000_parts_only_no_measurements.sql")).split("\n");
     expect(after.length).toBe(before.length);
     const changed = after.filter((l, i) => l !== before[i]);
     expect(changed).toEqual(["parts_sale := wo.request_type = 'parts_only';"]);

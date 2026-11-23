@@ -321,9 +321,9 @@ describe("completing an in-house order", () => {
 
   it("keeps a number the in-house login typed", async () => {
     const wo = await readyWo(f.inHouse);
-    await must(inHouseLogin.client.rpc("shop_complete_work_order", { p_work_order: wo.id, p_invoice_ref: " GESI-PO-7 " }));
+    await must(inHouseLogin.client.rpc("shop_complete_work_order", { p_work_order: wo.id, p_invoice_ref: ` GESI-PO-7-${runId} ` }));
     const after = await must(admin.from("work_orders").select("affiliate_invoice_ref").eq("id", wo.id).single());
-    expect(after.affiliate_invoice_ref).toBe("GESI-PO-7");
+    expect(after.affiliate_invoice_ref).toBe(`GESI-PO-7-${runId}`);
   });
 
   it("an outside shop still must enter its invoice number", async () => {

@@ -196,6 +196,13 @@ export function NewWorkOrderForm({ action, customers, locations, catalog, overri
             </div>
           </div>
           <div className="field">
+            <label htmlFor="customer_manufacturer">Manufacturer (customer)</label>
+            <input id="customer_manufacturer" name="customer_manufacturer" className="input" maxLength={100} />
+            <div className="small" style={{ marginTop: 5 }}>
+              The manufacturer the customer&apos;s request names, if any. The shop sees it with the Part #.
+            </div>
+          </div>
+          <div className="field">
             <label htmlFor="site_address">
               Customer / Ship-to address <span className="small">(tax destination)</span>
             </label>

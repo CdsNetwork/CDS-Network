@@ -3,12 +3,15 @@ import { ActionForm } from "@/components/cds-admin/ActionForm";
 import styles from "@/components/cds-admin/cds-admin.module.css";
 import { createClient } from "@/lib/supabase/server";
 import {
+  addShopContact,
   createShopUsernameLogin,
   inviteShopLogin,
+  removeShopContact,
   saveShop,
   sendShopPasswordLink,
   setProfileActive,
   setShopActive,
+  setShopContactDispatch,
   setShopEmails,
   setShopRecoveryEmail,
 } from "./actions";
@@ -48,7 +51,8 @@ type Login = {
   username: string | null;
   recovery_email: string | null;
 };
-type Contact = { affiliate_id: string; email: string };
+/** public.affiliate_contacts: every contact of a shop; job emails go to those with receives_dispatch. */
+type Contact = { id: string; affiliate_id: string; email: string; label: string | null; receives_dispatch: boolean };
 
 export const SHOP_KIND_LABEL: Record<string, string> = {
   service_shop: "Service shop",
@@ -76,7 +80,7 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
         .range(from, to),
     ),
     fetchAllSettled((from, to) =>
-      supabase.from("affiliate_contacts").select("affiliate_id, email").eq("receives_dispatch", true).order("email").order("id").range(from, to),
+      supabase.from("affiliate_contacts").select("id, affiliate_id, email, label, receives_dispatch").order("email").order("id").range(from, to),
     ),
     // Off until CDS turns it on (app_settings shop_username_logins).
     usernameLoginsOn(supabase),
@@ -85,8 +89,9 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
   const logins = (loginData ?? []) as Login[];
   const contacts = (contactData ?? []) as Contact[];
   const loginsFor = (id: string) => logins.filter((l) => l.affiliate_id === id);
-  const dispatchFor = (id: string) => contacts.find((c) => c.affiliate_id === id)?.email ?? "";
-  const emailsFor = (id: string) => contacts.filter((c) => c.affiliate_id === id).map((c) => c.email);
+  const contactsFor = (id: string) => contacts.filter((c) => c.affiliate_id === id);
+  const emailsFor = (id: string) => contactsFor(id).filter((c) => c.receives_dispatch).map((c) => c.email);
+  const dispatchFor = (id: string) => emailsFor(id)[0] ?? "";
 
   const editing = edit === "new" ? null : shops.find((s) => s.id === edit);
   const locationCount = (s: ShopRow) => s.customer_locations?.[0]?.count ?? 0;
@@ -114,6 +119,7 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
           shop={editing}
           dispatchEmail={dispatchFor(editing.id)}
           dispatchEmails={emailsFor(editing.id)}
+          contacts={contactsFor(editing.id)}
           logins={loginsFor(editing.id)}
           usernameLogins={usernameLogins}
         />
@@ -202,7 +208,7 @@ export async function ShopsTab({ edit, filters }: { edit?: string; filters: Shop
                   </td>
                   <td>
                     {s.display_name}
-                    {dispatchFor(s.id) && <div className="small">Dispatch: {dispatchFor(s.id)}</div>}
+                    {emailsFor(s.id).length > 0 && <div className="small">Dispatch: {emailsFor(s.id).join(", ")}</div>}
                   </td>
                   <td>{SHOP_KIND_LABEL[s.kind] ?? s.kind}</td>
                   <td>{[s.city, s.region].filter(Boolean).join(", ") || "-"}</td>
@@ -276,6 +282,7 @@ function ShopEditor({
   shop,
   dispatchEmail,
   dispatchEmails,
+  contacts,
   logins,
   usernameLogins,
 }: {
@@ -283,6 +290,8 @@ function ShopEditor({
   dispatchEmail: string;
   /** Every contact marked to receive dispatch emails: the shop emails go to all of them. */
   dispatchEmails: string[];
+  /** Every contact of the shop, with or without job emails. */
+  contacts: Contact[];
   logins: Login[];
   /** The shop_username_logins switch: off hides creating username logins and their password links. */
   usernameLogins: boolean;
@@ -299,8 +308,10 @@ function ShopEditor({
         </Link>
       </div>
       <ActionForm key={shop.id} action={saveShop.bind(null, shop.id)} submitLabel="Save shop">
-        <ShopFields shop={shop} dispatchEmail={dispatchEmail} />
+        <ShopFields shop={shop} />
       </ActionForm>
+
+      <ShopContacts shop={shop} contacts={contacts} />
 
       <div className="grid2" style={{ marginTop: 18 }}>
         <div className="summarybox">
@@ -445,6 +456,87 @@ function ShopEditor({
   );
 }
 
+/**
+ * Every contact of the shop (CDS, 2026-11-23): email, label and whether it gets the shop's job
+ * emails, with add, remove and a job emails switch per contact.
+ */
+function ShopContacts({ shop, contacts }: { shop: Shop; contacts: Contact[] }) {
+  return (
+    <div className="summarybox" style={{ marginTop: 18 }}>
+      <b>Contacts</b>
+      <p className="small">
+        {shop.is_in_house
+          ? "CDS's in-house shop is never emailed about its jobs."
+          : "The shop's job emails go to every contact with \"Gets job emails\". Remove an address the shop no longer uses."}
+      </p>
+      {contacts.length === 0 ? (
+        <p className="small">No contacts yet.</p>
+      ) : (
+        <div className="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Label</th>
+                <th>Gets job emails</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {contacts.map((c) => (
+                <tr key={c.id}>
+                  <td className={wrapCell(c.email)}>{c.email}</td>
+                  <td>{c.label || <span className="small">-</span>}</td>
+                  <td>
+                    <span className="row" style={{ gap: 6, alignItems: "center" }}>
+                      {c.receives_dispatch ? <span className="tag green">Yes</span> : <span className="tag">No</span>}
+                      <ActionForm
+                        key={`${c.id}-${c.receives_dispatch}`}
+                        action={setShopContactDispatch.bind(null, c.id, !c.receives_dispatch)}
+                        submitLabel={c.receives_dispatch ? "Stop job emails" : "Send job emails"}
+                        pendingLabel="..."
+                        submitClassName="btn btn-small btn-secondary"
+                      />
+                    </span>
+                  </td>
+                  <td>
+                    <ActionForm
+                      action={removeShopContact.bind(null, c.id)}
+                      submitLabel="Remove"
+                      pendingLabel="..."
+                      submitClassName="btn btn-small btn-danger"
+                      confirmText={`Remove ${c.email} from ${shop.display_name}?`}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <ActionForm key={`${shop.id}-add-contact`} action={addShopContact.bind(null, shop.id)} submitLabel="Add contact" pendingLabel="Adding..." resetOnSuccess>
+        <div className="grid3" style={{ marginTop: 10 }}>
+          <div className="field">
+            <label htmlFor="contact-email">
+              Email <span className="req">*</span>
+            </label>
+            <input className="input" id="contact-email" name="email" type="email" required maxLength={320} autoComplete="off" />
+          </div>
+          <div className="field">
+            <label htmlFor="contact-label">Label</label>
+            <input className="input" id="contact-label" name="label" maxLength={100} placeholder="Office, Owner, Dispatch" autoComplete="off" />
+          </div>
+          <div className="field">
+            <label htmlFor="contact-dispatch" className="row" style={{ gap: 6, alignItems: "center", marginTop: 24 }}>
+              <input id="contact-dispatch" name="receives_dispatch" type="checkbox" defaultChecked /> Gets job emails
+            </label>
+          </div>
+        </div>
+      </ActionForm>
+    </div>
+  );
+}
+
 /** "Email this shop about its jobs" (Sarah, CDS, 2026-11-19). */
 function ShopEmails({ shop, emails }: { shop: Shop; emails: string[] }) {
   if (shop.is_in_house) {
@@ -468,7 +560,7 @@ function ShopEmails({ shop, emails }: { shop: Shop; emails: string[] }) {
         <p className="small">Goes to: {emails.join(", ")}</p>
       ) : (
         <p className="small">
-          <b>No dispatch email for this shop:</b> nothing is sent until one is saved above.
+          <b>No contact gets job emails:</b> nothing is sent until a contact above has &quot;Gets job emails&quot;.
         </p>
       )}
       <ActionForm
@@ -494,7 +586,7 @@ function YesNo({ name, label, value }: { name: string; label: string; value: boo
   );
 }
 
-function ShopFields({ shop, dispatchEmail }: { shop?: Shop; dispatchEmail?: string }) {
+function ShopFields({ shop }: { shop?: Shop }) {
   const k = shop?.id ?? "new";
   return (
     <div className="grid3">
@@ -545,10 +637,13 @@ function ShopFields({ shop, dispatchEmail }: { shop?: Shop; dispatchEmail?: stri
         <label htmlFor={`hours-${k}`}>Hours note</label>
         <input className="input" id={`hours-${k}`} name="hours_note" defaultValue={shop?.hours_note ?? ""} placeholder="Mon to Fri, 7:00 AM to 5:00 PM" />
       </div>
-      <div className="field">
-        <label htmlFor={`dispatch-${k}`}>Dispatch email</label>
-        <input className="input" id={`dispatch-${k}`} name="dispatch_email" type="email" defaultValue={dispatchEmail ?? ""} placeholder="dispatch@shop.example" />
-      </div>
+      {/* A new shop's first contact; an existing shop's contacts are edited in its Contacts list. */}
+      {!shop && (
+        <div className="field">
+          <label htmlFor={`dispatch-${k}`}>Dispatch email</label>
+          <input className="input" id={`dispatch-${k}`} name="dispatch_email" type="email" placeholder="dispatch@shop.example" />
+        </div>
+      )}
     </div>
   );
 }

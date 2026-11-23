@@ -119,11 +119,13 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
   if (!FULFILLMENT.includes(fulfillment)) return { error: "Choose a fulfillment method." };
   const poNumber = text(formData.get("po_number"));
   const partNumber = text(formData.get("customer_part_number"));
+  const manufacturer = text(formData.get("customer_manufacturer"));
   const siteAddress = text(formData.get("site_address"));
   const limits: [string, number][] = [
     [unit, 100],
     [poNumber, 100],
     [partNumber, 200],
+    [manufacturer, 100],
     [label, 200],
     [siteAddress, 500],
     [requested, 2000],
@@ -185,6 +187,7 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
       unit_number: unit,
       po_number: poNumber || null,
       customer_part_number: partNumber || null,
+      customer_manufacturer: manufacturer || null,
       location_label: label,
       site_address: siteAddress || null,
       requested_work: requested,
@@ -315,6 +318,40 @@ export async function updateWorkOrderPartNumber(woId: string, _prev: ActionState
     shop_visible: false,
   });
   return done(woId, "Part # saved.");
+}
+
+/**
+ * The manufacturer the customer's request names, alone, at any status but cancelled, like the
+ * PO and Part # (Sarah, CDS, 2026-11-23: the shop should see it). In review the Edit order box
+ * saves it with the other fields. The shop sees it on its job page and in its emails.
+ */
+export async function updateWorkOrderManufacturer(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const manufacturer = text(formData.get("customer_manufacturer"));
+  if (manufacturer.length > 100) return { error: "The manufacturer is too long (max 100 characters)." };
+
+  const supabase = await createClient();
+  const { data: current, error: readError } = await supabase
+    .from("work_orders")
+    .select("status, customer_manufacturer")
+    .eq("id", woId)
+    .maybeSingle();
+  if (readError) return { error: "The work order could not be read. Try again." };
+  if (!current) return { error: "Work order not found." };
+  if (current.status === "cancelled") return { error: "The manufacturer of a cancelled order cannot change." };
+
+  const { error } = await supabase.from("work_orders").update({ customer_manufacturer: manufacturer || null }).eq("id", woId);
+  if (error) return { error: error.message };
+  const before = (current.customer_manufacturer as string | null) ?? null;
+  await supabase.from("work_order_events").insert({
+    work_order_id: woId,
+    actor_id: profile.id,
+    event_type: "edit",
+    message: `Manufacturer (customer) changed by CDS: ${before ?? "none"} to ${manufacturer || "none"}`,
+    shop_visible: false,
+  });
+  return done(woId, "Manufacturer saved.");
 }
 
 /**

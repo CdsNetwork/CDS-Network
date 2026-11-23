@@ -54,6 +54,8 @@ export type QueueJob = {
   po_number: string | null;
   /** The customer's part number (Part #), when CDS or the email gave one. */
   customer_part_number: string | null;
+  /** The manufacturer the customer's request named, when CDS or the email gave one. */
+  customer_manufacturer: string | null;
   customer_name: string;
   /** When CDS dispatched the order to this shop. */
   dispatched_at: string | null;
@@ -73,6 +75,7 @@ export type JobRow = {
   unit_number: string | null;
   po_number: string | null;
   customer_part_number: string | null;
+  customer_manufacturer: string | null;
   requested_work: string;
   pickup_window: string | null;
   /** The day the shop picks the part up (pickup jobs; null on orders accepted before 2026-11-19). */

@@ -79,7 +79,7 @@ export type BillRunResult = { status: "created"; message: string } | { status: "
 const why = (e: unknown) => (e instanceof Error ? e.message : "unknown error");
 
 /** True when a bill's memo says the portal made it for this order. */
-function madeForOrder(bill: FoundBill, woNumber: number): boolean {
+export function madeForOrder(bill: FoundBill, woNumber: number): boolean {
   return new RegExp(`(^|\\W)Portal WO-${woNumber}(\\W|$)`).test(bill.PrivateNote ?? "");
 }
 

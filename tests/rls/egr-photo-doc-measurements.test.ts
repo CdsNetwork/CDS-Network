@@ -68,7 +68,7 @@ async function job(unit: string, parts: Part[], fulfillment = "shipping", status
 }
 
 const complete = (wo: string) =>
-  shopLogin.client.rpc("shop_complete_work_order", { p_work_order: wo, p_invoice_ref: `INV-${runId}` });
+  shopLogin.client.rpc("shop_complete_work_order", { p_work_order: wo, p_invoice_ref: `INV-${runId}-${wo.slice(0, 8)}` });
 
 const statusOf = async (wo: string) => (await must(admin.from("work_orders").select("status, pickup_window").eq("id", wo).single())) as { status: string; pickup_window: string | null };
 

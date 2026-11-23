@@ -211,11 +211,16 @@ export function billTotal(i: Pick<BillInputs, "lines" | "deductions">): number {
   );
 }
 
+/** The bill number the portal sends for a shop invoice number (QuickBooks keeps 21 characters). */
+export function billDocNumber(shopInvoiceRef: string): string {
+  return clip(shopInvoiceRef.trim(), DOC_NUMBER_MAX);
+}
+
 /** The shop's invoice number as the bill number, and what the memo should say about it. */
 function docNumber(wo: BillWorkOrder): { doc: string; note: string } {
   const ref = wo.shopInvoiceRef?.trim() ?? "";
   if (!ref) return { doc: `WO-${wo.woNumber}`, note: "No shop invoice number" };
-  return { doc: clip(ref, DOC_NUMBER_MAX), note: `Shop invoice ${ref}` };
+  return { doc: billDocNumber(ref), note: `Shop invoice ${ref}` };
 }
 
 /**

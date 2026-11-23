@@ -157,6 +157,7 @@ export function JobDetail({
         <div>
           Unit {job.unit_number ?? "-"} • PO {job.po_number || "-"}
           {job.customer_part_number && <> • Part # {job.customer_part_number}</>}
+          {job.customer_manufacturer && <> • Manufacturer (customer) {job.customer_manufacturer}</>}
         </div>
         {data.timeline.length > 0 && (
           <div className="small" style={{ marginTop: 4 }}>
@@ -576,12 +577,26 @@ export function JobDetail({
                 successHref={doneHref("completed")}
               >
                 {data.inHouse ? (
-                  <p className="small">
-                    {data.partsSale
-                      ? "CDS parts sale: no components are needed."
-                      : "Work cannot be completed until all required component data is entered. Save each component first."}{" "}
-                    CDS in-house job: the reference number is filled in for you ({job.affiliate_invoice_ref || `IN-HOUSE-${job.wo_number}`}).
-                  </p>
+                  <>
+                    <p className="small">
+                      {data.partsSale
+                        ? "CDS parts sale: no components are needed."
+                        : "Work cannot be completed until all required component data is entered. Save each component first."}{" "}
+                      Enter the vendor&apos;s bill number (for example the GESi invoice number) for the QuickBooks bill.
+                    </p>
+                    <div className="field" style={{ maxWidth: 420 }}>
+                      <label htmlFor="invoice-ref">Vendor Bill / Reference #</label>
+                      <input
+                        className="input"
+                        id="invoice-ref"
+                        name="invoice_ref"
+                        maxLength={100}
+                        placeholder={`IN-HOUSE-${job.wo_number}`}
+                        defaultValue={job.affiliate_invoice_ref ?? ""}
+                      />
+                      <span className="small">Leave it empty to use IN-HOUSE-{job.wo_number}.</span>
+                    </div>
+                  </>
                 ) : (
                   <>
                     <p className="small">

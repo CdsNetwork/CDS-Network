@@ -67,7 +67,7 @@ export async function loadQueue(
   const supabase = await createClient();
   // The inbound legs' delivery times give the Received date (shop-dates receivedAt).
   const cols =
-    "id, wo_number, status, location_label, requested_work, unit_number, po_number, customer_part_number, dispatched_at, picked_up_at, completed_at, customers(name), shipments(direction, delivered_at)";
+    "id, wo_number, status, location_label, requested_work, unit_number, po_number, customer_part_number, customer_manufacturer, dispatched_at, picked_up_at, completed_at, customers(name), shipments(direction, delivered_at)";
 
   // One OR filter shared by the three queries. Customer names are looked up first (RLS
   // only returns customers on this shop's own work orders).
@@ -119,6 +119,7 @@ export async function loadQueue(
     unit_number: (r.unit_number as string | null) ?? "",
     po_number: (r.po_number as string | null) ?? null,
     customer_part_number: (r.customer_part_number as string | null) ?? null,
+    customer_manufacturer: (r.customer_manufacturer as string | null) ?? null,
     customer_name: (r.customers as Named)?.name ?? "",
     dispatched_at: (r.dispatched_at as string | null) ?? null,
     received_at: receivedAt(
@@ -229,7 +230,7 @@ export type JobDetailData = {
   partOptions: CatalogOption[];
   /** Whole active catalog for extra work requests, with the request kind. */
   authOptions: (CatalogOption & { kind: "service" | "part" })[];
-  /** The job belongs to CDS's in-house shop: no invoice number asked on completion. */
+  /** The job belongs to CDS's in-house shop: its bill number is optional on completion (IN-HOUSE-<wo> when empty). */
   inHouse: boolean;
   /** A parts-only order (any shop): completes without components or measurements. */
   partsSale: boolean;
@@ -251,7 +252,7 @@ export async function loadJob(id: string, editable: (job: JobRow) => boolean): P
     await supabase
       .from("work_orders")
       .select(
-        "id, wo_number, status, market, fulfillment, location_label, site_address, unit_number, po_number, customer_part_number, " +
+        "id, wo_number, status, market, fulfillment, location_label, site_address, unit_number, po_number, customer_part_number, customer_manufacturer, " +
           "requested_work, pickup_window, pickup_date, shop_ship_status, affiliate_invoice_ref, dispatched_at, accepted_at, picked_up_at, completed_at, delivered_at, " +
           "customer_id, affiliate_id, request_type, customers(name)",
       )

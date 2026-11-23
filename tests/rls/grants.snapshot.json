@@ -24,7 +24,7 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
-  "function public.cds_create_work_order(uuid,uuid,text,text,public.request_type,public.fulfillment_method,text,text,text,text,jsonb,text)": {
+  "function public.cds_create_work_order(uuid,uuid,text,text,public.request_type,public.fulfillment_method,text,text,text,text,jsonb,text,text)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
@@ -92,7 +92,7 @@
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
-  "function public.intake_create_draft_work_order(uuid,uuid,uuid,text,text,public.request_type,public.fulfillment_method,text,text,text,text,text,jsonb,text,integer,date,boolean,text,text,text,text,text,text)": {
+  "function public.intake_create_draft_work_order(uuid,uuid,uuid,text,text,public.request_type,public.fulfillment_method,text,text,text,text,text,jsonb,text,integer,date,boolean,text,text,text,text,text,text,text)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
   },
