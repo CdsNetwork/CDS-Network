@@ -3,7 +3,17 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/cds-wo/ActionForm";
-import { canEditRequestTypeOnly, isUuid, linesLocked, PO_IN_QUICKBOOKS_NOTE, REQUEST_TYPE_LABEL, REVIEW_STATUSES, text } from "@/components/cds-wo/util";
+import {
+  canEditRequestTypeOnly,
+  canEditUnitOrLocationOnly,
+  isUuid,
+  LABELS_KEEP_OLD_ADDRESS_NOTE,
+  linesLocked,
+  PO_IN_QUICKBOOKS_NOTE,
+  REQUEST_TYPE_LABEL,
+  REVIEW_STATUSES,
+  text,
+} from "@/components/cds-wo/util";
 import { parseWoNumber } from "@/components/cds-wo/linked-orders";
 import { money, woLabel } from "@/lib/format";
 import { requireCds } from "@/lib/auth";
@@ -118,6 +128,51 @@ export async function dispatchWorkOrder(woId: string, _prev: ActionState, formDa
   return done(woId, "Dispatched. The shop can now see this work order.");
 }
 
+type OrderLocation = { code: string; name: string; region: string | null; market: string; routing_notes: string | null };
+
+/**
+ * What a new order gets from its location (Create Work Order and email intake), for an order
+ * whose location changed: the location's routing notes and the state's starting tax. A tax rate
+ * CDS set by hand, or no tax for an exempt customer (kept by the database), stays. Returns the
+ * error message, or null.
+ */
+async function applyLocationToInternal(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  woId: string,
+  location: OrderLocation | null,
+): Promise<string | null> {
+  const internalUpdate: Record<string, unknown> = { routing_notes: location?.routing_notes ?? null };
+  const { data: internal } = await supabase.from("work_order_internal").select("tax_source").eq("work_order_id", woId).maybeSingle();
+  const taxSource = (internal?.tax_source as string | null | undefined) ?? null;
+  if (taxSource === null || taxSource === "state_fallback") {
+    const { data: rate } = location?.region
+      ? await supabase
+          .from("tax_rates")
+          .select("rate, taxes_parts, taxes_labor, taxes_shipping")
+          .eq("market", location.market)
+          .eq("region", location.region)
+          .is("postal_code", null)
+          .maybeSingle()
+      : { data: null };
+    // Without a state rate: the column defaults, as private.starting_tax gives a new order.
+    Object.assign(
+      internalUpdate,
+      rate
+        ? {
+            tax_rate: rate.rate,
+            tax_parts: rate.taxes_parts,
+            tax_labor: rate.taxes_labor,
+            tax_shipping: rate.taxes_shipping,
+            tax_jurisdiction: location!.region,
+            tax_source: "state_fallback",
+          }
+        : { tax_rate: 0, tax_parts: true, tax_labor: false, tax_shipping: true, tax_jurisdiction: null, tax_source: null },
+    );
+  }
+  const { error } = await supabase.from("work_order_internal").update(internalUpdate).eq("work_order_id", woId);
+  return error ? error.message : null;
+}
+
 export async function updateWorkOrderFields(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
   const profile = await requireCds();
   if (!isUuid(woId)) return { error: "Work order not found." };
@@ -179,7 +234,7 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
       return { error: "This order has services or parts priced for the current customer. Remove them, change the customer, then add them again." };
     }
   }
-  let location: { code: string; name: string; region: string | null; market: string; routing_notes: string | null } | null = null;
+  let location: OrderLocation | null = null;
   if (locationId && (locationChanged || customerChanged)) {
     const { data, error: locError } = await supabase
       .from("customer_locations")
@@ -210,42 +265,8 @@ export async function updateWorkOrderFields(woId: string, _prev: ActionState, fo
     .eq("id", woId);
   if (error) return { error: error.message };
 
-  // What a new order gets from its location (Create Work Order and email intake): the
-  // location's routing notes and the state's starting tax. A tax rate CDS set by hand, or no
-  // tax for an exempt customer (kept by the database), stays.
-  let internalError: string | null = null;
-  if (locationChanged) {
-    const internalUpdate: Record<string, unknown> = { routing_notes: location?.routing_notes ?? null };
-    const { data: internal } = await supabase.from("work_order_internal").select("tax_source").eq("work_order_id", woId).maybeSingle();
-    const taxSource = (internal?.tax_source as string | null | undefined) ?? null;
-    if (taxSource === null || taxSource === "state_fallback") {
-      const { data: rate } = location?.region
-        ? await supabase
-            .from("tax_rates")
-            .select("rate, taxes_parts, taxes_labor, taxes_shipping")
-            .eq("market", location.market)
-            .eq("region", location.region)
-            .is("postal_code", null)
-            .maybeSingle()
-        : { data: null };
-      // Without a state rate: the column defaults, as private.starting_tax gives a new order.
-      Object.assign(
-        internalUpdate,
-        rate
-          ? {
-              tax_rate: rate.rate,
-              tax_parts: rate.taxes_parts,
-              tax_labor: rate.taxes_labor,
-              tax_shipping: rate.taxes_shipping,
-              tax_jurisdiction: location!.region,
-              tax_source: "state_fallback",
-            }
-          : { tax_rate: 0, tax_parts: true, tax_labor: false, tax_shipping: true, tax_jurisdiction: null, tax_source: null },
-      );
-    }
-    const { error: e } = await supabase.from("work_order_internal").update(internalUpdate).eq("work_order_id", woId);
-    if (e) internalError = e.message;
-  }
+  // What a new order gets from its location (Create Work Order and email intake).
+  const internalError = locationChanged ? await applyLocationToInternal(supabase, woId, location) : null;
 
   const changes = [
     customerChanged ? "customer changed" : null,
@@ -365,6 +386,119 @@ export async function updateWorkOrderManufacturer(woId: string, _prev: ActionSta
     shop_visible: false,
   });
   return done(woId, "Manufacturer saved.");
+}
+
+/**
+ * The unit number alone after dispatch (Sarah, CDS, 2026-11-24: a wrong unit needed a decline
+ * and a new dispatch), until the customer invoice exists (canEditUnitOrLocationOnly: the unit is
+ * in the invoice memo). In review the Edit order box saves it with the other fields. The
+ * database also refuses it while a QuickBooks invoice is being created
+ * (private.invoice_inputs_locked); its message is shown as is. The shop sees the new unit on its
+ * job page; no email is sent.
+ */
+export async function updateWorkOrderUnit(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const unit = text(formData.get("unit_number"));
+  if (!unit) return { error: "The unit number is required." };
+  if (unit.length > 100) return { error: "The unit number is too long (max 100 characters)." };
+
+  const supabase = await createClient();
+  const { data: current, error: readError } = await supabase
+    .from("work_orders")
+    .select("status, unit_number, work_order_internal(qb_invoice_id)")
+    .eq("id", woId)
+    .maybeSingle();
+  if (readError) return { error: "The work order could not be read. Try again." };
+  if (!current) return { error: "Work order not found." };
+  const refusal = unitOrLocationRefusal(current.status as string, qbInvoiceIdOf(current.work_order_internal), "unit number");
+  if (refusal) return { error: refusal };
+  const before = (current.unit_number as string | null) ?? null;
+  if (before === unit) return done(woId, "Unit # unchanged.");
+
+  const { error } = await supabase.from("work_orders").update({ unit_number: unit }).eq("id", woId);
+  if (error) return { error: error.message };
+  await supabase.from("work_order_events").insert({
+    work_order_id: woId,
+    actor_id: profile.id,
+    event_type: "edit",
+    message: `Unit # changed by CDS: ${before ?? "none"} to ${unit}`,
+    shop_visible: false,
+  });
+  return done(woId, "Unit # saved.");
+}
+
+/**
+ * The customer location alone after dispatch (Sarah, CDS, 2026-11-24: an order without a
+ * location has no ship-to address for the invoice's sales tax, and the location could only be
+ * set by having the shop decline). One of the order's own customer's locations, in the order's
+ * market (its lines are priced there). It sets what the Edit order picker sets (location, label,
+ * ship-to address) and what a new order gets from its location (routing notes, starting tax:
+ * applyLocationToInternal). The shop, fulfillment, shipments and lines stay; shipping labels
+ * already made keep the old address. Allowed until the customer invoice exists
+ * (canEditUnitOrLocationOnly); the database also refuses it while the invoice is being created
+ * (private.invoice_inputs_locked) and once it exists (private.order_locked_when_invoiced).
+ */
+export async function updateWorkOrderLocation(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const profile = await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const locationId = text(formData.get("location_id"));
+  if (!isUuid(locationId)) return { error: "Choose a location from the list." };
+
+  const supabase = await createClient();
+  const { data: current, error: readError } = await supabase
+    .from("work_orders")
+    .select("status, customer_id, location_id, location_label, market, work_order_internal(qb_invoice_id)")
+    .eq("id", woId)
+    .maybeSingle();
+  if (readError) return { error: "The work order could not be read. Try again." };
+  if (!current) return { error: "Work order not found." };
+  const refusal = unitOrLocationRefusal(current.status as string, qbInvoiceIdOf(current.work_order_internal), "customer location");
+  if (refusal) return { error: refusal };
+  if (current.location_id === locationId) return done(woId, "Location unchanged.");
+
+  const { data: location, error: locError } = await supabase
+    .from("customer_locations")
+    .select("code, name, address_raw, region, market, routing_notes")
+    .eq("id", locationId)
+    .eq("customer_id", current.customer_id)
+    .maybeSingle();
+  if (locError) return { error: "The location could not be read. Try again." };
+  if (!location) return { error: "That location does not belong to this order's customer." };
+  if (location.market !== current.market) {
+    return { error: "That location is in another market than this order. Its prices are for its own market." };
+  }
+
+  const label = `${location.code} ${location.name}`.slice(0, 200);
+  const { error } = await supabase
+    .from("work_orders")
+    .update({ location_id: locationId, location_label: label, site_address: (location.address_raw as string | null)?.slice(0, 500) || null })
+    .eq("id", woId);
+  if (error) return { error: error.message };
+  const internalError = await applyLocationToInternal(supabase, woId, location as OrderLocation);
+
+  await supabase.from("work_order_events").insert({
+    work_order_id: woId,
+    actor_id: profile.id,
+    event_type: "edit",
+    message: `Customer location changed by CDS: ${(current.location_label as string | null) ?? "none"} to ${label}`,
+    shop_visible: false,
+  });
+  if (internalError) return { error: `Location saved, but the routing notes and tax were not: ${internalError}` };
+  const { count } = await supabase
+    .from("shipment_labels")
+    .select("id", { count: "exact", head: true })
+    .eq("work_order_id", woId)
+    .eq("status", "active");
+  return done(woId, count ? `Location saved. ${LABELS_KEEP_OLD_ADDRESS_NOTE}` : "Location saved.");
+}
+
+/** Why the unit or location cannot change here now, or null (canEditUnitOrLocationOnly). */
+function unitOrLocationRefusal(status: string, qbInvoiceId: string | null, what: string): string | null {
+  if (canEditUnitOrLocationOnly(status, qbInvoiceId)) return null;
+  if (REVIEW_STATUSES.includes(status)) return `Change the ${what} in the Edit order box while the order is in review.`;
+  if (status === "cancelled") return `The ${what} of a cancelled order cannot change.`;
+  return `The ${what} cannot change once the order is invoiced in QuickBooks.`;
 }
 
 /**

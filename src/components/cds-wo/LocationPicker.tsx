@@ -20,6 +20,11 @@ type Props = {
   /** Locations the email intake matched: listed first. */
   candidateIds?: string[];
   inputId?: string;
+  /**
+   * False after dispatch (the work order page's location edit): picking a location does not
+   * change the shop or fulfillment, so the chosen location's address is shown, not its routing.
+   */
+  showRouting?: boolean;
 };
 
 /** The Location / Branch picker of Create Work Order and the Edit order box. */
@@ -33,6 +38,7 @@ export function LocationPicker({
   onClear,
   candidateIds = [],
   inputId = "location_text",
+  showRouting = true,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -66,6 +72,7 @@ export function LocationPicker({
 
   let helper: ReactNode = "Start typing a location number, name, address, city, state or ZIP. Location number matches come first, sorted numerically.";
   if (!customerId) helper = "Choose a customer first.";
+  else if (location && !showRouting) helper = location.address_raw;
   else if (location)
     helper = (
       <>

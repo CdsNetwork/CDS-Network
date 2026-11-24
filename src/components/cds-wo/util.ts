@@ -85,6 +85,21 @@ export function canEditRequestTypeOnly(status: string): boolean {
   return !REVIEW_STATUSES.includes(status) && !LINES_LOCKED_STATUSES.includes(status);
 }
 
+/**
+ * Whether the work order page offers the unit-only and location-only edits (Sarah, CDS,
+ * 2026-11-24: a missing location or a wrong unit needed a decline and a new dispatch): after
+ * dispatch, at any status but cancelled, until the customer invoice exists (Invoiced, or a
+ * QuickBooks invoice on the order). Unlike the PO both stay fixed then: the unit is in the
+ * invoice memo and the location gives its sub-customer, ship-to address and tax, and the portal
+ * never changes QuickBooks. In review the Edit order box has them with the other fields.
+ */
+export function canEditUnitOrLocationOnly(status: string, qbInvoiceId: string | null): boolean {
+  return !REVIEW_STATUSES.includes(status) && status !== "cancelled" && status !== "invoiced" && !qbInvoiceId;
+}
+
+/** Shown with the location edit when the order has shipping labels (they are never changed). */
+export const LABELS_KEEP_OLD_ADDRESS_NOTE = "Shipping labels already made keep the old address.";
+
 /** Shown with the PO edit when the order already has its QuickBooks invoice (the portal never changes it). */
 export const PO_IN_QUICKBOOKS_NOTE = "This invoice is already in QuickBooks. Change the PO there too.";
 

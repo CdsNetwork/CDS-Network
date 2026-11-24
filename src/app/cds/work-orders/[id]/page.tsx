@@ -13,6 +13,7 @@ import { shipmentRemoval, voidAndRemoveConfirm } from "@/components/cds-wo/remov
 import { QUESTION_NOTE_MAX } from "@/components/cds-wo/question-pending";
 import type { LocationOption } from "@/components/cds-wo/NewWorkOrderForm";
 import { OrderLocationFields } from "@/components/cds-wo/OrderLocationFields";
+import { OrderLocationOnlyField } from "@/components/cds-wo/OrderLocationOnlyField";
 import { linkedOrders, type LinkedOrder } from "@/components/cds-wo/linked-orders";
 import { loadPickerLocations } from "@/app/cds/work-orders/new/locations";
 import styles from "@/components/cds-wo/cds-wo.module.css";
@@ -20,12 +21,14 @@ import type { SearchOption } from "@/components/SearchSelect";
 import {
   canEditPoOnly,
   canEditRequestTypeOnly,
+  canEditUnitOrLocationOnly,
   CUSTOMER_APPROVAL_LABEL,
   dispatchShopDefault,
   isUuid,
   LABEL_STATUS_LABEL,
   linesLocked as linesLockedFor,
   one,
+  LABELS_KEEP_OLD_ADDRESS_NOTE,
   PO_IN_QUICKBOOKS_NOTE,
   PRICE_SOURCE_LABEL,
   REQUEST_TYPE_LABEL,
@@ -110,9 +113,11 @@ import {
   updateTax,
   updateCustomerShipping,
   updateWorkOrderFields,
+  updateWorkOrderLocation,
   updateWorkOrderManufacturer,
   updateWorkOrderPartNumber,
   updateWorkOrderPo,
+  updateWorkOrderUnit,
   updateWorkOrderRequestType,
 } from "./actions";
 
@@ -842,6 +847,16 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
       ),
     ];
   }
+  // Unit # and location after dispatch, until the customer invoice exists (Sarah, CDS,
+  // 2026-11-24): the location picker has only the order's customer's locations.
+  const unitLocationEditable = canEditUnitOrLocationOnly(wo.status, qbInvoiceId);
+  let ownLocations: LocationOption[] = [];
+  let ownLocationsError: string | null = null;
+  if (unitLocationEditable) {
+    const res = await loadPickerLocations(supabase, wo.customer_id);
+    ownLocations = res.data ?? [];
+    ownLocationsError = res.error?.message ?? null;
+  }
   // Lines are locked once the order has a QuickBooks invoice, so they match the invoice. After
   // the shop completed the job CDS still corrects them (kits for loose parts) until the shop's
   // bill is in QuickBooks (unknown when the bill could not be read: locked).
@@ -1088,6 +1103,20 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
           <section className="section" style={{ marginTop: 0 }}>
             <h3>Work order</h3>
             <div className="grid2">
+              {unitLocationEditable && (
+                <Fact label="Unit #">
+                  {wo.unit_number ?? <span className="small">Missing</span>}
+                  <details style={{ marginTop: 6 }}>
+                    <summary className="small link">Edit unit</summary>
+                    <ActionForm action={updateWorkOrderUnit.bind(null, wo.id)} submitLabel="Save unit" buttonClass="btn btn-secondary" inline>
+                      <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                        <label htmlFor="edit-unit-only">Unit #</label>
+                        <input id="edit-unit-only" name="unit_number" className="input" defaultValue={wo.unit_number ?? ""} required maxLength={100} />
+                      </div>
+                    </ActionForm>
+                  </details>
+                </Fact>
+              )}
               <Fact label="PO">
                 {wo.po_number ?? <span className="small">Missing</span>}
                 {canEditPoOnly(wo.status) && (
@@ -1249,6 +1278,27 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
               <Fact label="Location">
                 {wo.location_label}
                 {location?.dock_note ? `\nDock: ${location.dock_note}` : ""}
+                {unitLocationEditable && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary className="small link">{wo.location_id ? "Edit location" : "Set location"}</summary>
+                    <p className="small" style={{ margin: "6px 0" }}>
+                      One of {customer?.name ?? "the customer"}&apos;s locations. The label, ship-to address, routing notes and
+                      starting tax follow it; the shop, fulfillment, shipments and lines stay as they are.
+                    </p>
+                    {labels.size > 0 && (
+                      <div className="notice warning" style={{ margin: "6px 0" }}>
+                        {LABELS_KEEP_OLD_ADDRESS_NOTE}
+                      </div>
+                    )}
+                    {ownLocationsError ? (
+                      <div className="notice danger">Could not load the customer&apos;s locations: {ownLocationsError}</div>
+                    ) : (
+                      <ActionForm action={updateWorkOrderLocation.bind(null, wo.id)} submitLabel="Save location" buttonClass="btn btn-secondary">
+                        <OrderLocationOnlyField customerId={wo.customer_id} locations={ownLocations} locationId={wo.location_id} />
+                      </ActionForm>
+                    )}
+                  </details>
+                )}
               </Fact>
               <Fact label="Routing notes">{internal?.routing_notes}</Fact>
               {emails.map((e) => (
