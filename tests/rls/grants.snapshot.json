@@ -518,5 +518,9 @@
   "function public.shop_add_pass_through_line(uuid,uuid,text,numeric)": {
     "authenticated": "EXECUTE",
     "service_role": "EXECUTE"
+  },
+  "function public.cds_set_fulfillment(uuid,public.fulfillment_method)": {
+    "authenticated": "EXECUTE",
+    "service_role": "EXECUTE"
   }
 }

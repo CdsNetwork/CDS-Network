@@ -21,8 +21,10 @@ import type { SearchOption } from "@/components/SearchSelect";
 import {
   canEditPoOnly,
   canEditRequestTypeOnly,
+  canEditFulfillmentOnly,
   canEditUnitOrLocationOnly,
   CUSTOMER_APPROVAL_LABEL,
+  FULFILLMENT_AFTER_DISPATCH,
   dispatchShopDefault,
   isUuid,
   LABEL_STATUS_LABEL,
@@ -68,11 +70,12 @@ import { combinedTaxView } from "@/lib/qbo/invoice-combined";
 import { billState, type BillState } from "@/lib/qbo/bill";
 import { loadBillInputs } from "@/lib/qbo/bill-input";
 import { ShopBillPanel } from "@/components/cds-wo/ShopBillPanel";
+import { ShippingCreditForm } from "@/components/cds-wo/ShippingCreditForm";
 import { qboStatus, type QboStatus } from "@/lib/qbo/status";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteConfirmText } from "@/lib/work-order-delete";
 import { createClient } from "@/lib/supabase/server";
-import { SHIPPING_CREDIT_HELP, SHOP_DEDUCTION_COLUMNS, deductionLabel, shippingCreditLock, shopPayable, toShopDeductions } from "@/lib/shop-deductions";
+import { SHOP_DEDUCTION_COLUMNS, deductionLabel, shippingCreditInBillPanel, shippingCreditLock, shopPayable, toShopDeductions } from "@/lib/shop-deductions";
 import { automaticShippingText, CUSTOMER_SHIPPING_COLUMNS, toCustomerShipping } from "@/lib/customer-shipping";
 import { LabelPanel, type LabelView } from "@/components/shipping/LabelPanel";
 import { activeLabels, defaultPackage, shipStationConfigured } from "@/lib/shipstation/views";
@@ -107,12 +110,12 @@ import {
   removeShipment,
   voidLabelAndRemoveShipment,
   setAttachmentShopVisible,
-  setShopShippingCredit,
   setStatus,
   linkWorkOrder,
   updateTax,
   updateCustomerShipping,
   updateWorkOrderFields,
+  updateWorkOrderFulfillment,
   updateWorkOrderLocation,
   updateWorkOrderManufacturer,
   updateWorkOrderPartNumber,
@@ -812,6 +815,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   const inHouse = Boolean(shop?.is_in_house);
   // "Shipping credit from shop" (CDS only): read-only once the shop's bill is in QuickBooks.
   const creditLock = shippingCreditLock(internal?.qb_bill_id ?? null, shopBill);
+  // The same checkbox in the Shop bill box while the bill waits for approval (Sarah, CDS, 2026-11-24).
+  const creditInBillPanel = shippingCreditInBillPanel(shopBill, {
+    qbBillId: internal?.qb_bill_id ?? null,
+    inHouse,
+    hasShop: Boolean(shop),
+    hasInternal: Boolean(internal),
+  });
   const rateLabel = inHouse ? "CDS Cost" : "Shop Rate";
   const location = one(wo.customer_locations);
   const inReview = REVIEW_STATUSES.includes(wo.status);
@@ -850,6 +860,9 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
   // Unit # and location after dispatch, until the customer invoice exists (Sarah, CDS,
   // 2026-11-24): the location picker has only the order's customer's locations.
   const unitLocationEditable = canEditUnitOrLocationOnly(wo.status, qbInvoiceId);
+  // Fulfillment after dispatch (Sarah, CDS, 2026-11-24): also not once the shop's bill is in
+  // QuickBooks or being created (unknown when the bill could not be read: not offered).
+  const fulfillmentEditable = canEditFulfillmentOnly(wo.status, qbInvoiceId, creditLock !== null || shopBillLoadError);
   let ownLocations: LocationOption[] = [];
   let ownLocationsError: string | null = null;
   if (unitLocationEditable) {
@@ -1251,7 +1264,51 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                   </details>
                 )}
               </Fact>
-              <Fact label="Fulfillment">{FULFILLMENT_LABEL[wo.fulfillment] ?? wo.fulfillment}</Fact>
+              <Fact label="Fulfillment">
+                {FULFILLMENT_LABEL[wo.fulfillment] ?? wo.fulfillment}
+                {fulfillmentEditable && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary className="small link">Edit fulfillment</summary>
+                    <p className="small" style={{ margin: "6px 0" }}>
+                      The shop sees the new method on its job right away; no email is sent. Shipping clears the pickup day and
+                      window.
+                    </p>
+                    {wo.fulfillment !== "pickup" && labels.size > 0 && (
+                      <div className="notice warning" style={{ margin: "6px 0" }}>
+                        This order has a shipping label. Void it in Logistics before switching to shop pickup.
+                      </div>
+                    )}
+                    <ActionForm
+                      action={updateWorkOrderFulfillment.bind(null, wo.id)}
+                      submitLabel="Save fulfillment"
+                      buttonClass="btn btn-secondary"
+                      confirmText="Change the fulfillment method of this order? The shop sees the change on its job."
+                      inline
+                    >
+                      <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                        <label htmlFor="edit-fulfillment-only">Fulfillment</label>
+                        <select
+                          id="edit-fulfillment-only"
+                          name="fulfillment"
+                          defaultValue={wo.fulfillment === "pickup" ? "pickup" : wo.fulfillment === "shipping" ? "shipping" : ""}
+                          required
+                        >
+                          {wo.fulfillment !== "pickup" && wo.fulfillment !== "shipping" && (
+                            <option value="" disabled>
+                              Choose
+                            </option>
+                          )}
+                          {FULFILLMENT_AFTER_DISPATCH.map((v) => (
+                            <option key={v} value={v}>
+                              {FULFILLMENT_LABEL[v]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </ActionForm>
+                  </details>
+                )}
+              </Fact>
               {wo.fulfillment === "pickup" ? (
                 <Fact label="Pickup day / window">{pickupEtaLabel(wo.pickup_window, wo.pickup_date)}</Fact>
               ) : (
@@ -1757,25 +1814,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
                     <b>Shipping credit from shop: {internal.shop_shipping_credit ? "on" : "off"}.</b> {creditLock}
                   </p>
                 ) : (
-                  <ActionForm
-                    action={setShopShippingCredit.bind(null, wo.id)}
-                    submitLabel="Save"
-                    buttonClass="btn btn-secondary btn-small"
-                    inline
-                  >
-                    <div className="field">
-                      <label className="row" style={{ gap: 8, fontWeight: 600 }}>
-                        <input
-                          type="checkbox"
-                          name="shop_shipping_credit"
-                          defaultChecked={internal.shop_shipping_credit}
-                          style={{ width: "auto" }}
-                        />{" "}
-                        Shipping credit from shop
-                      </label>
-                      <div className="small">{SHIPPING_CREDIT_HELP}</div>
-                    </div>
-                  </ActionForm>
+                  <ShippingCreditForm woId={wo.id} on={internal.shop_shipping_credit} idSuffix="lines" />
                 )}
               </div>
             )}
@@ -2231,7 +2270,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
           {showInvoice && (
             <InvoicePanel woId={wo.id} status={wo.status} qbo={qbo} invoice={invoice} loadError={invoiceLoadError} />
           )}
-          <ShopBillPanel woId={wo.id} status={wo.status} state={shopBill} loadError={shopBillLoadError} />
+          <ShopBillPanel
+            woId={wo.id}
+            status={wo.status}
+            state={shopBill}
+            loadError={shopBillLoadError}
+            shippingCredit={creditInBillPanel ? internal!.shop_shipping_credit : null}
+          />
 
           <section className="section">
             <h3>Status</h3>

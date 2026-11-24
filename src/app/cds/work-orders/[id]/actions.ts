@@ -6,6 +6,7 @@ import type { ActionState } from "@/components/cds-wo/ActionForm";
 import {
   canEditRequestTypeOnly,
   canEditUnitOrLocationOnly,
+  FULFILLMENT_AFTER_DISPATCH,
   isUuid,
   LABELS_KEEP_OLD_ADDRESS_NOTE,
   linesLocked,
@@ -499,6 +500,50 @@ function unitOrLocationRefusal(status: string, qbInvoiceId: string | null, what:
   if (REVIEW_STATUSES.includes(status)) return `Change the ${what} in the Edit order box while the order is in review.`;
   if (status === "cancelled") return `The ${what} of a cancelled order cannot change.`;
   return `The ${what} cannot change once the order is invoiced in QuickBooks.`;
+}
+
+/**
+ * The fulfillment method alone after dispatch, shipping or shop pickup (Sarah, CDS, 2026-11-24:
+ * a wrong method needed a decline and a new dispatch), until the order is invoiced and while the
+ * shop's bill is not in QuickBooks (canEditFulfillmentOnly). public.cds_set_fulfillment
+ * (20261124000000_fulfillment_after_dispatch.sql) enforces every rule and logs the change (CDS
+ * only): a purchased label must be voided before switching to pickup, switching to shipping
+ * clears the pickup day and window, the shop's bill and invoice locks. Its refusal is shown as
+ * is. The shop sees the new method on its job page; no email is sent.
+ */
+export async function updateWorkOrderFulfillment(woId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireCds();
+  if (!isUuid(woId)) return { error: "Work order not found." };
+  const fulfillment = text(formData.get("fulfillment"));
+  if (!(FULFILLMENT_AFTER_DISPATCH as readonly string[]).includes(fulfillment)) return { error: "Choose shipping or shop pickup." };
+
+  const supabase = await createClient();
+  const { data: current, error: readError } = await supabase
+    .from("work_orders")
+    .select("status, fulfillment, pickup_window, work_order_internal(qb_invoice_id)")
+    .eq("id", woId)
+    .maybeSingle();
+  if (readError) return { error: "The work order could not be read. Try again." };
+  if (!current) return { error: "Work order not found." };
+  const refusal = unitOrLocationRefusal(current.status as string, qbInvoiceIdOf(current.work_order_internal), "fulfillment");
+  if (refusal) return { error: refusal };
+  if (current.fulfillment === fulfillment) return done(woId, "Fulfillment unchanged.");
+
+  const { error } = await supabase.rpc("cds_set_fulfillment", { p_work_order: woId, p_fulfillment: fulfillment });
+  if (error) return { error: error.message };
+
+  if (fulfillment === "shipping") return done(woId, "Fulfillment saved: shipping. The pickup day and window were cleared.");
+  const notes = ["Fulfillment saved: shop pickup."];
+  notes.push(
+    current.status === "awaiting_acceptance"
+      ? "The shop chooses the pickup day and window when it accepts."
+      : current.pickup_window
+        ? "The shop can change the pickup day and window on its job."
+        : "The pickup window shows Need to coordinate until the shop sets the day and window on its job.",
+  );
+  const { count } = await supabase.from("shipments").select("id", { count: "exact", head: true }).eq("work_order_id", woId);
+  if (count) notes.push(`The order still has ${count === 1 ? "1 shipment leg" : `${count} shipment legs`} in Logistics: remove them there if they are not needed.`);
+  return done(woId, notes.join(" "));
 }
 
 /**

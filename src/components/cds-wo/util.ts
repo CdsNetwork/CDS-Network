@@ -97,6 +97,20 @@ export function canEditUnitOrLocationOnly(status: string, qbInvoiceId: string | 
   return !REVIEW_STATUSES.includes(status) && status !== "cancelled" && status !== "invoiced" && !qbInvoiceId;
 }
 
+/**
+ * Whether the work order page offers "Edit fulfillment" (shipping or shop pickup) after
+ * dispatch (Sarah, CDS, 2026-11-24): as for the unit and location (canEditUnitOrLocationOnly:
+ * the method gives the customer shipping charge on the invoice), and also not once the shop's
+ * bill is in QuickBooks or being created (shopBillLocked), as the method decides the shop's
+ * shipping deduction on that bill. public.cds_set_fulfillment refuses the same.
+ */
+export function canEditFulfillmentOnly(status: string, qbInvoiceId: string | null, shopBillLocked: boolean): boolean {
+  return canEditUnitOrLocationOnly(status, qbInvoiceId) && !shopBillLocked;
+}
+
+/** The methods CDS chooses between after dispatch. */
+export const FULFILLMENT_AFTER_DISPATCH = ["shipping", "pickup"] as const;
+
 /** Shown with the location edit when the order has shipping labels (they are never changed). */
 export const LABELS_KEEP_OLD_ADDRESS_NOTE = "Shipping labels already made keep the old address.";
 

@@ -96,3 +96,18 @@ export function shippingCreditLock(qbBillId: string | null, bill: BillState | nu
   if (bill?.kind === "creating") return "Locked while the shop's bill is being created. Refresh in a moment.";
   return null;
 }
+
+/**
+ * Whether the Shop bill box also shows the "Shipping credit from shop" checkbox, right above
+ * "Approve and send to QuickBooks" (Sarah, CDS, 2026-11-24): while the bill waits for CDS's
+ * approval, for a regular shop (never the in-house shop, as under the lines), and only while the
+ * flag can change (shippingCreditLock). The checkbox under the lines stays.
+ */
+export function shippingCreditInBillPanel(
+  bill: BillState | null,
+  o: { qbBillId: string | null; inHouse: boolean; hasShop: boolean; hasInternal: boolean },
+): boolean {
+  if (bill?.kind !== "pending_approval") return false;
+  if (o.inHouse || !o.hasShop || !o.hasInternal) return false;
+  return shippingCreditLock(o.qbBillId, bill) === null;
+}

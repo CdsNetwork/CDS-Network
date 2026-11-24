@@ -3,6 +3,7 @@ import { approveShopBill, createQuickBooksBill } from "@/app/cds/work-orders/[id
 import { dateTime, money } from "@/lib/format";
 import type { BillState, QboBillPayload } from "@/lib/qbo/bill";
 import { ActionForm } from "./ActionForm";
+import { ShippingCreditForm } from "./ShippingCreditForm";
 import { SHOP_BILL_PENDING_LABEL } from "./util";
 
 /**
@@ -44,7 +45,23 @@ function BillPreview({ payload, total }: { payload: QboBillPayload; total: numbe
     </div>
   );
 }
-export function ShopBillPanel({ woId, status, state, loadError }: { woId: string; status: string; state: BillState | null; loadError: boolean }) {
+export function ShopBillPanel({
+  woId,
+  status,
+  state,
+  loadError,
+  shippingCredit = null,
+}: {
+  woId: string;
+  status: string;
+  state: BillState | null;
+  loadError: boolean;
+  /**
+   * The saved "Shipping credit from shop" value when the box offers the checkbox above the
+   * approve button (shippingCreditInBillPanel), else null.
+   */
+  shippingCredit?: boolean | null;
+}) {
   if (loadError) {
     return (
       <section className="section">
@@ -138,6 +155,11 @@ export function ShopBillPanel({ woId, status, state, loadError }: { woId: string
           {state.kind === "pending_approval" ? (
             <>
               <p className="small">Check the lines (kits instead of loose parts); change them above if needed. A change after approval needs a new approval until the bill is in QuickBooks.</p>
+              {shippingCredit !== null && (
+                <div style={{ margin: "8px 0" }}>
+                  <ShippingCreditForm woId={woId} on={shippingCredit} idSuffix="bill" />
+                </div>
+              )}
               <ActionForm
                 action={approveShopBill.bind(null, woId, state.total)}
                 submitLabel="Approve and send to QuickBooks"
