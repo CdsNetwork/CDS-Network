@@ -15,6 +15,7 @@ import type { LocationOption } from "@/components/cds-wo/NewWorkOrderForm";
 import { OrderLocationFields } from "@/components/cds-wo/OrderLocationFields";
 import { OrderLocationOnlyField } from "@/components/cds-wo/OrderLocationOnlyField";
 import { linkedOrders, type LinkedOrder } from "@/components/cds-wo/linked-orders";
+import { WO_INTERNAL_COLUMNS } from "@/components/cds-wo/work-order-internal";
 import { loadPickerLocations } from "@/app/cds/work-orders/new/locations";
 import styles from "@/components/cds-wo/cds-wo.module.css";
 import type { SearchOption } from "@/components/SearchSelect";
@@ -627,9 +628,7 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     await Promise.all([
       supabase
         .from("work_order_internal")
-        .select(
-          "source, review_reason, routing_notes, internal_notes, order_type, customer_region, customer_contact_name, customer_contact_email, customer_contact_phone, approved_at, approved_by, approved_by_name, tax_rate, tax_parts, tax_labor, tax_shipping, tax_jurisdiction, tax_source, ready_to_invoice_at, invoiced_at, qb_invoice_id, qb_invoice_number, qb_tax_total, qb_total, qb_bill_id, shop_shipping_credit, internal_status, profiles(full_name)",
-        )
+        .select(WO_INTERNAL_COLUMNS)
         .eq("work_order_id", id)
         .maybeSingle(),
       supabase
@@ -766,6 +765,10 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
     shopBillLoadError = true;
   }
 
+  // A failed read must not look like an order with no internal row: that hid the shop
+  // shipping credit, the QuickBooks invoice, tax and the approver on every order (2026-11-25).
+  const internalLoadError = internalRes.error?.message ?? null;
+  if (internalLoadError) console.error(`work order ${id}: work_order_internal read failed: ${internalLoadError}`);
   const internal = internalRes.data as unknown as Internal | null;
   const fin = finRes.data as Financials | null;
   const lines = (linesRes.data ?? []) as unknown as Line[];
@@ -1041,6 +1044,13 @@ export default async function WorkOrderPage({ params }: PageProps<"/cds/work-ord
           {inReview && <span className="status pending_review">NOT SENT TO AFFILIATE</span>}
         </div>
       </div>
+
+      {internalLoadError && (
+        <div className="notice danger" role="alert" style={{ marginTop: 12 }}>
+          This order&apos;s internal details (shipping credit, QuickBooks invoice, tax, approval, routing notes) could not be
+          loaded, so they are missing below. Reload the page; if this stays, report it: {internalLoadError}
+        </div>
+      )}
 
       <ActionMessageGroup>
         <div className={questionOpen ? styles.questionPanel : undefined} id="question-pending" style={questionOpen ? undefined : { marginTop: 18 }}>

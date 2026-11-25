@@ -9,6 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { WO_INTERNAL_COLUMNS } from "@/components/cds-wo/work-order-internal";
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -207,7 +208,8 @@ describe("invoiceTaxView (the Customer invoice & tax box)", () => {
 describe("work order page", () => {
   const page = readFileSync(new URL("../../src/app/cds/work-orders/[id]/page.tsx", import.meta.url), "utf8");
   it("loads the QuickBooks amounts and shows the box through invoiceTaxView", () => {
-    expect(page).toMatch(/qb_tax_total, qb_total/);
+    expect(page).toMatch(/\.select\(WO_INTERNAL_COLUMNS\)/);
+    expect(WO_INTERNAL_COLUMNS).toMatch(/qb_tax_total, qb_total/);
     expect(page).toMatch(/invoiceTaxView\(/);
     expect(page).not.toMatch(/`Sales tax \(\$\{rate\}%\)`/);
   });
